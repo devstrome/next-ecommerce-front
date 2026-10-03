@@ -1,0 +1,96 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply font-sans text-black bg-pure-white antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading font-bold;
+  }
+
+  ::selection {
+    background-color: #DC143C;
+    color: #FFFFFF;
+  }
+}
+
+@layer utilities {
+  .page-padding { @apply px-4 sm:px-6 lg:px-8 xl:px-12; }
+  .section-padding { @apply py-14 sm:py-18 lg:py-24; }
+  .section-padding-sm { @apply py-8 sm:py-12 lg:py-16; }
+  .grid-responsive-1 { @apply grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4; }
+  .grid-responsive-2 { @apply grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5; }
+}
+
+@layer components {
+  .card {
+    @apply bg-pure-white border border-cool-gray transition-all duration-300;
+  }
+  .card:hover {
+    @apply border-mid-gray;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center px-8 py-3 bg-maybelline-pink text-pure-white
+           text-sm font-semibold tracking-wider uppercase transition-all duration-300
+           hover:bg-maybelline-magenta hover:shadow-lg;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center px-8 py-3 border-2 border-black text-black
+           text-sm font-semibold tracking-wider uppercase transition-all duration-300
+           hover:bg-black hover:text-pure-white;
+  }
+  .btn-outline-light {
+    @apply inline-flex items-center justify-center px-8 py-3 border-2 border-pure-white text-pure-white
+           text-sm font-semibold tracking-wider uppercase transition-all duration-300
+           hover:bg-pure-white hover:text-black;
+  }
+  .section-title {
+    @apply font-heading text-display-sm md:text-display-md text-black;
+  }
+  .section-tag {
+    @apply font-sans text-xs md:text-sm text-maybelline-pink font-semibold tracking-[0.2em] uppercase;
+  }
+}
+
+.line-clamp-1 { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+.line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #F5F5F5; }
+::-webkit-scrollbar-thumb { background: #CCCCCC; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #666666; }
+
+@media (max-width: 640px) {
+  .container { padding-left: 1rem; padding-right: 1rem; }
+  h1 { font-size: 2rem; }
+  h2 { font-size: 1.5rem; }
+  input, select, textarea { font-size: 16px; }
+}
+
+@media print {
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .no-print { display: none !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

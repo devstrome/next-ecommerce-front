@@ -1,0 +1,833 @@
+'use client'
+import { useEffect, useState, useDeferredValue, useMemo, useCallback, useRef } from "react";
+import axios from "axios";
+import ProductCard from "../components/ProductCard";
+import ProductCartModal from "../components/ProductCartModal";
+import Link from "next/link"
+import { useSearchParams } from "next/navigation";
+import { FaFilter, FaTimes, FaSearch, FaSort, FaTh, FaListUl, FaChevronDown, FaChevronUp } from "react-icons/fa";
+
+const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
+
+function Products() {
+  const searchParams = useSearchParams();
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [categories, setCategories] = useState([]);
+  const [brands, setBrands] = useState([]);
+  const [genders, setGenders] = useState([]);
+  const [selectedCategories, setSelectedCategories] = useState([]);
+  const [selectedBrands, setSelectedBrands] = useState([]);
+  const [selectedGenders, setSelectedGenders] = useState([]);
+  const [filteredProducts, setFilteredProducts] = useState([]);
+  const [showFilters, setShowFilters] = useState(false);
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
+  const deferredSearch = useDeferredValue(searchQuery);
+  const [sortBy, setSortBy] = useState(searchParams.get('sort') || "name");
+  const [viewMode, setViewMode] = useState("grid");
+  const [priceRange, setPriceRange] = useState({ min: "", max: "" });
+  const [appliedPrice, setAppliedPrice] = useState({ min: "", max: "" });
+  const maxPrice = 1000000;
+  const [expandedSections, setExpandedSections] = useState({
+    price: true,
+    sort: true,
+    category: true,
+    brand: true,
+    gender: true
+  });
+  const [cartModalProductId, setCartModalProductId] = useState(null);
+  const urlParamsApplied = useRef(false);
+
+  // Read URL params once
+  const urlCategory = searchParams.get('category') || '';
+  const urlBrand = searchParams.get('brand') || '';
+  const urlSort = searchParams.get('sort') || '';
+  const urlSearch = searchParams.get('search') || '';
+  const urlSale = searchParams.get('sale') || '';
+
+  // Fetch products with query params for server-side filtering
+  const getProducts = useCallback(async (query, category, brand) => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (query) params.set('q', query);
+      if (category) params.set('category', category);
+      if (brand) params.set('brand', brand);
+      params.set('limit', '500');
+      const url = `${API_URI}/api/products?${params.toString()}`;
+      const { data } = await axios.get(url);
+      const list = Array.isArray(data) ? data : (data.products || []);
+      setProducts(list);
+      setFilteredProducts(list);
+    } catch (error) {
+      console.error("Error fetching products", error);
+    }
+    setLoading(false);
+  }, []);
+
+  // Fetch categories (tree hierarchy)
+  const getCategories = async () => {
+    try {
+      const { data } = await axios.get(`${API_URI}/api/categories/tree`);
+      setCategories(data);
+      setBrands([]);
+    } catch (error) {
+      console.error("Error fetching categories", error);
+    }
+  };
+
+  // Compute brands from selected subcategories only
+  const updateBrandsFromSelection = (selectedCats) => {
+    const subcategoryNames = [];
+    for (const cat of categories) {
+      if (cat.children) {
+        for (const sub of cat.children) {
+          if (selectedCats.includes(sub.name)) {
+            subcategoryNames.push(sub.name);
+          }
+        }
+      }
+    }
+    if (subcategoryNames.length === 0) {
+      setBrands([]);
+      return;
+    }
+    const filteredBrands = [...new Set(
+      categories.flatMap(cat =>
+        (cat.children || [])
+          .filter(sub => subcategoryNames.includes(sub.name))
+          .flatMap(sub => sub.brands || [])
+      )
+    )].sort();
+    setBrands(filteredBrands);
+  };
+
+  // Fetch genders
+  const getGenders = async () => {
+    try {
+      const { data } = await axios.get(`${API_URI}/api/genders`);
+      setGenders(data);
+    } catch (error) {
+      console.error("Error fetching genders", error);
+    }
+  };
+
+  // Handle category checkbox change
+  const handleCategoryChange = (categoryName) => {
+    setSelectedCategories((prevSelected) => {
+      const updated = prevSelected.includes(categoryName)
+        ? prevSelected.filter((c) => c !== categoryName)
+        : [...prevSelected, categoryName];
+      return updated;
+    });
+  };
+
+  // Handle gender checkbox change
+  const handleGenderChange = (genderName) => {
+    setSelectedGenders((prevSelected) =>
+      prevSelected.includes(genderName)
+        ? prevSelected.filter((g) => g !== genderName)
+        : [...prevSelected, genderName]
+    );
+  };
+
+  const handlePriceChange = (field, value) => {
+    setPriceRange(prev => ({ ...prev, [field]: value }));
+  };
+
+  const applyPriceFilter = () => {
+    setAppliedPrice(priceRange);
+  };
+
+  // Toggle section expansion
+  const toggleSection = (section) => {
+    setExpandedSections(prev => ({
+      ...prev,
+      [section]: !prev[section]
+    }));
+  };
+
+  // Apply URL params after categories are loaded
+  useEffect(() => {
+    if (categories.length === 0 || urlParamsApplied.current) return;
+    urlParamsApplied.current = true;
+
+    const urlCat = searchParams.get('category') || '';
+    const urlBrandParam = searchParams.get('brand') || '';
+    const urlSortParam = searchParams.get('sort') || '';
+
+    if (urlSortParam) {
+      setSortBy(urlSortParam);
+    }
+
+    if (urlCat) {
+      // Find category by slug and select it (and its parent if subcategory)
+      const catNameFromSlug = [];
+      for (const cat of categories) {
+        if (cat.slug === urlCat || cat.name.toLowerCase() === urlCat.toLowerCase()) {
+          catNameFromSlug.push(cat.name);
+        }
+        if (cat.children) {
+          for (const sub of cat.children) {
+            if (sub.slug === urlCat || sub.name.toLowerCase() === urlCat.toLowerCase()) {
+              catNameFromSlug.push(sub.name);
+              // Also select parent so brands show up
+              if (!catNameFromSlug.includes(cat.name)) {
+                catNameFromSlug.push(cat.name);
+              }
+            }
+          }
+        }
+      }
+      if (catNameFromSlug.length > 0) {
+        setSelectedCategories(catNameFromSlug);
+      }
+    }
+
+    if (urlBrandParam) {
+      // Find which subcategories have this brand and select them
+      const catsWithBrand = [];
+      for (const cat of categories) {
+        if (cat.children) {
+          for (const sub of cat.children) {
+            if (sub.brands && sub.brands.some(b => b.toLowerCase() === urlBrandParam.toLowerCase())) {
+              if (!catsWithBrand.includes(sub.name)) catsWithBrand.push(sub.name);
+              if (!catsWithBrand.includes(cat.name)) catsWithBrand.push(cat.name);
+            }
+          }
+        }
+      }
+      if (catsWithBrand.length > 0) {
+        setSelectedCategories(prev => [...new Set([...prev, ...catsWithBrand])]);
+      }
+      setSelectedBrands([urlBrandParam]);
+    }
+  }, [categories, searchParams]);
+
+  // Update brands when selected categories change
+  useEffect(() => {
+    updateBrandsFromSelection(selectedCategories);
+    // Don't clear selected brands if URL brand was set
+    const urlBrandParam = searchParams.get('brand');
+    if (!urlBrandParam) {
+      setSelectedBrands([]);
+    }
+  }, [selectedCategories, categories]);
+
+  // Apply filtering and sorting
+  useEffect(() => {
+    let filtered = products;
+
+    if (deferredSearch.trim()) {
+      filtered = filtered.filter((product) =>
+        product.name.toLowerCase().includes(deferredSearch.toLowerCase()) ||
+        (product.sku && product.sku.toLowerCase().includes(deferredSearch.toLowerCase())) ||
+        (product.brand && product.brand.toLowerCase().includes(deferredSearch.toLowerCase()))
+      );
+    }
+
+    if (selectedCategories.length > 0) {
+      filtered = filtered.filter((product) => {
+        let productCategories = [];
+        if (Array.isArray(product.categories)) {
+          product.categories.forEach(cat => {
+            let val = cat;
+            while (typeof val === 'string') {
+              try { val = JSON.parse(val); } catch { break; }
+            }
+            if (Array.isArray(val)) {
+              productCategories = productCategories.concat(val);
+            } else {
+              productCategories.push(val);
+            }
+          });
+        }
+        return productCategories.some((category) =>
+          selectedCategories.includes(category)
+        );
+      });
+    }
+
+    if (selectedBrands.length > 0) {
+      filtered = filtered.filter((product) =>
+        selectedBrands.some(b => product.brand && product.brand.toLowerCase() === b.toLowerCase())
+      );
+    }
+
+    if (selectedGenders.length > 0) {
+      filtered = filtered.filter((product) =>
+        selectedGenders.includes(product.gender)
+      );
+    }
+
+    if (appliedPrice.min !== "" || appliedPrice.max !== "") {
+      filtered = filtered.filter((product) => {
+        const price = product.discountPrice || product.mainPrice;
+        const min = appliedPrice.min !== "" ? parseFloat(appliedPrice.min) : 0;
+        const max = appliedPrice.max !== "" ? parseFloat(appliedPrice.max) : Infinity;
+        return price >= min && price <= max;
+      });
+    }
+
+    filtered.sort((a, b) => {
+      switch (sortBy) {
+        case "name":
+          return a.name.localeCompare(b.name);
+        case "price-low":
+          return (a.discountPrice || a.mainPrice) - (b.discountPrice || b.mainPrice);
+        case "price-high":
+          return (b.discountPrice || b.mainPrice) - (a.discountPrice || a.mainPrice);
+        case "newest":
+          return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+        default:
+          return 0;
+      }
+    });
+
+    setFilteredProducts(filtered);
+  }, [selectedCategories, selectedBrands, selectedGenders, products, deferredSearch, sortBy, appliedPrice]);
+
+  // Fetch data on mount
+  useEffect(() => {
+    getCategories();
+    getGenders();
+    getProducts(urlSearch, urlCategory, urlBrand);
+  }, []);
+
+  // Sync URL search param changes
+  useEffect(() => {
+    const urlSearch = searchParams.get('search') || '';
+    setSearchQuery(urlSearch);
+    const urlCat = searchParams.get('category') || '';
+    const urlBrandParam = searchParams.get('brand') || '';
+    getProducts(urlSearch, urlCat, urlBrandParam);
+  }, [searchParams]);
+
+  const clearAllFilters = () => {
+    setSelectedCategories([]);
+    setSelectedBrands([]);
+    setSelectedGenders([]);
+    setSearchQuery("");
+    setPriceRange({ min: "", max: "" });
+    setAppliedPrice({ min: "", max: "" });
+    setSortBy("name");
+    urlParamsApplied.current = false;
+    getProducts();
+  };
+
+  const activeFiltersCount = selectedCategories.filter(c => {
+    const cat = categories.find(ct => ct.name === c);
+    return cat && cat.children; // only count subcategories, not parents
+  }).length + selectedBrands.length + selectedGenders.length + 
+    (appliedPrice.min !== "" ? 1 : 0) + (appliedPrice.max !== "" ? 1 : 0) + 
+    (deferredSearch.trim() !== "" ? 1 : 0);
+
+  // Filter section component
+  const FilterSection = ({ title, children, section, icon }) => (
+    <div className="mb-6 border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
+      <button
+        onClick={() => toggleSection(section)}
+        className="w-full px-4 py-3 bg-gradient-to-r from-gray-50 to-gray-100 hover:from-gray-100 hover:to-gray-200 transition-all duration-200 flex items-center justify-between text-left"
+      >
+        <div className="flex items-center gap-3">
+          {icon}
+          <h3 className="font-semibold text-gray-800">{title}</h3>
+        </div>
+        {expandedSections[section] ? (
+          <FaChevronUp className="text-gray-500" />
+        ) : (
+          <FaChevronDown className="text-gray-500" />
+        )}
+      </button>
+      {expandedSections[section] && (
+        <div className="p-4 border-t border-gray-100">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="bg-gradient-to-br from-maybelline-light via-pure-white to-white">
+      {/* Header Section */}
+      <div className="bg-gradient-to-r from-maybelline-pink via-maybelline-rose to-maybelline-magenta py-8 sm:py-12">
+        <div className="max-w-7xl mx-auto container-padding-mobile">
+          <div className="text-center">
+            <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-3 sm:mb-4">
+              Discover Our Products
+            </h1>
+            <p className="text-base sm:text-lg md:text-xl text-white/90 max-w-2xl mx-auto">
+              Explore our wide range of high-quality products with amazing deals
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto container-padding-mobile py-6 sm:py-8">
+        <div className="flex flex-col lg:flex-row gap-8">
+          {/* Sidebar Filters */}
+          <aside className="w-full lg:w-1/4">
+            {/* Mobile Filter Button */}
+            <div className="lg:hidden flex items-center justify-between mb-4 sm:mb-6">
+              <button
+                className="flex items-center gap-2 sm:gap-3 px-4 sm:px-6 py-2 sm:py-3 bg-gradient-to-r from-maybelline-pink to-maybelline-rose text-pure-white rounded-full shadow-lg font-semibold hover:from-maybelline-magenta hover:to-maybelline-pink transition-all duration-300 transform hover:scale-105 touch-target text-sm sm:text-base"
+                onClick={() => setShowFilters(true)}
+              >
+                <FaFilter />
+                Filters {activeFiltersCount > 0 && (
+                  <span className="bg-pure-white text-maybelline-pink px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full text-xs sm:text-sm font-bold">
+                    {activeFiltersCount}
+                  </span>
+                )}
+              </button>
+              <div className="flex items-center gap-1 sm:gap-2">
+                <button
+                  onClick={() => setViewMode("grid")}
+                  className={`p-2 sm:p-3 rounded-xl transition-all duration-300 transform hover:scale-105 touch-target ${
+                    viewMode === "grid" 
+                    ? "bg-gradient-to-r from-maybelline-pink to-maybelline-rose text-pure-white shadow-lg" 
+                    : "bg-pure-white text-gray-600 hover:bg-gray-50 shadow-md"
+                }`}
+              >
+                <FaTh size={14} className="sm:w-4 sm:h-4" />
+              </button>
+              <button
+                onClick={() => setViewMode("list")}
+                className={`p-2 sm:p-3 rounded-xl transition-all duration-300 transform hover:scale-105 touch-target ${
+                  viewMode === "list" 
+                    ? "bg-gradient-to-r from-maybelline-pink to-maybelline-rose text-pure-white shadow-lg" 
+                    : "bg-pure-white text-gray-600 hover:bg-gray-50 shadow-md"
+                  }`}
+                >
+                  <FaListUl size={14} className="sm:w-4 sm:h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Mobile Filter Drawer */}
+            {showFilters && (
+              <div className="fixed inset-0 z-50 flex lg:hidden">
+                <div
+                  className="flex-1 bg-black bg-opacity-50 backdrop-blur-sm"
+                  onClick={() => setShowFilters(false)}
+                />
+                <div className="w-80 max-w-full bg-white shadow-2xl overflow-y-auto">
+                  <div className="sticky top-0 bg-white border-b border-gray-200 p-4 sm:p-6">
+                    <div className="flex justify-between items-center">
+                      <h2 className="text-2xl font-bold text-gray-900">Filters</h2>
+                      <button
+                        className="p-2 rounded-full hover:bg-gray-100 transition-colors duration-200"
+                        onClick={() => setShowFilters(false)}
+                      >
+                        <FaTimes size={20} />
+                      </button>
+                    </div>
+                    {activeFiltersCount > 0 && (
+                      <button
+                        onClick={clearAllFilters}
+                        className="mt-4 w-full px-4 py-2 bg-gradient-to-r from-maybelline-pink to-maybelline-magenta text-pure-white rounded-lg hover:from-maybelline-magenta hover:to-maybelline-rose transition-all duration-200 font-semibold transform hover:scale-105"
+                      >
+                        Clear All Filters ({activeFiltersCount})
+                      </button>
+                    )}
+                  </div>
+                  
+                  <div className="p-4 sm:p-6">
+                    <FilterSection title="Price Range" section="price" icon={<span className="text-green-500">💰</span>}>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="text-sm text-gray-600 mb-1 block">
+                            Min: BDT{Number(priceRange.min || 0).toLocaleString()}
+                          </label>
+                          <input
+                            type="range"
+                            min="0"
+                            max={maxPrice}
+                            step="100"
+                            value={priceRange.min || 0}
+                            onChange={(e) => handlePriceChange('min', e.target.value)}
+                            className="w-full accent-maybelline-pink"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-sm text-gray-600 mb-1 block">
+                            Max: BDT{Number(priceRange.max || maxPrice).toLocaleString()}
+                          </label>
+                          <input
+                            type="range"
+                            min="0"
+                            max={maxPrice}
+                            step="100"
+                            value={priceRange.max || maxPrice}
+                            onChange={(e) => handlePriceChange('max', e.target.value)}
+                            className="w-full accent-maybelline-pink"
+                          />
+                        </div>
+                        <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded-lg text-center">
+                          BDT{Number(priceRange.min || 0).toLocaleString()} - BDT{Number(priceRange.max || maxPrice).toLocaleString()}
+                        </div>
+                        <button
+                          onClick={applyPriceFilter}
+                      className="w-full px-4 py-2 bg-gradient-to-r from-maybelline-pink to-maybelline-rose text-pure-white text-sm font-semibold rounded-lg hover:from-maybelline-magenta hover:to-maybelline-pink transition-all duration-200"
+                        >
+                          Apply
+                        </button>
+                      </div>
+                    </FilterSection>
+
+                    <FilterSection title="Sort By" section="sort" icon={<FaSort className="text-maybelline-pink" />}>
+                      <select
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-maybelline-pink focus:border-transparent transition-all duration-200"
+                      >
+                        <option value="name">Name A-Z</option>
+                        <option value="price-low">Price: Low to High</option>
+                        <option value="price-high">Price: High to Low</option>
+                        <option value="newest">Newest First</option>
+                      </select>
+                    </FilterSection>
+
+                    <FilterSection title="Categories" section="category" icon={<span className="text-maybelline-pink">📂</span>}>
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {categories.length > 0 ? (
+                          categories.map((category) => (
+                            <div key={category._id}>
+                              <label className="flex items-center cursor-pointer hover:bg-gray-50 p-2 rounded-lg transition-colors duration-200 group">
+                                <input
+                                  type="checkbox"
+                                  value={category.name}
+                                  checked={selectedCategories.includes(category.name)}
+                                  onChange={() => handleCategoryChange(category.name)}
+                                  className="mr-3 accent-maybelline-pink transform scale-110"
+                                />
+                                <span className="text-gray-900 font-medium text-sm">{category.name}</span>
+                              </label>
+                              {category.children && category.children.length > 0 && (
+                                <div className="ml-5 space-y-1">
+                                  {category.children.map((sub) => (
+                                    <label key={sub._id} className="flex items-center cursor-pointer hover:bg-gray-50 p-1.5 rounded transition-colors duration-200 group">
+                                      <input
+                                        type="checkbox"
+                                        value={sub.name}
+                                        checked={selectedCategories.includes(sub.name)}
+                                        onChange={() => handleCategoryChange(sub.name)}
+                                        className="mr-2 accent-maybelline-pink transform scale-110"
+                                      />
+                                      <span className="text-gray-600 text-xs group-hover:text-gray-900 transition-colors duration-200">{sub.name}</span>
+                                    </label>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-sm text-gray-500">Loading categories...</p>
+                        )}
+                      </div>
+                    </FilterSection>
+
+                    <FilterSection title="Brand" section="brand" icon={<span className="text-maybelline-pink">🏷️</span>}>
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {brands.length > 0 ? (
+                          brands.map((brand) => (
+                            <label key={brand} className="flex items-center cursor-pointer hover:bg-gray-50 p-2 rounded-lg transition-colors duration-200 group">
+                              <input
+                                type="checkbox"
+                                value={brand}
+                                checked={selectedBrands.includes(brand)}
+                                onChange={() => {
+                                  setSelectedBrands(prev =>
+                                    prev.includes(brand)
+                                      ? prev.filter(b => b !== brand)
+                                      : [...prev, brand]
+                                  );
+                                }}
+                                className="mr-3 accent-maybelline-pink transform scale-110"
+                              />
+                              <span className="text-gray-700 group-hover:text-gray-900 transition-colors duration-200">{brand}</span>
+                            </label>
+                          ))
+                        ) : (
+                          <p className="text-sm text-gray-400 italic">Select a subcategory to see brands</p>
+                        )}
+                      </div>
+                    </FilterSection>
+
+                    <FilterSection title="Gender" section="gender" icon={<span className="text-pink-500">👥</span>}>
+                      <div className="space-y-2">
+                        {genders.length > 0 ? (
+                          genders.map((gender) => (
+                            <label key={gender._id} className="flex items-center cursor-pointer hover:bg-gray-50 p-2 rounded-lg transition-colors duration-200 group">
+                              <input
+                                type="checkbox"
+                                value={gender.type}
+                                checked={selectedGenders.includes(gender.type)}
+                                onChange={() => handleGenderChange(gender.type)}
+                                className="mr-3 accent-maybelline-pink transform scale-110"
+                              />
+                              <span className="text-gray-700 group-hover:text-gray-900 transition-colors duration-200">{gender.type}</span>
+                            </label>
+                          ))
+                        ) : (
+                          <p className="text-sm text-gray-500">Loading genders...</p>
+                        )}
+                      </div>
+                    </FilterSection>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Desktop Sidebar */}
+            <div className="hidden lg:block">
+              <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-4 sm:p-6 sticky top-24">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-2xl font-bold text-gray-900">Filters</h2>
+                  {activeFiltersCount > 0 && (
+                    <button
+                    onClick={clearAllFilters}
+                    className="px-3 py-1 bg-gradient-to-r from-maybelline-pink to-maybelline-magenta text-pure-white rounded-full text-sm font-semibold hover:from-maybelline-magenta hover:to-maybelline-rose transition-all duration-200 transform hover:scale-105"
+                    >
+                      Clear ({activeFiltersCount})
+                    </button>
+                  )}
+                </div>
+                
+                <FilterSection title="Price Range" section="price" icon={<span className="text-green-500">💰</span>}>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-sm text-gray-600 mb-1 block">
+                        Min: BDT{Number(priceRange.min || 0).toLocaleString()}
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max={maxPrice}
+                        step="100"
+                        value={priceRange.min || 0}
+                        onChange={(e) => handlePriceChange('min', e.target.value)}
+                        className="w-full accent-maybelline-pink"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm text-gray-600 mb-1 block">
+                        Max: BDT{Number(priceRange.max || maxPrice).toLocaleString()}
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max={maxPrice}
+                        step="100"
+                        value={priceRange.max || maxPrice}
+                        onChange={(e) => handlePriceChange('max', e.target.value)}
+                        className="w-full accent-maybelline-pink"
+                      />
+                    </div>
+                    <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded-lg text-center">
+                      BDT{Number(priceRange.min || 0).toLocaleString()} - BDT{Number(priceRange.max || maxPrice).toLocaleString()}
+                    </div>
+                    <button
+                      onClick={applyPriceFilter}
+                      className="w-full px-4 py-2 bg-gradient-to-r from-maybelline-pink to-maybelline-rose text-pure-white text-sm font-semibold rounded-lg hover:from-maybelline-magenta hover:to-maybelline-pink transition-all duration-200"
+                    >
+                      Apply
+                    </button>
+                  </div>
+                </FilterSection>
+
+                <FilterSection title="Sort By" section="sort" icon={<FaSort className="text-maybelline-pink" />}>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-maybelline-pink focus:border-transparent transition-all duration-200"
+                  >
+                    <option value="name">Name A-Z</option>
+                    <option value="price-low">Price: Low to High</option>
+                    <option value="price-high">Price: High to Low</option>
+                    <option value="newest">Newest First</option>
+                  </select>
+                </FilterSection>
+
+                <FilterSection title="Categories" section="category" icon={<span className="text-maybelline-pink">📂</span>}>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {categories.length > 0 ? (
+                      categories.map((category) => (
+                        <div key={category._id}>
+                          <label className="flex items-center cursor-pointer hover:bg-gray-50 p-2 rounded-lg transition-colors duration-200 group">
+                            <input
+                              type="checkbox"
+                              value={category.name}
+                              checked={selectedCategories.includes(category.name)}
+                              onChange={() => handleCategoryChange(category.name)}
+                              className="mr-3 accent-maybelline-pink transform scale-110"
+                            />
+                            <span className="text-gray-900 font-medium text-sm">{category.name}</span>
+                          </label>
+                          {category.children && category.children.length > 0 && (
+                            <div className="ml-5 space-y-1">
+                              {category.children.map((sub) => (
+                                <label key={sub._id} className="flex items-center cursor-pointer hover:bg-gray-50 p-1.5 rounded transition-colors duration-200 group">
+                                  <input
+                                    type="checkbox"
+                                    value={sub.name}
+                                    checked={selectedCategories.includes(sub.name)}
+                                    onChange={() => handleCategoryChange(sub.name)}
+                                    className="mr-2 accent-maybelline-pink transform scale-110"
+                                  />
+                                  <span className="text-gray-600 text-xs group-hover:text-gray-900 transition-colors duration-200">{sub.name}</span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-gray-500">Loading categories...</p>
+                    )}
+                  </div>
+                </FilterSection>
+
+                    <FilterSection title="Brand" section="brand" icon={<span className="text-maybelline-pink">🏷️</span>}>
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {brands.length > 0 ? (
+                          brands.map((brand) => (
+                            <label key={brand} className="flex items-center cursor-pointer hover:bg-gray-50 p-2 rounded-lg transition-colors duration-200 group">
+                              <input
+                                type="checkbox"
+                                value={brand}
+                                checked={selectedBrands.includes(brand)}
+                                onChange={() => {
+                                  setSelectedBrands(prev =>
+                                    prev.includes(brand)
+                                      ? prev.filter(b => b !== brand)
+                                      : [...prev, brand]
+                                  );
+                                }}
+                                className="mr-3 accent-maybelline-pink transform scale-110"
+                              />
+                              <span className="text-gray-700 group-hover:text-gray-900 transition-colors duration-200">{brand}</span>
+                            </label>
+                          ))
+                        ) : (
+                          <p className="text-sm text-gray-400 italic">Select a subcategory to see brands</p>
+                        )}
+                      </div>
+                    </FilterSection>
+
+                <FilterSection title="Gender" section="gender" icon={<span className="text-pink-500">👥</span>}>
+                  <div className="space-y-2">
+                    {genders.length > 0 ? (
+                      genders.map((gender) => (
+                        <label key={gender._id} className="flex items-center cursor-pointer hover:bg-gray-50 p-2 rounded-lg transition-colors duration-200 group">
+                          <input
+                            type="checkbox"
+                            value={gender.type}
+                            checked={selectedGenders.includes(gender.type)}
+                            onChange={() => handleGenderChange(gender.type)}
+                            className="mr-3 accent-maybelline-pink transform scale-110"
+                          />
+                          <span className="text-gray-700 group-hover:text-gray-900 transition-colors duration-200">{gender.type}</span>
+                        </label>
+                      ))
+                    ) : (
+                      <p className="text-sm text-gray-500">Loading genders...</p>
+                    )}
+                  </div>
+                </FilterSection>
+              </div>
+            </div>
+          </aside>
+
+          {/* Products List */}
+          <main className="w-full lg:w-3/4">
+            {/* Search Bar */}
+            <div className="mb-4">
+              <div className="relative">
+                <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search products..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-maybelline-pink focus:border-transparent transition-all duration-200 bg-white"
+                />
+              </div>
+            </div>
+
+            {/* Desktop Header */}
+            <div className="hidden lg:flex items-center justify-between mb-6 sm:mb-8">
+              <div>
+                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">
+                  Products ({filteredProducts.length})
+                </h1>
+                {activeFiltersCount > 0 && (
+                  <p className="text-sm sm:text-base text-gray-600">
+                    {activeFiltersCount} filter{activeFiltersCount !== 1 ? 's' : ''} applied
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setViewMode("grid")}
+                  className={`p-3 rounded-xl transition-all duration-300 transform hover:scale-105 touch-target ${
+                    viewMode === "grid" 
+                    ? "bg-gradient-to-r from-maybelline-pink to-maybelline-rose text-pure-white shadow-lg" 
+                    : "bg-pure-white text-gray-600 hover:bg-gray-50 shadow-md"
+                }`}
+              >
+                <FaTh size={16} />
+              </button>
+              <button
+                onClick={() => setViewMode("list")}
+                className={`p-3 rounded-xl transition-all duration-300 transform hover:scale-105 touch-target ${
+                  viewMode === "list" 
+                    ? "bg-gradient-to-r from-maybelline-pink to-maybelline-rose text-pure-white shadow-lg" 
+                    : "bg-pure-white text-gray-600 hover:bg-gray-50 shadow-md"
+                  }`}
+                >
+                  <FaListUl size={16} />
+                </button>
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="flex items-center justify-center h-48 sm:h-64">
+                <div className="animate-spin rounded-full h-10 sm:h-12 w-10 sm:w-12 border-b-2 border-maybelline-pink"></div>
+              </div>
+            ) : filteredProducts.length > 0 ? (
+              <div className={`grid gap-4 sm:gap-6 ${
+                viewMode === "grid" 
+                  ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" 
+                  : "grid-cols-1"
+              }`}>
+                {filteredProducts.map((info) => (
+                  <div key={info._id} className={viewMode === "list" ? "bg-white rounded-xl shadow-sm hover:shadow-lg transition-all duration-300" : ""}>
+                    <ProductCard Data={info} viewMode={viewMode} onAddToCart={(id) => { setCartModalProductId(id); }} />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12 sm:py-16">
+                <div className="text-4xl sm:text-6xl mb-3 sm:mb-4">🔍</div>
+                <h3 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2">No products found</h3>
+                <p className="text-sm sm:text-base text-gray-600 mb-4 sm:mb-6">
+                  Try adjusting your filters or search terms
+                </p>
+                <button
+                  onClick={clearAllFilters}
+                   className="px-4 sm:px-6 py-2 sm:py-3 bg-gradient-to-r from-maybelline-pink to-maybelline-rose text-pure-white rounded-full font-semibold hover:from-maybelline-magenta hover:to-maybelline-pink transition-all duration-200 transform hover:scale-105 shadow-lg touch-target text-sm sm:text-base"
+                >
+                  Clear All Filters
+                </button>
+              </div>
+            )}
+            <ProductCartModal productId={cartModalProductId} isOpen={!!cartModalProductId} onClose={() => setCartModalProductId(null)} />
+          </main>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default Products;
