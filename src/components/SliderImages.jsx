@@ -2,39 +2,50 @@ import React from 'react';
 import Link from "next/link";
 
 const SliderImages = ({ ImageInfo }) => {
+    const hasDiscount = ImageInfo.discountPrice && ImageInfo.discountPrice < ImageInfo.price;
+
     return (
-        <div className="slide-content text-center flex flex-col justify-center items-center p-4 border rounded-lg shadow-lg relative">
-            <Link href={`../products/${ImageInfo.productId}`}>
-                <img 
-                    src={ImageInfo.imageUrl} 
-                    alt={ImageInfo.name} 
-                    className="h-60 mx-auto rounded-lg mb-2" 
-                />
+        <div className="relative flex flex-col border border-black/10 bg-pure-white transition-colors duration-300 hover:border-black/30">
+            <Link href={`/products/${ImageInfo.productId}`} className="block">
+                <div className="relative aspect-[4/5] bg-[#F7F5F3] overflow-hidden">
+                    <img
+                        src={ImageInfo.imageUrl}
+                        alt={ImageInfo.name}
+                        className="w-full h-full object-cover transition-transform duration-700 hover:scale-105"
+                        loading="lazy"
+                    />
 
-                {/* Badge for main badge name and color */}
-                {ImageInfo.mainBadgeName && (
-                    <div 
-                        className="absolute top-2 right-2 px-2 py-1 text-xs font-bold rounded" 
-                        style={{ backgroundColor: ImageInfo.mainBadgeColor }}
-                    >
-                        {ImageInfo.mainBadgeName}
-                    </div>
-                )}
-
-                <h2 className="text-lg font-semibold mt-2">{ImageInfo.name}</h2>
-
-                <div className="text-md">
-                    {/* Display original price with strikethrough if discount price is available */}
-                    <span className={`${ImageInfo.discountPrice ? 'line-through text-gray-500' : ''}`}>
-                        ${ImageInfo.price}
-                    </span>
-
-                    {/* Display discount price if available */}
-                    {ImageInfo.discountPrice && (
-                        <span className="text-green-500 ml-2">
-                            ${ImageInfo.discountPrice}
-                        </span>
+                    {ImageInfo.mainBadgeName && (
+                        <div
+                            className="absolute top-3 left-3 px-2.5 py-1 text-[10px] font-semibold tracking-wider uppercase text-pure-white"
+                            style={{ backgroundColor: ImageInfo.mainBadgeColor || '#DC143C' }}
+                        >
+                            {ImageInfo.mainBadgeName}
+                        </div>
                     )}
+                </div>
+
+                <div className="p-5 text-left">
+                    <h3 className="font-display text-lg leading-snug text-black line-clamp-2">
+                        {ImageInfo.name}
+                    </h3>
+
+                    <div className="mt-2.5 flex items-baseline gap-2.5">
+                        {hasDiscount ? (
+                            <>
+                                <span className="font-sans text-sm font-semibold text-maybelline-pink">
+                                    BDT {ImageInfo.discountPrice}
+                                </span>
+                                <span className="font-sans text-xs text-mid-gray line-through">
+                                    BDT {ImageInfo.price}
+                                </span>
+                            </>
+                        ) : (
+                            <span className="font-sans text-sm font-semibold text-black">
+                                BDT {ImageInfo.price}
+                            </span>
+                        )}
+                    </div>
                 </div>
             </Link>
         </div>

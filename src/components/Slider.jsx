@@ -33,36 +33,47 @@ const Slider = () => {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center py-12">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#1B1B1B]"></div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        {[...Array(3)].map((_, i) => (
+          <div key={i}>
+            <div className="aspect-[4/5] shimmer" />
+            <div className="mt-4 space-y-2">
+              <div className="h-3.5 w-3/4 shimmer" />
+              <div className="h-3.5 w-1/3 shimmer" />
+            </div>
+          </div>
+        ))}
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="text-center py-12">
-        <div className="bg-white rounded-xl p-6 border border-[#F4F4F4]">
-          <p className="text-[#B1123B] font-semibold">{error}</p>
-        </div>
+      <div className="border border-black/10 px-6 py-14 text-center">
+        <p className="font-display text-xl text-black mb-1">Offers are unavailable right now</p>
+        <p className="font-sans text-sm text-dark-gray/70">{error}</p>
       </div>
     );
   }
 
   if (slides.length === 0) {
     return (
-      <div className="text-center py-12">
-        <div className="bg-white rounded-xl p-8 border border-[#F4F4F4]">
-          <div className="text-6xl mb-4">🎉</div>
-          <h3 className="text-2xl font-bold text-[#1B1B1B] mb-2">Special Offers Coming Soon!</h3>
-          <p className="text-[#4A4A4A]">Stay tuned for amazing deals and discounts</p>
-        </div>
+      <div className="border border-black/10 px-6 py-16 text-center">
+        <p className="font-sans text-[11px] tracking-[0.28em] uppercase text-maybelline-pink mb-3">
+          Coming Soon
+        </p>
+        <h3 className="font-display text-2xl sm:text-3xl text-black mb-2">
+          Special offers are being curated
+        </h3>
+        <p className="font-sans text-sm text-dark-gray/70">
+          Stay tuned — new deals are added regularly.
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="w-full mx-auto max-w-6xl px-4">
+    <div className="w-full mx-auto max-w-6xl">
       <div className="relative">
         <Swiper
           autoplay={{
@@ -80,7 +91,7 @@ const Slider = () => {
             prevEl: '.swiper-button-prev',
           }}
           modules={[Autoplay, Pagination, Navigation]}
-          className="mySwiper rounded-2xl overflow-hidden"
+          className="mySwiper"
           breakpoints={{
             640: { slidesPerView: 1, spaceBetween: 20 },
             768: { slidesPerView: 2, spaceBetween: 30 },
@@ -88,24 +99,20 @@ const Slider = () => {
           }}
         >
           {slides.map((slide) => (
-            <SwiperSlide key={slide._id} className="flex items-center justify-center p-4">
-              <div className="w-full h-full flex items-center justify-center">
-                <div className="bg-white rounded-xl shadow-lg border border-[#F4F4F4] p-4 hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1 w-full">
-                  <SliderImages ImageInfo={slide} />
-                </div>
-              </div>
+            <SwiperSlide key={slide._id} className="flex items-stretch p-1">
+              <SliderImages ImageInfo={slide} />
             </SwiperSlide>
           ))}
         </Swiper>
-        
-        <div className="swiper-button-prev absolute left-4 top-1/2 transform -translate-y-1/2 z-10 w-12 h-12 bg-[#1B1B1B] bg-opacity-50 rounded-full flex items-center justify-center text-white hover:bg-[#1B1B1B] hover:bg-opacity-80 transition-all duration-300 cursor-pointer">
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+
+        <div className="swiper-button-prev absolute left-0 top-1/2 -translate-y-1/2 z-10 w-11 h-11 bg-pure-white border border-black/15 flex items-center justify-center text-black hover:bg-black hover:text-pure-white transition-all duration-300 cursor-pointer">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 19l-7-7 7-7" />
           </svg>
         </div>
-        <div className="swiper-button-next absolute right-4 top-1/2 transform -translate-y-1/2 z-10 w-12 h-12 bg-[#1B1B1B] bg-opacity-50 rounded-full flex items-center justify-center text-white hover:bg-[#1B1B1B] hover:bg-opacity-80 transition-all duration-300 cursor-pointer">
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        <div className="swiper-button-next absolute right-0 top-1/2 -translate-y-1/2 z-10 w-11 h-11 bg-pure-white border border-black/15 flex items-center justify-center text-black hover:bg-black hover:text-pure-white transition-all duration-300 cursor-pointer">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5l7 7-7 7" />
           </svg>
         </div>
       </div>

@@ -11,15 +11,17 @@ export const UserProvider = ({ children }) => {
   const router = useRouter();
   const API = process.env.NEXT_PUBLIC_API_URI;
 
-  const cachedUser = typeof window !== 'undefined' ? (() => { try { return JSON.parse(getStorage('user')); } catch {} return null; })() : null;
-  const [user, setUser] = useState(cachedUser);
-  const [isLoggedIn, setIsLoggedIn] = useState(!!cachedUser);
-  const [address, setAddress] = useState(cachedUser?.address || null);
-  const [paymentMethods, setPaymentMethods] = useState(cachedUser?.paymentMethods || []);
-  const [defaultPaymentMethod, setDefaultPaymentMethod] = useState(cachedUser ? (cachedUser.paymentMethods?.find((m) => m.isDefault) || cachedUser.paymentMethods?.[0] || null) : null);
+  // Start in guest mode on both server and client first render (hydration-safe),
+  // then restore the cached session in the mount effect below.
+  const [user, setUser] = useState(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [address, setAddress] = useState(null);
+  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [defaultPaymentMethod, setDefaultPaymentMethod] = useState(null);
   const [redirectPath, setRedirectPath] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [wishlist, setWishlist] = useState([]);
+  const [userHydrated, setUserHydrated] = useState(false);
 
   const pickDefaultPaymentMethod = (methods = []) =>
     methods.find((m) => m.isDefault) || methods[0] || null;
@@ -138,16 +140,31 @@ export const UserProvider = ({ children }) => {
   };
 
   useEffect(() => {
+    // Restore cached session after hydration (never during the first render)
+    try {
+      const cached = JSON.parse(getStorage('user'));
+      if (cached) {
+        setUser(cached);
+        setIsLoggedIn(true);
+        setAddress(cached.address || null);
+        const methods = cached.paymentMethods || [];
+        setPaymentMethods(methods);
+        setDefaultPaymentMethod(pickDefaultPaymentMethod(methods));
+      }
+    } catch { /* ignore corrupt cache */ }
+
     const token = getStorage('accessToken');
     if (token) axios.defaults.headers.common.Authorization = `Bearer ${token}`;
     fetchUser();
+    setUserHydrated(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
+    if (!userHydrated) return;
     if (user) setStorage('user', JSON.stringify(user));
     else removeStorage('user');
-  }, [user]);
+  }, [user, userHydrated]);
 
   useEffect(() => {
     if (redirectPath) {

@@ -9,6 +9,136 @@ import { FaFilter, FaTimes, FaSearch, FaSort, FaTh, FaListUl, FaChevronDown, FaC
 
 const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
 
+// Both filter components live at module scope on purpose: if they were
+// defined inside Products, every parent re-render (e.g. each keystroke)
+// would create a new component type and React would remount the subtree,
+// stealing input focus after 1 character and cancelling slider drags.
+const FilterSection = ({ title, children, section, icon, expandedSections, toggleSection }) => (
+  <div className="mb-6 border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
+    <button
+      onClick={() => toggleSection(section)}
+      className="w-full px-4 py-3 bg-gradient-to-r from-gray-50 to-gray-100 hover:from-gray-100 hover:to-gray-200 transition-all duration-200 flex items-center justify-between text-left"
+    >
+      <div className="flex items-center gap-3">
+        {icon}
+        <h3 className="font-semibold text-gray-800">{title}</h3>
+      </div>
+      {expandedSections[section] ? (
+        <FaChevronUp className="text-gray-500" />
+      ) : (
+        <FaChevronDown className="text-gray-500" />
+      )}
+    </button>
+    {expandedSections[section] && (
+      <div className="p-4 border-t border-gray-100">
+        {children}
+      </div>
+    )}
+  </div>
+);
+
+// Form-style price filter: type Min/Max freely or drag the dual slider,
+// nothing is committed until "Apply" is clicked.
+const PriceRangeFilter = ({ idPrefix = "pf", maxPrice, priceRange, onPriceChange, onSliderChange, onApply, onReset }) => {
+  const rawMin = priceRange.min === '' ? 0 : Math.max(0, Math.min(Number(priceRange.min) || 0, maxPrice));
+  const rawMax = priceRange.max === '' ? maxPrice : Math.max(0, Math.min(Number(priceRange.max) || 0, maxPrice));
+  const sMin = Math.min(rawMin, rawMax);
+  const sMax = Math.max(rawMin, rawMax);
+  const pct = (v) => Math.max(0, Math.min(100, (v / maxPrice) * 100));
+  const fmt = (v) => Number(v || 0).toLocaleString();
+  const minOnTop = pct(sMin) > 55;
+
+  const thumb =
+    "[&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-maybelline-pink [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-pure-white [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:pointer-events-auto " +
+    "[&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-maybelline-pink [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-pure-white [&::-moz-range-thumb]:shadow-md [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:pointer-events-auto";
+
+  return (
+    <div className="space-y-4">
+      {/* Dual-handle slider */}
+      <div className="relative h-6 select-none">
+        <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-1.5 bg-gray-200 rounded-full" />
+        <div
+          className="absolute top-1/2 -translate-y-1/2 h-1.5 bg-gradient-to-r from-maybelline-pink to-maybelline-rose rounded-full"
+          style={{ left: `${pct(sMin)}%`, right: `${100 - pct(sMax)}%` }}
+        />
+        <input
+          type="range"
+          min="0"
+          max={maxPrice}
+          step="100"
+          value={sMin}
+          onChange={(e) => onSliderChange('min', e.target.value)}
+          aria-label="Minimum price"
+          className={`absolute inset-0 w-full h-6 appearance-none bg-transparent pointer-events-none touch-none ${thumb}`}
+          style={{ zIndex: minOnTop ? 30 : 20 }}
+        />
+        <input
+          type="range"
+          min="0"
+          max={maxPrice}
+          step="100"
+          value={sMax}
+          onChange={(e) => onSliderChange('max', e.target.value)}
+          aria-label="Maximum price"
+          className={`absolute inset-0 w-full h-6 appearance-none bg-transparent pointer-events-none touch-none ${thumb}`}
+          style={{ zIndex: minOnTop ? 20 : 30 }}
+        />
+      </div>
+
+      {/* Min / Max inputs */}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label htmlFor={`${idPrefix}-min`} className="block text-xs font-medium text-gray-500 mb-1">
+            Min (BDT)
+          </label>
+          <input
+            id={`${idPrefix}-min`}
+            type="text"
+            inputMode="numeric"
+            placeholder="0"
+            value={priceRange.min}
+            onChange={(e) => onPriceChange('min', e.target.value)}
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-maybelline-pink focus:border-transparent transition-all duration-200"
+          />
+        </div>
+        <div>
+          <label htmlFor={`${idPrefix}-max`} className="block text-xs font-medium text-gray-500 mb-1">
+            Max (BDT)
+          </label>
+          <input
+            id={`${idPrefix}-max`}
+            type="text"
+            inputMode="numeric"
+            placeholder={maxPrice.toLocaleString()}
+            value={priceRange.max}
+            onChange={(e) => onPriceChange('max', e.target.value)}
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-maybelline-pink focus:border-transparent transition-all duration-200"
+          />
+        </div>
+      </div>
+
+      <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded-lg text-center">
+        BDT {fmt(rawMin)} - BDT {fmt(rawMax)}
+      </div>
+
+      <div className="flex gap-2">
+        <button
+          onClick={onApply}
+          className="flex-1 px-4 py-2 bg-gradient-to-r from-maybelline-pink to-maybelline-rose text-pure-white text-sm font-semibold rounded-lg hover:from-maybelline-magenta hover:to-maybelline-pink transition-all duration-200"
+        >
+          Apply
+        </button>
+        <button
+          onClick={onReset}
+          className="px-4 py-2 border border-gray-300 text-gray-600 text-sm font-semibold rounded-lg hover:bg-gray-50 transition-all duration-200"
+        >
+          Reset
+        </button>
+      </div>
+    </div>
+  );
+};
+
 function Products() {
   const searchParams = useSearchParams();
   const [products, setProducts] = useState([]);
@@ -132,11 +262,27 @@ function Products() {
   };
 
   const handlePriceChange = (field, value) => {
-    setPriceRange(prev => ({ ...prev, [field]: value }));
+    const digits = String(value).replace(/[^0-9]/g, '').slice(0, 7);
+    setPriceRange(prev => ({ ...prev, [field]: digits }));
+  };
+
+  const handleSliderChange = (field, value) => {
+    setPriceRange(prev => ({ ...prev, [field]: String(value) }));
   };
 
   const applyPriceFilter = () => {
-    setAppliedPrice(priceRange);
+    let min = priceRange.min === '' ? 0 : Math.max(0, Math.min(Number(priceRange.min) || 0, maxPrice));
+    let max = priceRange.max === '' ? maxPrice : Math.max(0, Math.min(Number(priceRange.max) || 0, maxPrice));
+    if (min > max) { const t = min; min = max; max = t; }
+    setAppliedPrice({
+      min: min <= 0 ? '' : String(min),
+      max: max >= maxPrice ? '' : String(max),
+    });
+  };
+
+  const resetPriceFilter = () => {
+    setPriceRange({ min: "", max: "" });
+    setAppliedPrice({ min: "", max: "" });
   };
 
   // Toggle section expansion
@@ -322,30 +468,15 @@ function Products() {
     (appliedPrice.min !== "" ? 1 : 0) + (appliedPrice.max !== "" ? 1 : 0) + 
     (deferredSearch.trim() !== "" ? 1 : 0);
 
-  // Filter section component
-  const FilterSection = ({ title, children, section, icon }) => (
-    <div className="mb-6 border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
-      <button
-        onClick={() => toggleSection(section)}
-        className="w-full px-4 py-3 bg-gradient-to-r from-gray-50 to-gray-100 hover:from-gray-100 hover:to-gray-200 transition-all duration-200 flex items-center justify-between text-left"
-      >
-        <div className="flex items-center gap-3">
-          {icon}
-          <h3 className="font-semibold text-gray-800">{title}</h3>
-        </div>
-        {expandedSections[section] ? (
-          <FaChevronUp className="text-gray-500" />
-        ) : (
-          <FaChevronDown className="text-gray-500" />
-        )}
-      </button>
-      {expandedSections[section] && (
-        <div className="p-4 border-t border-gray-100">
-          {children}
-        </div>
-      )}
-    </div>
-  );
+  const sectionProps = { expandedSections, toggleSection };
+  const priceProps = {
+    maxPrice,
+    priceRange,
+    onPriceChange: handlePriceChange,
+    onSliderChange: handleSliderChange,
+    onApply: applyPriceFilter,
+    onReset: resetPriceFilter,
+  };
 
   return (
     <div className="bg-gradient-to-br from-maybelline-light via-pure-white to-white">
@@ -433,49 +564,11 @@ function Products() {
                   </div>
                   
                   <div className="p-4 sm:p-6">
-                    <FilterSection title="Price Range" section="price" icon={<span className="text-green-500">💰</span>}>
-                      <div className="space-y-4">
-                        <div>
-                          <label className="text-sm text-gray-600 mb-1 block">
-                            Min: BDT{Number(priceRange.min || 0).toLocaleString()}
-                          </label>
-                          <input
-                            type="range"
-                            min="0"
-                            max={maxPrice}
-                            step="100"
-                            value={priceRange.min || 0}
-                            onChange={(e) => handlePriceChange('min', e.target.value)}
-                            className="w-full accent-maybelline-pink"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-sm text-gray-600 mb-1 block">
-                            Max: BDT{Number(priceRange.max || maxPrice).toLocaleString()}
-                          </label>
-                          <input
-                            type="range"
-                            min="0"
-                            max={maxPrice}
-                            step="100"
-                            value={priceRange.max || maxPrice}
-                            onChange={(e) => handlePriceChange('max', e.target.value)}
-                            className="w-full accent-maybelline-pink"
-                          />
-                        </div>
-                        <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded-lg text-center">
-                          BDT{Number(priceRange.min || 0).toLocaleString()} - BDT{Number(priceRange.max || maxPrice).toLocaleString()}
-                        </div>
-                        <button
-                          onClick={applyPriceFilter}
-                      className="w-full px-4 py-2 bg-gradient-to-r from-maybelline-pink to-maybelline-rose text-pure-white text-sm font-semibold rounded-lg hover:from-maybelline-magenta hover:to-maybelline-pink transition-all duration-200"
-                        >
-                          Apply
-                        </button>
-                      </div>
+                    <FilterSection {...sectionProps} title="Price Range" section="price" icon={<span className="text-green-500">💰</span>}>
+                      <PriceRangeFilter {...priceProps} idPrefix="pf-m" />
                     </FilterSection>
 
-                    <FilterSection title="Sort By" section="sort" icon={<FaSort className="text-maybelline-pink" />}>
+                    <FilterSection {...sectionProps} title="Sort By" section="sort" icon={<FaSort className="text-maybelline-pink" />}>
                       <select
                         value={sortBy}
                         onChange={(e) => setSortBy(e.target.value)}
@@ -488,7 +581,7 @@ function Products() {
                       </select>
                     </FilterSection>
 
-                    <FilterSection title="Categories" section="category" icon={<span className="text-maybelline-pink">📂</span>}>
+                    <FilterSection {...sectionProps} title="Categories" section="category" icon={<span className="text-maybelline-pink">📂</span>}>
                       <div className="space-y-2 max-h-48 overflow-y-auto">
                         {categories.length > 0 ? (
                           categories.map((category) => (
@@ -527,7 +620,7 @@ function Products() {
                       </div>
                     </FilterSection>
 
-                    <FilterSection title="Brand" section="brand" icon={<span className="text-maybelline-pink">🏷️</span>}>
+                    <FilterSection {...sectionProps} title="Brand" section="brand" icon={<span className="text-maybelline-pink">🏷️</span>}>
                       <div className="space-y-2 max-h-48 overflow-y-auto">
                         {brands.length > 0 ? (
                           brands.map((brand) => (
@@ -554,7 +647,7 @@ function Products() {
                       </div>
                     </FilterSection>
 
-                    <FilterSection title="Gender" section="gender" icon={<span className="text-pink-500">👥</span>}>
+                    <FilterSection {...sectionProps} title="Gender" section="gender" icon={<span className="text-pink-500">👥</span>}>
                       <div className="space-y-2">
                         {genders.length > 0 ? (
                           genders.map((gender) => (
@@ -594,49 +687,11 @@ function Products() {
                   )}
                 </div>
                 
-                <FilterSection title="Price Range" section="price" icon={<span className="text-green-500">💰</span>}>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="text-sm text-gray-600 mb-1 block">
-                        Min: BDT{Number(priceRange.min || 0).toLocaleString()}
-                      </label>
-                      <input
-                        type="range"
-                        min="0"
-                        max={maxPrice}
-                        step="100"
-                        value={priceRange.min || 0}
-                        onChange={(e) => handlePriceChange('min', e.target.value)}
-                        className="w-full accent-maybelline-pink"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm text-gray-600 mb-1 block">
-                        Max: BDT{Number(priceRange.max || maxPrice).toLocaleString()}
-                      </label>
-                      <input
-                        type="range"
-                        min="0"
-                        max={maxPrice}
-                        step="100"
-                        value={priceRange.max || maxPrice}
-                        onChange={(e) => handlePriceChange('max', e.target.value)}
-                        className="w-full accent-maybelline-pink"
-                      />
-                    </div>
-                    <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded-lg text-center">
-                      BDT{Number(priceRange.min || 0).toLocaleString()} - BDT{Number(priceRange.max || maxPrice).toLocaleString()}
-                    </div>
-                    <button
-                      onClick={applyPriceFilter}
-                      className="w-full px-4 py-2 bg-gradient-to-r from-maybelline-pink to-maybelline-rose text-pure-white text-sm font-semibold rounded-lg hover:from-maybelline-magenta hover:to-maybelline-pink transition-all duration-200"
-                    >
-                      Apply
-                    </button>
-                  </div>
+                <FilterSection {...sectionProps} title="Price Range" section="price" icon={<span className="text-green-500">💰</span>}>
+                  <PriceRangeFilter {...priceProps} idPrefix="pf-d" />
                 </FilterSection>
 
-                <FilterSection title="Sort By" section="sort" icon={<FaSort className="text-maybelline-pink" />}>
+                <FilterSection {...sectionProps} title="Sort By" section="sort" icon={<FaSort className="text-maybelline-pink" />}>
                   <select
                     value={sortBy}
                     onChange={(e) => setSortBy(e.target.value)}
@@ -649,7 +704,7 @@ function Products() {
                   </select>
                 </FilterSection>
 
-                <FilterSection title="Categories" section="category" icon={<span className="text-maybelline-pink">📂</span>}>
+                <FilterSection {...sectionProps} title="Categories" section="category" icon={<span className="text-maybelline-pink">📂</span>}>
                   <div className="space-y-2 max-h-48 overflow-y-auto">
                     {categories.length > 0 ? (
                       categories.map((category) => (
@@ -688,7 +743,7 @@ function Products() {
                   </div>
                 </FilterSection>
 
-                    <FilterSection title="Brand" section="brand" icon={<span className="text-maybelline-pink">🏷️</span>}>
+                    <FilterSection {...sectionProps} title="Brand" section="brand" icon={<span className="text-maybelline-pink">🏷️</span>}>
                       <div className="space-y-2 max-h-48 overflow-y-auto">
                         {brands.length > 0 ? (
                           brands.map((brand) => (
@@ -715,7 +770,7 @@ function Products() {
                       </div>
                     </FilterSection>
 
-                <FilterSection title="Gender" section="gender" icon={<span className="text-pink-500">👥</span>}>
+                <FilterSection {...sectionProps} title="Gender" section="gender" icon={<span className="text-pink-500">👥</span>}>
                   <div className="space-y-2">
                     {genders.length > 0 ? (
                       genders.map((gender) => (

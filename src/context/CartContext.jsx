@@ -8,11 +8,13 @@ export const CartContext = createContext();
 
 export const CartProvider = ({ children }) => {
   const { user, isLoggedIn } = useContext(UserContext);
-  const cachedCart = typeof window !== 'undefined' ? (() => { try { return JSON.parse(getStorage('cart')); } catch {} return null; })() : null;
-  const [cartItems, setCartItems] = useState(cachedCart || []);
+  // Cart starts empty on both server and client first render (hydration-safe),
+  // then is restored from storage / server in the sync effect below.
+  const [cartItems, setCartItems] = useState([]);
   const [coupon, setCoupon] = useState(null);
   const [discount, setDiscount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [cartHydrated, setCartHydrated] = useState(false);
 
   const formatCartItem = useCallback((item) => {
   const productId = item.productId?._id || item.productId;
@@ -147,7 +149,7 @@ const syncCart = useCallback(async (localCartItems = []) => {
   useEffect(() => {
     const handleCartSync = async () => {
       if (isLoggedIn && user?._id) {
-        if (hasSyncedRef.current) return;
+        if (hasSyncedRef.current) { setCartHydrated(true); return; }
         hasSyncedRef.current = true;
         try {
           const guestCart = JSON.parse(getStorage('guestCart')) || [];
@@ -163,15 +165,21 @@ const syncCart = useCallback(async (localCartItems = []) => {
         }
       } else {
         hasSyncedRef.current = false;
-        const guestCart = JSON.parse(getStorage('guestCart')) || [];
-        setCartItems(guestCart.map(formatCartItem));
+        try {
+          const guestCart = JSON.parse(getStorage('guestCart')) || [];
+          setCartItems(guestCart.map(formatCartItem));
+        } catch (error) {
+          console.error('Cart restore error:', error);
+        }
       }
+      setCartHydrated(true);
     };
 
     handleCartSync();
   }, [isLoggedIn, user?._id, formatCartItem]);
 
   useEffect(() => {
+    if (!cartHydrated) return;
     const simplifiedCart = cartItems.map(item => ({
       productId: item.productId,
       variantId: item.variantId,
@@ -189,7 +197,7 @@ const syncCart = useCallback(async (localCartItems = []) => {
     if (!isLoggedIn) {
       setStorage('guestCart', JSON.stringify(simplifiedCart));
     }
-  }, [cartItems, isLoggedIn]);
+  }, [cartItems, isLoggedIn, cartHydrated]);
 
  const applyCoupon = useCallback(async (couponCode) => {
   if (!user?._id) {

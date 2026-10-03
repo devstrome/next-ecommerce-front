@@ -1,19 +1,19 @@
 'use client'
 import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { FiChevronLeft, FiChevronRight } from "react-icons/fi";
+import { FiChevronLeft, FiChevronRight, FiArrowRight } from "react-icons/fi";
 
 const defaultSlides = [
   {
     _id: "default-1",
     tag: "New Arrivals",
-    title: "New Collection",
+    title: "The New Collection",
     highlight: "Collection",
-    subtitle: "Discover the season's defining looks",
+    subtitle: "Discover the season's defining looks — curated for the modern wardrobe.",
     cta: "Explore Now",
-    link: "/products?sort=newest",
+    link: "/products",
     bgImage: "",
-    bgGradient: "from-maybelline-light via-pure-white to-maybelline-rose/10",
+    bgGradient: "from-[#F6F1EC] via-pure-white to-[#EFE7E0]",
     textColor: "#1A1A1A",
     highlightColor: "#DC143C",
   },
@@ -22,11 +22,10 @@ const defaultSlides = [
     tag: "Best Sellers",
     title: "Timeless Beauty",
     highlight: "Beauty",
-    subtitle: "Curated essentials for every occasion",
+    subtitle: "Curated essentials for every occasion, chosen by thousands.",
     cta: "Shop Beauty",
-    link: "/products?category=makeup",
-    bgImage: "",
-    bgGradient: "from-cool-gray via-pure-white to-maybelline-light",
+    link: "/products",
+    bgGradient: "from-cool-gray via-pure-white to-[#F6F1EC]",
     textColor: "#1A1A1A",
     highlightColor: "#DC143C",
   },
@@ -35,20 +34,22 @@ const defaultSlides = [
     tag: "Premium Edit",
     title: "Luxury Redefined",
     highlight: "Redefined",
-    subtitle: "Premium fashion & accessories for the discerning",
+    subtitle: "Premium fashion & accessories for the discerning.",
     cta: "View Collection",
-    link: "/products?category=fashion",
-    bgImage: "",
-    bgGradient: "from-maybelline-light via-pure-white to-cool-gray",
+    link: "/products",
+    bgGradient: "from-[#F1F1F1] via-pure-white to-maybelline-light",
     textColor: "#1A1A1A",
     highlightColor: "#DC143C",
   },
 ];
 
+const AUTOPLAY_MS = 6000;
+const pad = (n) => String(n).padStart(2, '0');
+
 const HeroSection = () => {
   const [slides, setSlides] = useState(defaultSlides);
   const [current, setCurrent] = useState(0);
-  const [isAnimating, setIsAnimating] = useState(false);
+  const [paused, setPaused] = useState(false);
 
   useEffect(() => {
     const fetchSlides = async () => {
@@ -56,7 +57,7 @@ const HeroSection = () => {
         const res = await fetch(`${process.env.NEXT_PUBLIC_API_URI}/api/hero-slides`);
         if (res.ok) {
           const data = await res.json();
-          if (data.length > 0) setSlides(data);
+          if (Array.isArray(data) && data.length > 0) setSlides(data);
         }
       } catch {
         // use defaults
@@ -65,26 +66,23 @@ const HeroSection = () => {
     fetchSlides();
   }, []);
 
-  const goTo = useCallback((index) => {
-    if (isAnimating) return;
-    setIsAnimating(true);
-    setCurrent(index);
-    setTimeout(() => setIsAnimating(false), 800);
-  }, [isAnimating]);
-
-  const next = useCallback(() => goTo((current + 1) % slides.length), [current, goTo, slides.length]);
-  const prev = useCallback(() => goTo((current - 1 + slides.length) % slides.length), [current, goTo, slides.length]);
+  const next = useCallback(() => setCurrent((c) => (c + 1) % slides.length), [slides.length]);
+  const prev = useCallback(() => setCurrent((c) => (c - 1 + slides.length) % slides.length), [slides.length]);
+  const goTo = (i) => setCurrent(i);
 
   useEffect(() => {
-    const timer = setInterval(next, 6000);
-    return () => clearInterval(timer);
-  }, [next]);
+    if (paused || slides.length < 2) return;
+    const timer = setTimeout(next, AUTOPLAY_MS);
+    return () => clearTimeout(timer);
+  }, [current, paused, next, slides.length]);
 
   useEffect(() => {
     if (current >= slides.length) setCurrent(0);
   }, [slides.length, current]);
 
-  const slide = slides[current];
+  const slide = slides[current] || defaultSlides[0];
+  const onImage = !!slide.bgImage;
+  const hasMore = slides.length > 1;
 
   const renderTitle = (title, highlight) => {
     if (!highlight || !title || !title.includes(highlight)) return title;
@@ -93,91 +91,182 @@ const HeroSection = () => {
     return (
       <>
         {title.slice(0, idx)}
-        <span style={{ color }}>{highlight}</span>
+        <em className="not-italic" style={{ color }}>{highlight}</em>
         {title.slice(idx + highlight.length)}
       </>
     );
   };
 
-  const hasBgImage = !!slide.bgImage;
-
   return (
-    <section className="relative h-screen min-h-[600px] max-h-[900px] w-full overflow-hidden bg-pure-white">
-      {hasBgImage ? (
-        <div
-          className="absolute inset-0 bg-cover bg-center transition-all duration-1000"
-          style={{ backgroundImage: `url(${slide.bgImage})` }}
-        />
-      ) : (
-        <div className={`absolute inset-0 bg-gradient-to-br ${slide.bgGradient || 'from-maybelline-light via-pure-white to-maybelline-rose/10'} transition-all duration-1000`} />
-      )}
-
-      <div
-        className="absolute right-0 top-0 w-1/2 h-full transition-all duration-1000"
-        style={{ background: hasBgImage ? 'transparent' : `linear-gradient(135deg, ${slide.highlightColor || '#DC143C'}10, transparent)` }}
-      >
-        {!hasBgImage && (
-          <div
-            className="absolute right-0 top-1/2 -translate-y-1/2 w-[90%] h-3/4 rounded-l-[100px] opacity-60 transition-all duration-1000"
-            style={{ background: `radial-gradient(ellipse at center, ${slide.highlightColor || '#DC143C'}15 0%, transparent 70%)` }}
+    <section
+      className="group relative w-full overflow-hidden border-b border-black/10 bg-[#F6F1EC]"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+    >
+      {/* ── Media layer (Ken Burns on each slide change) ────── */}
+      <div className="absolute inset-0" key={`media-${slide._id}`} aria-hidden="true">
+        {onImage ? (
+          <img
+            src={slide.bgImage}
+            alt=""
+            className="w-full h-full object-cover object-center animate-hero-zoom"
           />
+        ) : (
+          <div className={`relative w-full h-full bg-gradient-to-br ${slide.bgGradient || 'from-[#F6F1EC] via-pure-white to-[#EFE7E0]'}`}>
+            <span className="absolute -top-24 -right-24 w-96 h-96 rounded-full bg-maybelline-pink/10 blur-3xl" />
+            <span className="absolute -bottom-32 left-1/4 w-[28rem] h-[28rem] rounded-full bg-maybelline-rose/10 blur-3xl" />
+            <span className="absolute bottom-6 right-8 font-display italic text-8xl lg:text-9xl text-black/[0.05] select-none">
+              B
+            </span>
+          </div>
         )}
       </div>
 
-      <div className="relative h-full max-w-[1440px] mx-auto px-6 sm:px-8 lg:px-12 xl:px-16">
-        <div className="flex items-center h-full">
-          <div className="max-w-xl relative z-10" key={slide._id}>
+      {/* ── Readability scrims ──────────────────────────────── */}
+      {onImage && (
+        <>
+          <div className="absolute inset-0 lg:hidden bg-gradient-to-t from-black/85 via-black/55 to-black/35" />
+          <div className="absolute inset-0 hidden lg:block bg-gradient-to-r from-black/80 via-black/45 to-transparent" />
+        </>
+      )}
+
+      {/* ── Content ─────────────────────────────────────────── */}
+      <div className="relative min-h-[78vh] sm:min-h-[82vh] lg:min-h-[86vh] flex items-center">
+        <div
+          key={`content-${slide._id}`}
+          className="w-full max-w-[1440px] mx-auto page-padding pt-12 pb-32 sm:pb-36 lg:pb-40 animate-fade-up"
+        >
+          <div className="max-w-2xl">
             {slide.tag && (
-              <p className="section-tag mb-4 animate-fade-up" style={{ color: slide.highlightColor || '#DC143C' }}>
+              <span
+                className={`inline-flex items-center gap-2.5 mb-7 px-4 py-2 font-sans text-[10px] sm:text-[11px] font-semibold tracking-[0.28em] uppercase ${
+                  onImage
+                    ? 'border border-white/40 bg-white/10 text-white backdrop-blur-sm'
+                    : 'border border-black/20 text-black/70'
+                }`}
+              >
+                <span className={`block w-5 h-[1px] ${onImage ? 'bg-white/70' : 'bg-maybelline-pink'}`} />
                 {slide.tag}
-              </p>
+              </span>
             )}
+
             <h1
-              className="font-heading text-display-sm sm:text-display-md md:text-display-lg lg:text-display-xl xl:text-display-2xl leading-tight mb-6 animate-fade-up"
-              style={{ color: slide.textColor || '#1A1A1A' }}
+              className={`font-display font-medium text-[2.6rem] leading-[1.03] sm:text-6xl lg:text-7xl xl:text-[5.25rem] tracking-tight mb-6 ${
+                onImage ? 'text-pure-white' : ''
+              }`}
+              style={onImage ? undefined : { color: slide.textColor || '#1A1A1A' }}
             >
               {renderTitle(slide.title, slide.highlight)}
             </h1>
-            <p className="font-sans text-base sm:text-lg text-dark-gray max-w-lg mb-10 animate-fade-up">
-              {slide.subtitle}
-            </p>
-            <Link href={slide.link || '/products'} className="btn-primary inline-flex animate-fade-up">
-              {slide.cta || 'Shop Now'}
-            </Link>
+
+            {slide.subtitle && (
+              <p
+                className={`font-sans text-sm sm:text-base lg:text-lg leading-relaxed max-w-lg mb-10 ${
+                  onImage ? 'text-white/75' : 'text-dark-gray'
+                }`}
+              >
+                {slide.subtitle}
+              </p>
+            )}
+
+            <div className="flex flex-wrap items-center gap-4">
+              <Link
+                href={slide.link || '/products'}
+                className={`group/cta inline-flex items-center gap-3 px-8 sm:px-10 py-4 font-sans text-[11px] font-semibold tracking-[0.22em] uppercase transition-colors duration-300 ${
+                  onImage
+                    ? 'bg-pure-white text-black hover:bg-maybelline-pink hover:text-pure-white'
+                    : 'bg-black text-pure-white hover:bg-maybelline-pink'
+                }`}
+              >
+                {slide.cta || 'Shop Now'}
+                <FiArrowRight size={14} className="group-hover/cta:translate-x-1 transition-transform duration-300" />
+              </Link>
+              <Link
+                href="/products"
+                className={`inline-flex items-center px-8 sm:px-10 py-4 font-sans text-[11px] font-semibold tracking-[0.22em] uppercase border transition-colors duration-300 ${
+                  onImage
+                    ? 'border-white/50 text-white hover:bg-pure-white hover:text-black hover:border-pure-white'
+                    : 'border-black/30 text-black hover:border-black'
+                }`}
+              >
+                Browse All
+              </Link>
+            </div>
           </div>
         </div>
-
-        <button
-          onClick={prev}
-          className="absolute left-4 sm:left-8 top-1/2 -translate-y-1/2 w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center text-mid-gray hover:text-black hover:bg-cool-gray rounded-full transition-all duration-300"
-          aria-label="Previous slide"
-        >
-          <FiChevronLeft size={24} />
-        </button>
-        <button
-          onClick={next}
-          className="absolute right-4 sm:right-8 top-1/2 -translate-y-1/2 w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center text-mid-gray hover:text-black hover:bg-cool-gray rounded-full transition-all duration-300"
-          aria-label="Next slide"
-        >
-          <FiChevronRight size={24} />
-        </button>
-
-        <div className="absolute bottom-8 sm:bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-3">
-          {slides.map((_, i) => (
-            <button
-              key={i}
-              onClick={() => goTo(i)}
-              className={`h-[3px] rounded-full transition-all duration-500 ${
-                i === current
-                  ? "w-10"
-                  : "w-6 bg-black/20 hover:bg-black/40"
-              }`}
-              style={i === current ? { backgroundColor: slide.highlightColor || '#DC143C' } : undefined}
-              aria-label={`Go to slide ${i + 1}`}
-            />
-          ))}
-        </div>
       </div>
+
+      {/* ── Bottom controls: timeline tabs + arrows ─────────── */}
+      {hasMore && (
+        <div className="absolute bottom-0 left-0 right-0">
+          <div className="max-w-[1440px] mx-auto page-padding pb-6 sm:pb-8 flex items-center justify-between gap-6">
+            {/* Timeline tabs (desktop) */}
+            <div className="hidden sm:flex items-center gap-5 lg:gap-7">
+              {slides.map((s, i) => (
+                <button
+                  key={s._id || i}
+                  onClick={() => goTo(i)}
+                  className="flex items-center gap-3"
+                  aria-label={`Go to slide ${i + 1}`}
+                  aria-current={i === current}
+                >
+                  <span
+                    className={`font-sans text-[11px] tracking-[0.2em] transition-colors duration-300 ${
+                      i === current
+                        ? (onImage ? 'text-white' : 'text-black')
+                        : (onImage ? 'text-white/40 hover:text-white/70' : 'text-black/35 hover:text-black/60')
+                    }`}
+                  >
+                    {pad(i + 1)}
+                  </span>
+                  <span className={`relative block h-[2px] w-14 lg:w-20 transition-colors duration-300 ${onImage ? 'bg-white/25' : 'bg-black/15'}`}>
+                    {i === current && (
+                      <span
+                        className="absolute left-0 top-0 h-full animate-hero-progress"
+                        style={{
+                          backgroundColor: onImage ? '#FFFFFF' : '#1A1A1A',
+                          animationPlayState: paused ? 'paused' : 'running',
+                        }}
+                      />
+                    )}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {/* Counter (mobile) */}
+            <span className={`sm:hidden font-sans text-[11px] tracking-[0.25em] ${onImage ? 'text-white/70' : 'text-black/50'}`}>
+              {pad(current + 1)} <span className="opacity-50">/ {pad(slides.length)}</span>
+            </span>
+
+            {/* Arrows */}
+            <div className="flex items-center gap-2.5">
+              <button
+                onClick={prev}
+                className={`w-11 h-11 rounded-full flex items-center justify-center border transition-all duration-300 ${
+                  onImage
+                    ? 'border-white/40 text-white hover:bg-pure-white hover:text-black hover:border-pure-white'
+                    : 'border-black/25 text-black hover:bg-black hover:text-pure-white hover:border-black'
+                }`}
+                aria-label="Previous slide"
+              >
+                <FiChevronLeft size={18} />
+              </button>
+              <button
+                onClick={next}
+                className={`w-11 h-11 rounded-full flex items-center justify-center border transition-all duration-300 ${
+                  onImage
+                    ? 'border-white/40 text-white hover:bg-pure-white hover:text-black hover:border-pure-white'
+                    : 'border-black/25 text-black hover:bg-black hover:text-pure-white hover:border-black'
+                }`}
+                aria-label="Next slide"
+              >
+                <FiChevronRight size={18} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 };
