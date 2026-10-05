@@ -11,6 +11,9 @@ const ShippingAdmin = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [form, setForm] = useState({ name: '', charge: '', estimatedDays: 3, isActive: true });
   const [editingId, setEditingId] = useState(null);
+  const [deliveryPhone, setDeliveryPhone] = useState('');
+  const [phoneSaving, setPhoneSaving] = useState(false);
+  const [phoneSaved, setPhoneSaved] = useState(false);
   const router = useRouter();
   const API = process.env.NEXT_PUBLIC_API_URI;
 
@@ -26,6 +29,26 @@ const ShippingAdmin = () => {
       console.error('Error loading shipping types:', error);
     } finally {
       setLoading(false);
+    }
+    try {
+      const phoneRes = await axios.get(`${API}/api/delivery-setting`);
+      setDeliveryPhone(phoneRes.data?.phone || '');
+    } catch (error) {
+      console.error('Error loading delivery phone:', error);
+    }
+  };
+
+  const saveDeliveryPhone = async () => {
+    try {
+      setPhoneSaving(true);
+      await axios.put(`${API}/api/delivery-setting`, { phone: deliveryPhone }, { headers });
+      setPhoneSaved(true);
+      setTimeout(() => setPhoneSaved(false), 2500);
+    } catch (error) {
+      console.error('Error saving delivery phone:', error);
+      alert('Failed to save delivery contact number');
+    } finally {
+      setPhoneSaving(false);
     }
   };
 
@@ -160,6 +183,27 @@ const ShippingAdmin = () => {
               <label htmlFor="active" className="text-sm font-medium text-[#4A4A4A]">Active</label>
             </div>
           </form>
+        </div>
+
+        <div className="mb-8 p-4 border border-[#BDBDBD] bg-[#FAF8F6]">
+          <h2 className="text-lg font-semibold mb-3 text-[#1B1B1B]">Delivery Contact Number</h2>
+          <p className="text-sm text-[#4A4A4A] mb-3">Shown to customers at checkout for delivery inquiries.</p>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <input
+              type="tel"
+              className="flex-1 px-4 py-2 border border-[#BDBDBD] bg-white focus:outline-none focus:ring-2 focus:ring-[#B1123B] text-[#1B1B1B]"
+              value={deliveryPhone}
+              onChange={e => setDeliveryPhone(e.target.value)}
+              placeholder="e.g. 01XXXXXXXXX"
+            />
+            <button
+              onClick={saveDeliveryPhone}
+              disabled={phoneSaving}
+              className="bg-[#B1123B] text-white px-6 py-2 hover:bg-[#8E0E2F] transition min-h-[44px] disabled:opacity-50"
+            >
+              {phoneSaving ? 'Saving...' : phoneSaved ? 'Saved ✓' : 'Save Number'}
+            </button>
+          </div>
         </div>
 
         <div className="hidden md:block overflow-x-auto">

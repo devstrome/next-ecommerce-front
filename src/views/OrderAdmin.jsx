@@ -4,6 +4,8 @@ import React, { useEffect, useState, useRef } from 'react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import { useAdmin } from '../context/AdminContext';
+import RefundStatusTracker from '../components/RefundStatusTracker';
+import AdminCreateOrderModal from '../components/AdminCreateOrderModal';
 import QRScanner from '../components/QRScanner';
 import { QRCodeSVG } from 'qrcode.react';
 import QRCode from 'qrcode';
@@ -20,7 +22,9 @@ import {
   FaSignature,
   FaTimes,
   FaEye,
-  FaEdit
+  FaEdit,
+  FaSyncAlt,
+  FaPlus
 } from 'react-icons/fa';
 
 const statusColors = {
@@ -36,6 +40,11 @@ const statusColors = {
     completed: 'bg-green-100 text-green-800',
     failed: 'bg-red-100 text-red-800',
     refunded: 'bg-purple-100 text-purple-800',
+  },
+  refundStatus: {
+    pending: 'bg-yellow-100 text-yellow-800',
+    approved: 'bg-green-100 text-green-800',
+    rejected: 'bg-red-100 text-red-800',
   },
 };
 
@@ -87,11 +96,13 @@ const AdminOrdersPage = () => {
     orderStatus: '',
     paymentStatus: '',
     paymentMethod: '',
+    refundStatus: '',
     dateFrom: '',
     dateTo: '',
     minAmount: '',
     maxAmount: ''
   });
+  const [refundNoteInput, setRefundNoteInput] = useState('');
   
   // Print states
   const [showPrintModal, setShowPrintModal] = useState(false);
@@ -99,6 +110,7 @@ const AdminOrdersPage = () => {
   
   // Order editing states
   const [showAddProductModal, setShowAddProductModal] = useState(false);
+  const [showCreateOrderModal, setShowCreateOrderModal] = useState(false);
   const [showDiscountModal, setShowDiscountModal] = useState(false);
   const [availableProducts, setAvailableProducts] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
@@ -156,17 +168,17 @@ useEffect(() => {
 
   socketRef.current.on('admin:updateOrder', (updatedOrder) => {
     setOrders(prev => prev.map(order => 
-      order._id === updatedOrder._id ? updatedOrder : order
+      order._id === updatedOrder._id ? { ...order, ...updatedOrder } : order
     ));
     if (editingOrder?._id === updatedOrder._id) {
-      setEditingOrder(updatedOrder);
+      setEditingOrder(prev => (prev ? { ...prev, ...updatedOrder } : updatedOrder));
     }
     showNotification(`Order #${updatedOrder.orderId} updated`);
   });
 
   socketRef.current.on('admin:cancelOrder', (cancelledOrder) => {
     setOrders(prev => prev.map(order => 
-      order._id === cancelledOrder._id ? cancelledOrder : order
+      order._id === cancelledOrder._id ? { ...order, ...cancelledOrder } : order
     ));
     showNotification(`Order #${cancelledOrder.orderId} cancelled`);
   });
@@ -258,6 +270,7 @@ useEffect(() => {
     if (filters.orderStatus && order.orderStatus !== filters.orderStatus) return false;
     if (filters.paymentStatus && order.paymentStatus !== filters.paymentStatus) return false;
     if (filters.paymentMethod && order.paymentMethod !== filters.paymentMethod) return false;
+    if (filters.refundStatus && (order.refundStatus || 'none') !== filters.refundStatus) return false;
 
     // Date filters
     if (filters.dateFrom) {
@@ -401,6 +414,62 @@ useEffect(() => {
       }
       alert('Failed to refund order');
       console.error(err);
+    }
+  };
+
+  // Admin: approve or reject a user's refund request
+  const handleRefundRequestDecision = async (orderId, action) => {
+    const adminNote = refundNoteInput.trim();
+    if (action === 'reject' && !adminNote) {
+      toast.error('Please enter a note explaining the rejection');
+      return;
+    }
+    const confirmMsg = action === 'approve'
+      ? 'Approve this refund request? The order will be cancelled, inventory released and the payment marked as refunded (if paid).'
+      : 'Reject this refund request?';
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      setUpdatingOrderId(orderId);
+      await axios.patch(
+        `${API_BASE_URL}/api/orders/${orderId}/refund-request/admin`,
+        { action, adminNote },
+        {
+          headers: {
+            Authorization: `Bearer ${getStorage('adminAccessToken')}`
+          }
+        }
+      );
+      toast.success(action === 'approve' ? 'Refund request approved' : 'Refund request rejected');
+      await fetchOrders(currentPage);
+      if (editingOrder?._id === orderId) {
+        try {
+          const fresh = await axios.get(`${API_BASE_URL}/api/orders/${orderId}`);
+          setEditingOrder(fresh.data);
+        } catch (fetchErr) {
+          console.error(fetchErr);
+          setEditingOrder(prev => (prev ? {
+            ...prev,
+            refundStatus: action === 'approve' ? 'approved' : 'rejected',
+            refundAdminNote: adminNote,
+            refundProcessedAt: new Date().toISOString(),
+            ...(action === 'approve' ? {
+              orderStatus: 'cancelled',
+              isActive: false,
+              paymentStatus: prev.paymentStatus === 'completed' ? 'refunded' : prev.paymentStatus,
+            } : {}),
+          } : prev));
+        }
+      }
+      setRefundNoteInput('');
+    } catch (err) {
+      if (err.response?.status === 401) {
+        logout();
+      }
+      toast.error(err.response?.data?.message || 'Failed to process refund request');
+      console.error(err);
+    } finally {
+      setUpdatingOrderId(null);
     }
   };
 
@@ -696,6 +765,7 @@ useEffect(() => {
       orderStatus: '',
       paymentStatus: '',
       paymentMethod: '',
+      refundStatus: '',
       dateFrom: '',
       dateTo: '',
       minAmount: '',
@@ -1296,10 +1366,28 @@ useEffect(() => {
 
   const startEditing = (order) => {
     setEditingOrder(order);
+    setRefundNoteInput('');
   };
 
   const cancelEditing = () => {
     setEditingOrder(null);
+    setRefundNoteInput('');
+  };
+
+  // Refresh the open specific-order panel with fresh data from the server
+  const handleRefreshEditingOrder = async () => {
+    if (!editingOrder) return;
+    try {
+      setUpdatingOrderId(editingOrder._id);
+      const fresh = await axios.get(`${API_BASE_URL}/api/orders/${editingOrder.orderId}`);
+      setEditingOrder(fresh.data);
+      toast.success(`Order #${editingOrder.orderId} refreshed`);
+    } catch (err) {
+      console.error(err);
+      toast.error(err.response?.data?.message || 'Failed to refresh order');
+    } finally {
+      setUpdatingOrderId(null);
+    }
   };
 
   const isMobilePayment = (order) => {
@@ -1835,6 +1923,13 @@ useEffect(() => {
             >
               Refresh
             </button>
+            <button
+              onClick={() => setShowCreateOrderModal(true)}
+              className="bg-gray-900 hover:bg-gray-700 text-white px-3 sm:px-4 py-2 rounded transition min-h-[44px] whitespace-nowrap flex items-center gap-2"
+            >
+              <FaPlus />
+              <span>Create Order</span>
+            </button>
           </div>
         </div>
 
@@ -1897,6 +1992,20 @@ useEffect(() => {
                   <option value="bkash">bKash</option>
                   <option value="nagad">Nagad</option>
                   <option value="cash">Cash</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Refund Request</label>
+                <select
+                  value={filters.refundStatus}
+                  onChange={(e) => handleFilterChange('refundStatus', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-maybelline-pink bg-white"
+                >
+                  <option value="">All Refund Requests</option>
+                  <option value="pending">Pending</option>
+                  <option value="approved">Approved</option>
+                  <option value="rejected">Rejected</option>
                 </select>
               </div>
 
@@ -1966,14 +2075,25 @@ useEffect(() => {
                   {formatDate(editingOrder.createdAt)}
                 </span>
               </h2>
-              <button
-                onClick={cancelEditing}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleRefreshEditingOrder}
+                  disabled={updatingOrderId === editingOrder._id}
+                  className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition disabled:opacity-50"
+                  title="Refresh this order"
+                >
+                  <FaSyncAlt className={updatingOrderId === editingOrder._id ? 'animate-spin' : ''} />
+                  Refresh
+                </button>
+                <button
+                  onClick={cancelEditing}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
@@ -2089,6 +2209,101 @@ useEffect(() => {
                     </div>
                   )}
                 </div>
+              </div>
+
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h3 className="text-lg font-semibold mb-3 border-b pb-2">Refund Request</h3>
+                {editingOrder.refundStatus && editingOrder.refundStatus !== 'none' ? (
+                  <div className="space-y-2">
+                    <RefundStatusTracker order={editingOrder} />
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-600">Status:</span>
+                      <span className={`px-2 py-1 rounded text-xs font-semibold ${statusColors.refundStatus[editingOrder.refundStatus] || 'bg-gray-100 text-gray-800'}`}>
+                        {editingOrder.refundStatus.charAt(0).toUpperCase() + editingOrder.refundStatus.slice(1)}
+                      </span>
+                    </div>
+                    {editingOrder.refundBkashNumber && (
+                      <div className="flex justify-between gap-3">
+                        <span className="text-gray-600">bKash Number:</span>
+                        <span className="text-right text-sm font-medium">{editingOrder.refundBkashNumber}</span>
+                      </div>
+                    )}
+                    {editingOrder.refundReason && (
+                      <div className="flex justify-between gap-3">
+                        <span className="text-gray-600">Reason:</span>
+                        <span className="text-right text-sm">{editingOrder.refundReason}</span>
+                      </div>
+                    )}
+                    {editingOrder.refundNote && (
+                      <div className="flex justify-between gap-3">
+                        <span className="text-gray-600">Note:</span>
+                        <span className="text-right text-sm">{editingOrder.refundNote}</span>
+                      </div>
+                    )}
+                    {editingOrder.refundImage && (
+                      <div>
+                        <span className="text-gray-600 text-sm">Photo:</span>
+                        <a href={editingOrder.refundImage} target="_blank" rel="noreferrer" className="block">
+                          <img
+                            src={editingOrder.refundImage}
+                            alt="Refund evidence"
+                            className="mt-1 h-24 w-24 object-cover rounded border border-gray-300"
+                          />
+                        </a>
+                      </div>
+                    )}
+                    {editingOrder.refundRequestedAt && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Requested:</span>
+                        <span className="text-sm">{formatDate(editingOrder.refundRequestedAt)}</span>
+                      </div>
+                    )}
+                    {editingOrder.refundAdminNote && (
+                      <div className="flex justify-between gap-3">
+                        <span className="text-gray-600">Admin Response:</span>
+                        <span className="text-right text-sm">{editingOrder.refundAdminNote}</span>
+                      </div>
+                    )}
+                    {editingOrder.refundProcessedAt && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Processed:</span>
+                        <span className="text-sm">{formatDate(editingOrder.refundProcessedAt)}</span>
+                      </div>
+                    )}
+                    {editingOrder.refundStatus === 'pending' && (
+                      <div className="pt-2 border-t border-gray-200">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Admin Note (required to reject)
+                        </label>
+                        <textarea
+                          rows={2}
+                          value={refundNoteInput}
+                          onChange={(e) => setRefundNoteInput(e.target.value)}
+                          placeholder="Optional when approving, required when rejecting"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-maybelline-pink text-sm"
+                        />
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            disabled={updatingOrderId === editingOrder._id}
+                            onClick={() => handleRefundRequestDecision(editingOrder._id, 'approve')}
+                            className="px-3 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md disabled:opacity-50"
+                          >
+                            Approve Refund
+                          </button>
+                          <button
+                            disabled={updatingOrderId === editingOrder._id}
+                            onClick={() => handleRefundRequestDecision(editingOrder._id, 'reject')}
+                            className="px-3 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md disabled:opacity-50"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">No refund request for this order.</p>
+                )}
               </div>
 
               <div className="bg-gray-50 p-4 rounded-lg">
@@ -2595,6 +2810,13 @@ useEffect(() => {
                         }`}>
                           {order.orderStatus.charAt(0).toUpperCase() + order.orderStatus.slice(1)}
                         </span>
+                        {order.refundStatus && order.refundStatus !== 'none' && (
+                          <span className={`mt-1 px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                            statusColors.refundStatus[order.refundStatus] || 'bg-gray-100 text-gray-800'
+                          }`}>
+                            Refund {order.refundStatus}
+                          </span>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <div className="flex items-center justify-end space-x-2">
@@ -2641,11 +2863,20 @@ useEffect(() => {
                       <p className="font-semibold text-gray-900">#{order.orderId}</p>
                       <p className="text-sm text-gray-500">{formatDate(order.createdAt)}</p>
                     </div>
-                    <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                      statusColors.orderStatus[order.orderStatus] || 'bg-gray-100 text-gray-800'
-                    }`}>
-                      {order.orderStatus.charAt(0).toUpperCase() + order.orderStatus.slice(1)}
-                    </span>
+                    <div className="flex flex-col items-end gap-1">
+                      <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                        statusColors.orderStatus[order.orderStatus] || 'bg-gray-100 text-gray-800'
+                      }`}>
+                        {order.orderStatus.charAt(0).toUpperCase() + order.orderStatus.slice(1)}
+                      </span>
+                      {order.refundStatus && order.refundStatus !== 'none' && (
+                        <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                          statusColors.refundStatus[order.refundStatus] || 'bg-gray-100 text-gray-800'
+                        }`}>
+                          Refund {order.refundStatus}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="text-sm text-gray-900 mb-1">{order.shippingAddress?.fullName || 'N/A'}</div>
                   <div className="text-xs text-gray-500 mb-2">{order.userId}</div>
@@ -3335,6 +3566,12 @@ useEffect(() => {
       />
 
       {/* 🔹 Print Order Modal */}
+      <AdminCreateOrderModal
+        isOpen={showCreateOrderModal}
+        onClose={() => setShowCreateOrderModal(false)}
+        onCreated={() => fetchOrders(currentPage)}
+      />
+
       {showPrintModal && selectedOrderForPrint && (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">

@@ -5,6 +5,10 @@ import { useAdminChat } from "../context/AdminChatContext";
 import { BiArrowBack, BiTransfer, BiX, BiSend, BiUserCheck, BiCheck, BiCheckDouble, BiDotsHorizontalRounded, BiPencil, BiTrash } from "react-icons/bi";
 import TransferModal from "../components/TransferModal";
 import EmojiPicker from "../components/EmojiPicker";
+import axios from "axios";
+import { getStorage } from "../lib/storage";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URI;
 
 const AdminMessagePage = () => {
   const { id: roomId } = useParams();
@@ -25,6 +29,8 @@ const AdminMessagePage = () => {
     closeRoom,
     joinRoom,
     setInputMessage,
+    imageToSend,
+    setImageToSend,
     autoAssignAdmin,
     isConnected,
     markAsRead,
@@ -91,7 +97,8 @@ const AdminMessagePage = () => {
   }, []);
 
   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || activeRoom?.isClosed || !isConnected) return;
+    const hasImage = Boolean(imageToSend);
+    if ((!inputMessage.trim() && !hasImage) || activeRoom?.isClosed || !isConnected) return;
     if (editingMsgId) {
       editMessage(editingMsgId, inputMessage.trim());
       setEditingMsgId(null);
@@ -127,6 +134,39 @@ const AdminMessagePage = () => {
   const [activeMsgMenu, setActiveMsgMenu] = useState(null);
   const [editingMsgId, setEditingMsgId] = useState(null);
   const [showEmojiForMsg, setShowEmojiForMsg] = useState(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const fileInputRef = useRef(null);
+
+  const handleImageSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadError("");
+    if (!file.type.startsWith("image/")) {
+      setUploadError("Please select an image file");
+      e.target.value = "";
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError("Image must be under 5 MB");
+      e.target.value = "";
+      return;
+    }
+    try {
+      setUploadingImage(true);
+      const formData = new FormData();
+      formData.append("image", file);
+      const res = await axios.post(`${API_BASE}/api/upload/image`, formData, {
+        headers: { Authorization: `Bearer ${getStorage("adminAccessToken")}` },
+      });
+      setImageToSend(res.data.url);
+    } catch (err) {
+      setUploadError(err.response?.data?.message || "Failed to upload image");
+    } finally {
+      setUploadingImage(false);
+      e.target.value = "";
+    }
+  };
 
   const handleTransfer = async (newAdminId) => {
     if (!isConnected) {
@@ -361,9 +401,9 @@ const AdminMessagePage = () => {
                     <div className={`max-w-[75%] ${isAdmin ? "items-end" : "items-start"} flex flex-col`}>
                       {/* Bubble + action row */}
                       <div className="flex items-center gap-1">
-                        {/* Action buttons — only on OTHER person's messages */}
+                        {/* Action buttons — only on OTHER person's messages (always visible on touch) */}
                         {!isAdmin && !msg.isDeleted && (
-                          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                          <div className="flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity shrink-0">
                             <button
                               onClick={() => setShowEmojiForMsg(showEmojiForMsg === msg._id ? null : msg._id)}
                               className="w-6 h-6 flex items-center justify-center hover:bg-gray-100 text-xs"
@@ -372,7 +412,7 @@ const AdminMessagePage = () => {
                           </div>
                         )}
                         {isAdmin && !msg.isDeleted && (
-                          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                          <div className="flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity shrink-0">
                             <button
                               onClick={() => setActiveMsgMenu(activeMsgMenu === msg._id ? null : msg._id)}
                               className="w-6 h-6 flex items-center justify-center hover:bg-gray-100"
@@ -390,7 +430,7 @@ const AdminMessagePage = () => {
                           </div>
                         )}
                         {/* Message bubble — relative wrapper for reaction badge */}
-                        <div className={`relative ${isAdmin ? 'self-end' : 'self-start'}`}>
+                        <div className={`relative ${isAdmin ? 'self-end' : 'self-start'} ${hasReactions ? 'mb-3.5' : ''}`}>
                           <div
                             className={`px-3 py-1.5 ${
                               isAdmin
@@ -398,8 +438,22 @@ const AdminMessagePage = () => {
                                 : `${msg.isDeleted ? 'bg-gray-200 text-gray-500 italic' : 'bg-[#F4F4F4] text-[#1B1B1B]'} rounded-tl-xl rounded-tr-xl rounded-br-xl`
                             }`}
                           >
-                            <p className="text-sm leading-relaxed">{msg.text}</p>
-                            {msg.edited && <span className="text-[10px] opacity-50 ml-1">(edited)</span>}
+                            {msg.isDeleted ? (
+                              <p className="text-sm leading-relaxed italic">This message has been deleted</p>
+                            ) : (
+                              <>
+                                {msg.image && (
+                                  <img
+                                    src={msg.image}
+                                    alt="Attachment"
+                                    className="rounded-lg max-w-[220px] max-h-48 mb-1 cursor-pointer hover:opacity-90 block"
+                                    onClick={() => window.open(msg.image, "_blank")}
+                                  />
+                                )}
+                                {msg.text && <p className="text-sm leading-relaxed">{msg.text}</p>}
+                                {msg.edited && <span className="text-[10px] opacity-50 ml-1">(edited)</span>}
+                              </>
+                            )}
                           </div>
                           {/* Messenger-style reaction badge — overlaps bottom-end */}
                           {hasReactions && (
@@ -474,6 +528,21 @@ const AdminMessagePage = () => {
 
         {/* Input */}
         <div className="p-4 border-t border-[#BDBDBD] bg-white">
+          {uploadError && (
+            <p className="text-xs text-red-500 mb-1.5">{uploadError}</p>
+          )}
+          {imageToSend && (
+            <div className="flex items-center gap-2 mb-2 p-1.5 bg-[#F4F4F4] border border-[#BDBDBD] w-fit">
+              <img src={imageToSend} alt="Preview" className="h-12 w-12 object-cover" />
+              <button
+                onClick={() => setImageToSend("")}
+                className="w-6 h-6 flex items-center justify-center text-[#4A4A4A] hover:text-red-500"
+                title="Remove image"
+              >
+                <BiX className="w-4 h-4" />
+              </button>
+            </div>
+          )}
           <div className="flex items-center space-x-3">
             {editingMsgId && (
               <button
@@ -483,6 +552,25 @@ const AdminMessagePage = () => {
               >
                 <BiX className="w-5 h-5" />
               </button>
+            )}
+            {!editingMsgId && (
+              <>
+                <input
+                  type="file"
+                  accept="image/*"
+                  ref={fileInputRef}
+                  onChange={handleImageSelect}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={activeRoom.isClosed || uploadingImage}
+                  className="p-3 border border-[#BDBDBD] text-[#4A4A4A] hover:text-[#B1123B] hover:border-[#B1123B] transition-colors shrink-0 disabled:opacity-50"
+                  title={uploadingImage ? "Uploading..." : "Attach image"}
+                >
+                  {uploadingImage ? "⏳" : "📎"}
+                </button>
+              </>
             )}
             <input
               type="text"
@@ -513,9 +601,9 @@ const AdminMessagePage = () => {
             ) : (
               <button
                 onClick={handleSendMessage}
-                disabled={!inputMessage.trim() || activeRoom.isClosed}
+                disabled={(!inputMessage.trim() && !imageToSend) || activeRoom.isClosed}
                 className={`p-3 transition-colors ${
-                  !activeRoom.isClosed && inputMessage.trim()
+                  !activeRoom.isClosed && (inputMessage.trim() || imageToSend)
                     ? "bg-[#1B1B1B] text-white hover:bg-[#4A4A4A]"
                     : "bg-[#F4F4F4] text-[#4A4A4A] cursor-not-allowed"
                 }`}

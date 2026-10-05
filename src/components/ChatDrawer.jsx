@@ -1,8 +1,12 @@
 'use client'
-import React, { useContext, useState, useEffect } from "react";
+import React, { useContext, useState, useEffect, useRef } from "react";
+import axios from "axios";
 import { useUserChat } from "../context/UserChatContext";
 import { UserContext } from "../context/UserContext";
 import EmojiPicker from "./EmojiPicker";
+import { getStorage } from "../lib/storage";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URI;
 
 const ChatDrawer = () => {
   const { user } = useContext(UserContext);
@@ -23,6 +27,8 @@ const ChatDrawer = () => {
     openChat,
     closeChat,
     setInputMessage,
+    imageToSend,
+    setImageToSend,
     handleSend,
     clearError,
     clearNotifications,
@@ -47,12 +53,45 @@ const ChatDrawer = () => {
   const [activeMsgMenu, setActiveMsgMenu] = useState(null);
   const [editingMsgId, setEditingMsgId] = useState(null);
   const [showEmojiForMsg, setShowEmojiForMsg] = useState(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const fileInputRef = useRef(null);
 
   // Check if device is mobile
   const isMobile = () => window.innerWidth <= 768;
 
-  const canSend = Boolean(inputMessage.trim()) && isConnected;
+  const canSend = (Boolean(inputMessage.trim()) || Boolean(imageToSend)) && isConnected;
   const activePlaceholder = "Type your message...";
+
+  const handleImageSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadError("");
+    if (!file.type.startsWith("image/")) {
+      setUploadError("Please select an image file");
+      e.target.value = "";
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError("Image must be under 5 MB");
+      e.target.value = "";
+      return;
+    }
+    try {
+      setUploadingImage(true);
+      const formData = new FormData();
+      formData.append("image", file);
+      const res = await axios.post(`${API_BASE}/api/user/upload/chat-image`, formData, {
+        headers: { Authorization: `Bearer ${getStorage("accessToken")}` },
+      });
+      setImageToSend(res.data.url);
+    } catch (err) {
+      setUploadError(err.response?.data?.message || "Failed to upload image");
+    } finally {
+      setUploadingImage(false);
+      e.target.value = "";
+    }
+  };
 
   // No draggable logic — fixed bottom-right permanently
 
@@ -268,21 +307,21 @@ const ChatDrawer = () => {
                 return (
                   <div key={msg._id || idx} className={`mb-2 group ${isUser ? "text-right" : "text-left"}`}>
                     <div className={`flex items-end gap-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
-                      {/* Action buttons — only on OTHER person's messages */}
+                      {/* Action buttons — only on OTHER person's messages (always visible on touch) */}
                       {!isUser && !msg.isDeleted && (
-                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 pb-1">
+                        <div className="flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity shrink-0 pb-1">
                           <button
                             onClick={() => setShowEmojiForMsg(showEmojiForMsg === msg._id ? null : msg._id)}
-                            className="w-5 h-5 flex items-center justify-center hover:bg-gray-100 text-xs"
+                            className="w-6 h-6 flex items-center justify-center hover:bg-gray-100 text-xs"
                             title="React"
                           >😊</button>
                         </div>
                       )}
                       {isUser && !msg.isDeleted && (
-                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 pb-1">
+                        <div className="flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity shrink-0 pb-1">
                           <button
                             onClick={() => setActiveMsgMenu(activeMsgMenu === msg._id ? null : msg._id)}
-                            className="w-5 h-5 flex items-center justify-center hover:bg-gray-100"
+                            className="w-6 h-6 flex items-center justify-center hover:bg-gray-100"
                             title="More"
                           >···</button>
                         </div>
@@ -297,10 +336,24 @@ const ChatDrawer = () => {
                         </div>
                       )}
                       {/* Bubble — relative wrapper for reaction badge */}
-                      <div className="max-w-[220px] relative">
+                      <div className={`max-w-[220px] relative ${hasReactions ? 'mb-3.5' : ''}`}>
                         <div className={`px-3 py-1.5 break-words whitespace-pre-wrap ${bubbleClass}`} style={{ wordBreak: 'break-word' }}>
-                          {msg.content || msg.text}
-                          {msg.edited && <span className="text-[10px] opacity-50 ml-1">(edited)</span>}
+                          {msg.isDeleted ? (
+                            <span className="italic opacity-80">This message has been deleted</span>
+                          ) : (
+                            <>
+                              {msg.image && (
+                                <img
+                                  src={msg.image}
+                                  alt="Attachment"
+                                  className="rounded-lg max-w-[200px] max-h-48 mb-1 cursor-pointer hover:opacity-90 block"
+                                  onClick={() => window.open(msg.image, "_blank")}
+                                />
+                              )}
+                              {msg.content || msg.text}
+                              {msg.edited && <span className="text-[10px] opacity-50 ml-1">(edited)</span>}
+                            </>
+                          )}
                         </div>
                         {/* Messenger-style reaction badge — overlaps bottom-end */}
                         {hasReactions && (
@@ -374,7 +427,41 @@ const ChatDrawer = () => {
           </div>
 
           <div className="p-3 border-t">
+            {uploadError && (
+              <p className="text-xs text-red-500 mb-1.5">{uploadError}</p>
+            )}
+            {imageToSend && (
+              <div className="flex items-center gap-2 mb-2 p-1.5 bg-gray-50 border border-gray-200 rounded-lg w-fit">
+                <img src={imageToSend} alt="Preview" className="h-12 w-12 object-cover rounded" />
+                <button
+                  onClick={() => setImageToSend("")}
+                  className="w-6 h-6 flex items-center justify-center text-gray-500 hover:text-red-500"
+                  title="Remove image"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
             <div className="flex gap-2">
+              {!editingMsgId && !isGuest && (
+                <>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    ref={fileInputRef}
+                    onChange={handleImageSelect}
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={!isConnected || uploadingImage}
+                    className="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-300 text-gray-500 hover:text-maybelline-pink hover:border-maybelline-pink transition shrink-0 disabled:opacity-50"
+                    title={uploadingImage ? "Uploading..." : "Attach image"}
+                  >
+                    {uploadingImage ? "⏳" : "📎"}
+                  </button>
+                </>
+              )}
               {editingMsgId && (
                 <button
                   onClick={() => { setEditingMsgId(null); setInputMessage(''); }}

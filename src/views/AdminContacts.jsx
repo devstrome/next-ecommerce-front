@@ -34,6 +34,10 @@ const AdminContacts = () => {
   const [stats, setStats] = useState({});
   const [selectedContact, setSelectedContact] = useState(null);
   const [showModal, setShowModal] = useState(false);
+  const [showReplyModal, setShowReplyModal] = useState(false);
+  const [replySubject, setReplySubject] = useState('');
+  const [replyMessage, setReplyMessage] = useState('');
+  const [sendingReply, setSendingReply] = useState(false);
   const [filters, setFilters] = useState({
     status: '',
     priority: '',
@@ -109,6 +113,48 @@ const AdminContacts = () => {
     } catch (error) {
       toast.error('Failed to update contact');
       console.error('Error updating contact:', error);
+    }
+  };
+
+  const openReplyModal = () => {
+    if (!selectedContact) return;
+    setReplySubject(`Re: ${selectedContact.subject || 'Your Message'}`);
+    setReplyMessage(
+      `Hi ${selectedContact.name},\n\n` +
+      `Thank you for reaching out. We received your message:\n\n` +
+      `"${selectedContact.message}"\n\n` +
+      `We will get back to you shortly.\n\n` +
+      `Best regards,\n` +
+      `Belorella Support`
+    );
+    setShowReplyModal(true);
+  };
+
+  const handleSendReply = async () => {
+    if (!selectedContact) return;
+    if (!replySubject.trim() || !replyMessage.trim()) {
+      toast.error('Subject and message are required');
+      return;
+    }
+    setSendingReply(true);
+    try {
+      await axios.post(
+        `${process.env.NEXT_PUBLIC_API_URI}/api/contact/admin/contacts/${selectedContact._id}/reply`,
+        { subject: replySubject.trim(), message: replyMessage.trim() },
+        {
+          headers: {
+            Authorization: `Bearer ${getStorage('adminToken') || getStorage('adminAccessToken')}`
+          }
+        }
+      );
+      toast.success(`Reply sent to ${selectedContact.email}`);
+      setShowReplyModal(false);
+      fetchContacts();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to send reply');
+      console.error('Error sending reply:', error);
+    } finally {
+      setSendingReply(false);
     }
   };
 
@@ -478,6 +524,16 @@ const AdminContacts = () => {
                 <div>
                   <label className="block text-sm font-medium text-[#4A4A4A] mb-1">Email</label>
                   <p className="text-[#1B1B1B]">{selectedContact.email}</p>
+                  <button
+                    type="button"
+                    onClick={openReplyModal}
+                    className="mt-2 inline-flex items-center gap-1.5 text-sm text-[#B1123B] hover:text-[#1B1B1B] font-medium transition-colors"
+                  >
+                    <FaEnvelope className="text-sm" /> Send Email
+                  </button>
+                  {Array.isArray(selectedContact.replies) && selectedContact.replies.length > 0 && (
+                    <p className="mt-1 text-xs text-[#4A4A4A]">{selectedContact.replies.length} repl{selectedContact.replies.length === 1 ? 'y' : 'ies'} sent</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-[#4A4A4A] mb-1">Subject</label>
@@ -559,6 +615,78 @@ const AdminContacts = () => {
           </div>
             </div>
           )}
+
+      {showReplyModal && selectedContact && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl max-w-xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-[#F4F4F4]">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-[#1B1B1B]">Send Email</h2>
+                <button
+                  onClick={() => setShowReplyModal(false)}
+                  disabled={sendingReply}
+                  className="text-[#BDBDBD] hover:text-[#4A4A4A]"
+                >
+                  <FaTimes />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-[#4A4A4A] mb-1">To</label>
+                <input
+                  type="email"
+                  readOnly
+                  value={selectedContact.email}
+                  className="w-full px-3 py-2 border border-[#BDBDBD] rounded-lg bg-[#F4F4F4] text-[#1B1B1B] cursor-not-allowed"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-[#4A4A4A] mb-1">Subject</label>
+                <input
+                  type="text"
+                  value={replySubject}
+                  onChange={(e) => setReplySubject(e.target.value)}
+                  maxLength={200}
+                  placeholder="Email subject"
+                  className="w-full px-3 py-2 border border-[#BDBDBD] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#B1123B] text-[#1B1B1B] bg-white"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-[#4A4A4A] mb-1">Message</label>
+                <textarea
+                  rows={10}
+                  value={replyMessage}
+                  onChange={(e) => setReplyMessage(e.target.value)}
+                  placeholder="Write your reply..."
+                  className="w-full px-3 py-2 border border-[#BDBDBD] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#B1123B] text-[#1B1B1B] bg-white"
+                />
+              </div>
+              <p className="text-xs text-[#888888]">
+                This email is sent through Belorella's server email account and recorded on the contact.
+              </p>
+            </div>
+
+            <div className="p-6 pt-0 flex justify-end space-x-3">
+              <button
+                onClick={() => setShowReplyModal(false)}
+                disabled={sendingReply}
+                className="px-4 py-2 text-[#4A4A4A] bg-[#F4F4F4] rounded-lg hover:bg-[#BDBDBD] transition-colors duration-200 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendReply}
+                disabled={sendingReply}
+                className="px-4 py-2 bg-[#B1123B] text-white rounded-lg hover:bg-[#1B1B1B] transition-colors duration-200 disabled:opacity-50"
+              >
+                {sendingReply ? 'Sending...' : 'Send Email'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

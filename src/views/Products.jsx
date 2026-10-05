@@ -376,17 +376,20 @@ function Products() {
       filtered = filtered.filter((product) => {
         let productCategories = [];
         if (Array.isArray(product.categories)) {
-          product.categories.forEach(cat => {
-            let val = cat;
-            while (typeof val === 'string') {
-              try { val = JSON.parse(val); } catch { break; }
+          const pushCat = (v, depth = 0) => {
+            if (Array.isArray(v)) { v.forEach((x) => pushCat(x, depth + 1)); return; }
+            if (typeof v === 'string') {
+              const t = v.trim();
+              if (!t) return;
+              if (depth < 10) {
+                try { pushCat(JSON.parse(t), depth + 1); return; } catch {}
+              }
+              productCategories.push(t);
+              return;
             }
-            if (Array.isArray(val)) {
-              productCategories = productCategories.concat(val);
-            } else {
-              productCategories.push(val);
-            }
-          });
+            if (v !== null && v !== undefined) productCategories.push(String(v));
+          };
+          product.categories.forEach((cat) => pushCat(cat));
         }
         return productCategories.some((category) =>
           selectedCategories.includes(category)

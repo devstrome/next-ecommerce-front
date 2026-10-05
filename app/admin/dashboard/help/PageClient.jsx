@@ -18,15 +18,20 @@ const PAGE_ICONS = {
 export default function HelpPagesList() {
   const [pages, setPages] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   const authHeaders = () => ({ headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` } });
 
   const fetchPages = async () => {
+    setLoading(true);
+    setError('');
     try {
       const res = await axios.get(`${API_URI}/api/admin/help-pages`, authHeaders());
-      setPages(res.data);
+      const data = res.data;
+      setPages(Array.isArray(data) ? data : (data?.pages || data?.helpPages || []));
     } catch (err) {
       console.error('Failed to fetch help pages', err);
+      setError(err.response?.data?.message || 'Failed to load help pages. API may be unavailable.');
     } finally {
       setLoading(false);
     }
@@ -46,6 +51,20 @@ export default function HelpPagesList() {
 
       {loading ? (
         <div className="text-center py-16 text-gray-400">Loading...</div>
+      ) : error ? (
+        <div className="text-center py-16">
+          <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4">
+            <FiHelpCircle size={28} className="text-red-400" />
+          </div>
+          <p className="text-red-600 font-medium">Failed to load help pages</p>
+          <p className="text-sm text-gray-500 mt-1">{error}</p>
+          <button
+            onClick={fetchPages}
+            className="mt-4 px-4 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-dark-gray transition-colors"
+          >
+            Retry
+          </button>
+        </div>
       ) : pages.length === 0 ? (
         <div className="text-center py-16 text-gray-400">No pages found. Restart the backend to seed defaults.</div>
       ) : (

@@ -1,8 +1,9 @@
 'use client'
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { FaPlus, FaEdit, FaTrash, FaEye, FaSearch } from 'react-icons/fa';
+import { FaPlus, FaEdit, FaTrash, FaEye, FaSearch, FaUpload } from 'react-icons/fa';
 import { getStorage } from "../lib/storage";
+import { toast } from 'react-toastify';
 import SEOEditor from '../components/SEOEditor';
 
 const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
@@ -14,6 +15,7 @@ const BlogAdmin = () => {
   const [statusFilter, setStatusFilter] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingBlog, setEditingBlog] = useState(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   const [form, setForm] = useState({
     title: '', content: '', excerpt: '', coverImage: '',
@@ -137,9 +139,44 @@ const BlogAdmin = () => {
               <input type="text" placeholder="Title" value={form.title}
                 onChange={(e) => setForm({ ...form, title: e.target.value })}
                 className="w-full px-4 py-3 border border-cool-gray bg-white text-black focus:outline-none focus:ring-2 focus:ring-charcoal" />
-              <input type="text" placeholder="Cover Image URL" value={form.coverImage}
-                onChange={(e) => setForm({ ...form, coverImage: e.target.value })}
-                className="w-full px-4 py-3 border border-cool-gray bg-white text-black focus:outline-none focus:ring-2 focus:ring-charcoal" />
+              <div>
+                <div className="flex gap-2">
+                  <input type="text" placeholder="Cover Image URL" value={form.coverImage}
+                    onChange={(e) => setForm({ ...form, coverImage: e.target.value })}
+                    className="flex-1 min-w-0 px-4 py-3 border border-cool-gray bg-white text-black focus:outline-none focus:ring-2 focus:ring-charcoal" />
+                  <label className={`flex items-center gap-2 px-4 py-3 bg-[#1B1B1B] text-white font-medium cursor-pointer hover:bg-[#B1123B] transition whitespace-nowrap ${uploadingImage ? 'opacity-60 pointer-events-none' : ''}`}>
+                    <FaUpload size={13} />
+                    {uploadingImage ? 'Uploading...' : 'Upload'}
+                    <input type="file" accept="image/*" className="hidden"
+                      disabled={uploadingImage}
+                      onChange={async (e) => {
+                        const file = e.target.files && e.target.files[0];
+                        if (!file) return;
+                        const fd = new FormData();
+                        fd.append('image', file);
+                        setUploadingImage(true);
+                        try {
+                          const res = await axios.post(`${API_URI}/api/upload/image`, fd, {
+                            headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` },
+                          });
+                          setForm((f) => ({ ...f, coverImage: res.data.url }));
+                          toast.success('Image uploaded');
+                        } catch (err) {
+                          toast.error(err.response?.data?.message || 'Image upload failed');
+                          console.error('Image upload failed:', err);
+                        } finally {
+                          setUploadingImage(false);
+                          e.target.value = '';
+                        }
+                      }} />
+                  </label>
+                </div>
+                {form.coverImage && (
+                  <img src={form.coverImage} alt="Cover preview"
+                    className="mt-2 h-20 object-cover border border-cool-gray"
+                    onError={(e) => { e.target.style.display = 'none'; }} />
+                )}
+              </div>
               <input type="text" placeholder="Excerpt" value={form.excerpt}
                 onChange={(e) => setForm({ ...form, excerpt: e.target.value })}
                 className="w-full px-4 py-3 border border-cool-gray bg-white text-black focus:outline-none focus:ring-2 focus:ring-charcoal" />

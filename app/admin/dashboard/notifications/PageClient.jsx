@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { getStorage } from '../../../../src/lib/storage';
-import { FiMail, FiSend, FiTrash2, FiPlus, FiEye, FiEyeOff, FiRefreshCw, FiUsers, FiUserPlus, FiSearch, FiChevronDown, FiChevronRight } from 'react-icons/fi';
+import { FiMail, FiSend, FiTrash2, FiPlus, FiEye, FiEyeOff, FiRefreshCw, FiUsers, FiUserPlus, FiSearch, FiChevronDown, FiChevronRight, FiAlertCircle } from 'react-icons/fi';
 
 const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
 
@@ -22,16 +22,19 @@ export default function NotificationsPageClient() {
   const [subPagination, setSubPagination] = useState({ page: 1, limit: 20, total: 0, pages: 0 });
   const [subSearch, setSubSearch] = useState('');
   const [showSubscribers, setShowSubscribers] = useState(false);
+  const [error, setError] = useState('');
 
   const authHeaders = () => ({ headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` } });
 
   const fetchNewsletters = async () => {
     setLoading(true);
+    setError('');
     try {
       const res = await axios.get(`${API_URI}/api/admin/newsletters`, authHeaders());
-      setNewsletters(res.data);
+      setNewsletters(Array.isArray(res.data) ? res.data : (res.data?.newsletters || []));
     } catch (err) {
       console.error('Failed to fetch newsletters:', err);
+      setError(err.response?.data?.message || 'Failed to load newsletters. API may be unavailable.');
     } finally {
       setLoading(false);
     }
@@ -157,6 +160,19 @@ export default function NotificationsPageClient() {
           Compose Newsletter
         </button>
       </header>
+
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6 flex items-center gap-3">
+          <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center flex-shrink-0">
+            <FiAlertCircle className="text-red-500" size={20} />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-red-700">API Error</p>
+            <p className="text-xs text-red-600 mt-0.5">{error}</p>
+          </div>
+        </div>
+      )}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">

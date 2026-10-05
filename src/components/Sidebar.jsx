@@ -9,7 +9,7 @@ import {
   FiHome, FiMail, FiShield, FiUsers, FiPackage,
   FiShoppingBag, FiMessageSquare, FiGrid, FiMonitor,
   FiFileText, FiHeart, FiLogOut, FiInbox,
-  FiSearch, FiShare2, FiTruck, FiDollarSign, FiMapPin
+  FiSearch, FiTruck, FiDollarSign, FiMapPin, FiFilter
 } from 'react-icons/fi';
 
 const Sidebar = ({ isOpen, toggleSidebar }) => {
@@ -26,6 +26,7 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
         const res = await fetch(`${process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000'}/api/admin/notifications/count`, {
           headers: { Authorization: `Bearer ${token}` }
         });
+        if (!res.ok) return;
         const data = await res.json();
         if (data.success) setNotifCounts(data.counts);
       } catch (e) { /* ignore */ }
@@ -35,9 +36,9 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
       fetch(`${process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000'}/api/admin/notifications/count`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('adminAccessToken')}` }
       })
-        .then(res => res.json())
+        .then(res => { if (!res.ok) return null; return res.json(); })
         .then(data => {
-          if (data.success) {
+          if (data?.success) {
             setNotifCounts(prev => {
               if (prev.orders === data.counts.orders && prev.contacts === data.counts.contacts) return prev;
               return data.counts;
@@ -152,6 +153,12 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
               </Link>
             </li>
             <li>
+              <Link href="/admin/dashboard/products/checkout-rules" className={linkClass('/admin/dashboard/products/checkout-rules')}>
+                <FiFilter className="w-5 h-5 flex-shrink-0" />
+                Checkout Rules
+              </Link>
+            </li>
+            <li>
               <Link href="/admin/dashboard/contacts" className={linkClass('/admin/dashboard/contacts')}>
                 <FiMessageSquare className="w-5 h-5 flex-shrink-0" />
                 <span className="flex-1">Contact Messages</span>
@@ -216,12 +223,6 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
               <Link href="/admin/dashboard/seo-ai" className={linkClass('/admin/dashboard/seo-ai')}>
                 <FiSearch className="w-5 h-5 flex-shrink-0" />
                 SEO Optimizer
-              </Link>
-            </li>
-            <li>
-              <Link href="/admin/dashboard/social-ads" className={linkClass('/admin/dashboard/social-ads')}>
-                <FiShare2 className="w-5 h-5 flex-shrink-0" />
-                Social Media Ads
               </Link>
             </li>
             <li>

@@ -57,7 +57,12 @@ const ProductView = () => {
       console.log("Fetched product:", response.data);
 
       if (response.data.variants && response.data.variants.length > 0) {
-        const defaultVariant = response.data.variants[0];
+        const urlVariantId = typeof window !== 'undefined'
+          ? new URLSearchParams(window.location.search).get('variant')
+          : null;
+        const defaultVariant = (urlVariantId
+          ? response.data.variants.find(v => String(v._id) === String(urlVariantId))
+          : null) || response.data.variants[0];
         setSelectedVariant(defaultVariant);
 
         if (
@@ -215,13 +220,22 @@ const ProductView = () => {
 
   const unwrapCategories = (cats) => {
     if (!Array.isArray(cats)) return [];
-    return cats.map(c => {
-      let val = c;
-      while (typeof val === 'string') {
-        try { val = JSON.parse(val); } catch { break; }
+    const out = [];
+    const pushCat = (v, depth = 0) => {
+      if (Array.isArray(v)) { v.forEach((x) => pushCat(x, depth + 1)); return; }
+      if (typeof v === 'string') {
+        const t = v.trim();
+        if (!t) return;
+        if (depth < 10) {
+          try { pushCat(JSON.parse(t), depth + 1); return; } catch {}
+        }
+        out.push(t);
+        return;
       }
-      return Array.isArray(val) ? val : [val];
-    }).flat();
+      if (v !== null && v !== undefined) out.push(String(v));
+    };
+    cats.forEach((c) => pushCat(c));
+    return out;
   };
 
   useEffect(() => {
@@ -239,6 +253,15 @@ const ProductView = () => {
   const handleVariantChange = (variant) => {
     setSelectedVariant(variant);
     setQuantity(1);
+
+    // Keep the URL in sync so ?variant=<id> serves this variant's SEO/meta
+    if (variant && variant._id && typeof window !== 'undefined') {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('variant', variant._id);
+        window.history.replaceState(null, '', url.toString());
+      } catch {}
+    }
 
     if (variant.sizes && variant.prices && variant.discountPrices && variant.discountPrices.length > 0 && variant.sizes.length > 0 && variant.prices.length > 0) {
       setSelectedSize(variant.sizes[0]);
@@ -383,7 +406,7 @@ const ProductView = () => {
 
   return (
     <>
-      <SEOHead product={product} url={`/products/${id}`} />
+      <SEOHead product={product} url={`/products/${id}`} hideMeta />
       <div className="min-h-screen bg-pure-white">
       <ToastContainer />
       {product && selectedVariant ? (

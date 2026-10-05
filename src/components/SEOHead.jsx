@@ -16,6 +16,7 @@ const SEOHead = ({
   type = "website",
   product,
   noindex = false,
+  hideMeta = false,
 }) => {
   // If a product object is passed, extract SEO from it
   const seo = product?.seo || {};
@@ -86,25 +87,29 @@ const SEOHead = ({
 
   return (
     <Helmet>
-      <title>{fullTitle}</title>
-      <meta name="description" content={finalDescription} />
-      <meta name="keywords" content={finalKeywords} />
-      {noindex && <meta name="robots" content="noindex, nofollow" />}
-      <link rel="canonical" href={fullUrl} />
+      {!hideMeta && (
+        <>
+          <title>{fullTitle}</title>
+          <meta name="description" content={finalDescription} />
+          <meta name="keywords" content={finalKeywords} />
+          {noindex && <meta name="robots" content="noindex, nofollow" />}
+          <link rel="canonical" href={fullUrl} />
 
-      {/* Open Graph */}
-      <meta property="og:title" content={fullTitle} />
-      <meta property="og:description" content={finalDescription} />
-      <meta property="og:image" content={finalImage} />
-      <meta property="og:url" content={fullUrl} />
-      <meta property="og:type" content={type} />
-      <meta property="og:site_name" content={SITE_NAME} />
+          {/* Open Graph */}
+          <meta property="og:title" content={fullTitle} />
+          <meta property="og:description" content={finalDescription} />
+          <meta property="og:image" content={finalImage} />
+          <meta property="og:url" content={fullUrl} />
+          <meta property="og:type" content={type} />
+          <meta property="og:site_name" content={SITE_NAME} />
 
-      {/* Twitter Card */}
-      <meta name="twitter:card" content="summary_large_image" />
-      <meta name="twitter:title" content={fullTitle} />
-      <meta name="twitter:description" content={finalDescription} />
-      <meta name="twitter:image" content={finalImage} />
+          {/* Twitter Card */}
+          <meta name="twitter:card" content="summary_large_image" />
+          <meta name="twitter:title" content={fullTitle} />
+          <meta name="twitter:description" content={finalDescription} />
+          <meta name="twitter:image" content={finalImage} />
+        </>
+      )}
 
       {/* Structured Data */}
       <script type="application/ld+json">{JSON.stringify(orgSchema)}</script>

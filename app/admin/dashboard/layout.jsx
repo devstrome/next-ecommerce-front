@@ -7,6 +7,9 @@ import { useState, useEffect } from 'react';
 import { useRouter } from "next/navigation";
 import { useAdmin } from '../../../src/context/AdminContext';
 import { POSProvider } from '../../../src/context/POSContext';
+import { AdminProductProvider } from '../../../src/context/AdminProductContext';
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 export default function DashboardLayout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -38,13 +41,16 @@ export default function DashboardLayout({ children }) {
       <div className="pt-16 sm:ml-64">
         <AdminBreadcrumb />
         <POSProvider>
-          {children}
+          <AdminProductProvider>
+            {children}
+          </AdminProductProvider>
         </POSProvider>
       </div>
       {sidebarOpen && (
-        <div className="fixed inset-0 bg-black/50 z-30 sm:hidden" onClick={toggleSidebar}></div>
+        <div className="fixed inset-0 bg-black/50 z-30 sm:hidden" onClick={() => setSidebarOpen(false)}></div>
       )}
       <ScrollToTop />
+      <ToastContainer position="top-right" autoClose={3000} />
     </div>
   );
 }

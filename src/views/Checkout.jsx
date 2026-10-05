@@ -68,6 +68,8 @@ function CheckoutPage() {
   const [loading, setLoading] = useState(false);
   const [shippingOptions, setShippingOptions] = useState([]);
   const [selectedShipping, setSelectedShipping] = useState(null);
+  const [deliveryPhone, setDeliveryPhone] = useState('');
+  const [ruleEval, setRuleEval] = useState(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -133,7 +135,27 @@ function CheckoutPage() {
           }
         }
 
-        const uniqueOptions = Array.from(variantShippingMap.values());
+        let uniqueOptions = Array.from(variantShippingMap.values());
+
+        // Always make store-wide delivery options (Inside/Outside Dhaka) available,
+        // even when product variants don't have shipping options attached
+        try {
+          const globalRes = await fetch(`${process.env.NEXT_PUBLIC_API_URI}/api/shipping`);
+          if (globalRes.ok) {
+            const globalOptions = await globalRes.json();
+            if (Array.isArray(globalOptions)) {
+              for (const g of globalOptions) {
+                const exists = uniqueOptions.some(
+                  o => (o.name || '').toLowerCase() === (g.name || '').toLowerCase()
+                );
+                if (!exists) uniqueOptions.push(g);
+              }
+            }
+          }
+        } catch { /* keep variant-only options */ }
+
+        uniqueOptions.sort((a, b) => Number(a.charge || 0) - Number(b.charge || 0));
+
         setShippingOptions(uniqueOptions);
         setSelectedShipping(uniqueOptions[0] || null);
       } catch (e) {
@@ -144,6 +166,16 @@ function CheckoutPage() {
     };
     loadShipping();
   }, [cartItems]);
+
+  // Delivery contact number (shown under shipping methods)
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${process.env.NEXT_PUBLIC_API_URI}/api/delivery-setting`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (!cancelled && d?.phone) setDeliveryPhone(d.phone); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   const handleAddressChange = (e) => {
     const { name, value } = e.target;
@@ -170,10 +202,60 @@ function CheckoutPage() {
   const discountPercentage = (discount / mainTotal) * 100;
   const shippingCharge = selectedShipping?.charge ? Number(selectedShipping.charge) : 0;
   const totalAfterDiscount = mainTotal - discount;
-  const grandTotal = totalAfterDiscount + shippingCharge;
+  const paymentMethodKey = !selectedPaymentMethod
+    ? ''
+    : selectedPaymentMethod.type === 'cash'
+      ? 'Cash on Delivery'
+      : selectedPaymentMethod.type;
+  const effectiveShipping = ruleEval ? Number(ruleEval.deliveryCharge) : shippingCharge;
+  const extraFeeTotal = ruleEval ? Number(ruleEval.extraFeeTotal || 0) : 0;
+  const grandTotal = totalAfterDiscount + effectiveShipping + extraFeeTotal;
+  const ruleBlockers = ruleEval?.blockers || [];
+  const checkoutBlocked = ruleBlockers.length > 0;
+  const deliveryRuleNotes = (ruleEval?.appliedRules || []).filter(r =>
+    ['free_delivery_above', 'delivery_multiplier', 'extra_delivery_fee'].includes(r.type)
+  );
+  const cartSignature = cartItems
+    .map(i => `${i._id || i.guestItemId || ''}-${i.productId}-${i.variantId}:${i.quantity}`)
+    .join(',');
+
+  // Evaluate admin checkout rules (delivery multipliers, fees, limits) on cart/shipping/payment changes
+  useEffect(() => {
+    if (!cartItems.length) {
+      setRuleEval(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URI}/api/checkout-rules/evaluate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            subtotal: mainTotal,
+            discountAmount: discount,
+            shippingCharge,
+            paymentMethod: paymentMethodKey,
+            items: cartItems.map(i => ({ productId: i.productId, name: i.name, quantity: i.quantity })),
+          }),
+        });
+        if (!res.ok) throw new Error('evaluate failed');
+        const data = await res.json();
+        if (!cancelled) setRuleEval(data);
+      } catch (e) {
+        if (!cancelled) setRuleEval(null);
+      }
+    }, 350);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [mainTotal, discount, shippingCharge, paymentMethodKey, cartSignature]);
 
 const handleCheckout = async () => {
   if (!validateShippingInfo()) return;
+
+  if (checkoutBlocked) {
+    toast.error(ruleBlockers[0].message);
+    return;
+  }
 
   const orderShippingAddress = useSavedAddress ? {
     fullName: user?.fullName || "",
@@ -243,7 +325,7 @@ const handleCheckout = async () => {
         charge: shippingCharge,
         estimatedDays: selectedShipping.estimatedDays || 0,
       } : null,
-      shippingCost: shippingCharge,
+      shippingCost: effectiveShipping,
       grandTotal: grandTotal,
       discountAmount: discount,
       couponCode: coupon?.code || null,
@@ -611,6 +693,11 @@ const handleCheckout = async () => {
                     ))}
                   </div>
                 )}
+                {deliveryPhone && (
+                  <p className="mt-4 text-sm text-dark-gray">
+                    Delivery inquiries: <a href={`tel:${deliveryPhone}`} className="font-semibold text-maybelline-pink hover:underline">{deliveryPhone}</a>
+                  </p>
+                )}
               </div>
             </div>
 
@@ -894,14 +981,59 @@ const handleCheckout = async () => {
                 
                 <div className="flex justify-between items-center">
                   <span className="text-dark-gray">Shipping</span>
-                  <span className="font-semibold text-black">BDT{shippingCharge.toFixed(2)}</span>
+                  <span className="font-semibold text-black text-right">
+                    {ruleEval?.freeDelivery ? (
+                      <>
+                        <span className="line-through text-mid-gray mr-2">BDT{shippingCharge.toFixed(2)}</span>
+                        <span className="text-green-600">Free</span>
+                      </>
+                    ) : effectiveShipping !== shippingCharge ? (
+                      <>
+                        <span className="line-through text-mid-gray mr-2">BDT{shippingCharge.toFixed(2)}</span>
+                        <span>BDT{effectiveShipping.toFixed(2)}</span>
+                      </>
+                    ) : (
+                      <>BDT{shippingCharge.toFixed(2)}</>
+                    )}
+                  </span>
                 </div>
-                
+
+                {deliveryRuleNotes.length > 0 && (
+                  <div className="text-xs text-dark-gray space-y-0.5">
+                    {deliveryRuleNotes.map(r => (
+                      <p key={r.ruleId || r.name}>• {r.name}</p>
+                    ))}
+                  </div>
+                )}
+
+                {(ruleEval?.extraFees || []).map(f => (
+                  <div key={f.ruleId || f.label} className="flex justify-between items-center">
+                    <span className="text-dark-gray">{f.label}</span>
+                    <span className="font-semibold text-black">BDT{Number(f.amount).toFixed(2)}</span>
+                  </div>
+                ))}
+
                 <div className="flex justify-between items-center text-xl font-bold pt-3 border-t border-cool-gray">
                   <span>Total</span>
                   <span className="text-maybelline-pink">BDT{grandTotal.toFixed(2)}</span>
                 </div>
               </div>
+
+              {(ruleEval?.notices || []).length > 0 && !checkoutBlocked && (
+                <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg space-y-1">
+                  {ruleEval.notices.map((n, i) => (
+                    <p key={i} className="text-sm text-green-700">{n}</p>
+                  ))}
+                </div>
+              )}
+
+              {checkoutBlocked && (
+                <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg space-y-1">
+                  {ruleBlockers.map((b, i) => (
+                    <p key={i} className="text-sm text-red-600 font-medium">{b.message}</p>
+                  ))}
+                </div>
+              )}
 
               {/* Security Notice */}
               <div className="mt-6 p-4 bg-cool-gray border border-cool-gray">
@@ -918,7 +1050,7 @@ const handleCheckout = async () => {
               <div className="mt-6 space-y-3">
                 <button
                   onClick={handleCheckout}
-                  disabled={loading || cartItems.length === 0}
+                  disabled={loading || cartItems.length === 0 || checkoutBlocked}
                   className={`bg-maybelline-pink text-pure-white w-full py-3 font-sans font-medium text-lg hover:opacity-90 transition-opacity duration-200 ${
                     loading ? "opacity-50 cursor-not-allowed" : ""
                   }`}

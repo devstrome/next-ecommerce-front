@@ -21,7 +21,9 @@ import {
   FaTruck,
   FaCheckCircle,
   FaClock,
-  FaBan
+  FaBan,
+  FaUndoAlt,
+  FaUpload
 } from 'react-icons/fa';
 
 function OrdersListPage() {
@@ -39,6 +41,13 @@ function OrdersListPage() {
   const [endDate, setEndDate] = useState('');
   const [socket, setSocket] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
+  const [refundModalOrder, setRefundModalOrder] = useState(null);
+  const [refundReason, setRefundReason] = useState('');
+  const [refundNote, setRefundNote] = useState('');
+  const [refundSubmitting, setRefundSubmitting] = useState(false);
+  const [refundImage, setRefundImage] = useState('');
+  const [refundImageUploading, setRefundImageUploading] = useState(false);
+  const [refundBkash, setRefundBkash] = useState('');
 
   const API_BASE = process.env.NEXT_PUBLIC_API_URI;
   const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URI || API_BASE;
@@ -360,6 +369,109 @@ function OrdersListPage() {
       });
     } finally {
       setCancelLoadingId(null);
+    }
+  };
+
+  const canRequestRefund = (order) => {
+    if (!order) return false;
+    const rs = order.refundStatus || 'none';
+    if (['pending', 'approved'].includes(rs)) return false;
+    if (order.paymentStatus === 'refunded') return false;
+    const st = (order.orderStatus || '').toLowerCase();
+    if (st === 'cancelled' || st === 'canceled') return false;
+    return true;
+  };
+
+  const refundStatusBadge = (order) => {
+    const rs = order?.refundStatus;
+    if (!rs || rs === 'none') return null;
+    const map = {
+      pending: { cls: 'text-black bg-pure-white border-cool-gray', icon: <FaClock />, label: 'Refund Requested' },
+      approved: { cls: 'text-black bg-pure-white border-cool-gray', icon: <FaCheckCircle />, label: 'Refund Approved' },
+      rejected: { cls: 'text-maybelline-pink bg-pure-white border-maybelline-pink', icon: <FaBan />, label: 'Refund Rejected' },
+    };
+    const cfg = map[rs];
+    if (!cfg) return null;
+    return (
+      <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full border text-sm font-medium font-sans ${cfg.cls}`}>
+        {cfg.icon}
+        <span>{cfg.label}</span>
+      </span>
+    );
+  };
+
+  const openRefundModal = (order) => {
+    setRefundModalOrder(order);
+    setRefundReason('');
+    setRefundNote('');
+    setRefundImage('');
+    setRefundBkash('');
+  };
+
+  const handleRefundImageSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select an image file');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image must be under 5 MB');
+      return;
+    }
+    try {
+      setRefundImageUploading(true);
+      const formData = new FormData();
+      formData.append('image', file);
+      const res = await axios.post(`${API_BASE}/api/upload/refund-image`, formData, {
+        headers: {
+          'Authorization': `Bearer ${getStorage('accessToken')}`,
+        },
+      });
+      setRefundImage(res.data.url);
+      toast.success('Image uploaded');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to upload image');
+    } finally {
+      setRefundImageUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleRefundRequest = async () => {
+    if (!refundModalOrder) return;
+    if (!refundReason.trim()) {
+      toast.error('Please provide a reason for the refund request');
+      return;
+    }
+    if (!refundBkash.trim()) {
+      toast.error('Please provide your bKash number to receive the refund amount');
+      return;
+    }
+    try {
+      setRefundSubmitting(true);
+      const res = await axios.patch(
+        `${API_BASE}/api/orders/${refundModalOrder.orderId}/refund-request`,
+        { reason: refundReason.trim(), note: refundNote.trim(), refundImage, bkashNumber: refundBkash.trim() },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${getStorage('accessToken')}`,
+          },
+        }
+      );
+      const updated = res.data.order;
+      setOrders(prev => prev.map(o => (o.orderId === refundModalOrder.orderId ? updated : o)));
+      toast.success(res.data.message || 'Refund request submitted');
+      setRefundModalOrder(null);
+      setRefundReason('');
+      setRefundNote('');
+      setRefundImage('');
+      setRefundBkash('');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to submit refund request');
+    } finally {
+      setRefundSubmitting(false);
     }
   };
 
@@ -685,6 +797,7 @@ function OrdersListPage() {
                         {getStatusIcon(order.orderStatus)}
                         <span>{order.orderStatus || 'N/A'}</span>
                       </div>
+                      {refundStatusBadge(order)}
                     </div>
                     <div className="text-sm text-dark-gray flex items-center gap-2 font-sans">
                       <FaCalendarAlt className="text-mid-gray" />
@@ -776,6 +889,12 @@ function OrdersListPage() {
                             <span className="text-black font-medium">{formatCurrency(order.shippingCost, currency)}</span>
                           </p>
                         )}
+                        {(order.extraFees || []).map((fee, idx) => (
+                          <p key={fee.ruleId || idx} className="text-sm font-sans">
+                            <span className="font-medium">{fee.label}:</span>{' '}
+                            <span className="text-black font-medium">{formatCurrency(fee.amount || 0, currency)}</span>
+                          </p>
+                        ))}
                         <p className="text-sm font-sans">
                           <span className="font-medium">Total:</span>{' '}
                           <span className="text-lg font-bold text-maybelline-pink">{formatCurrency(order.grandTotal, currency)}</span>
@@ -855,6 +974,16 @@ function OrdersListPage() {
                         View Details
                       </Link>
 
+                      {canRequestRefund(order) && (
+                        <button
+                          onClick={() => openRefundModal(order)}
+                          className="btn-primary bg-pure-white text-black border border-cool-gray hover:border-maybelline-pink hover:text-maybelline-pink hover:shadow-none"
+                        >
+                          <FaUndoAlt />
+                          Request Refund
+                        </button>
+                      )}
+
                       {order.orderStatus?.toLowerCase() === 'pending' && (
                         <button
                           disabled={cancelLoadingId === order.orderId}
@@ -880,6 +1009,123 @@ function OrdersListPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {refundModalOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="card rounded-xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-black flex items-center gap-2 font-heading">
+                <FaUndoAlt className="text-maybelline-pink" />
+                Request Refund
+              </h3>
+              <button
+                onClick={() => setRefundModalOrder(null)}
+                className="text-mid-gray hover:text-black"
+                aria-label="Close"
+              >
+                <FaTimes />
+              </button>
+            </div>
+            <p className="text-sm text-dark-gray mb-4 font-sans">
+              Order <span className="font-medium text-black">#{refundModalOrder.orderId}</span>
+              {' \u2014 '}
+              {formatCurrency(refundModalOrder.grandTotal || refundModalOrder.totalAmount || 0, currency)}
+            </p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-dark-gray mb-1 font-sans">
+                  Reason <span className="text-maybelline-pink">*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  className="w-full px-3 py-2 border border-cool-gray rounded-lg focus:outline-none focus:ring-2 focus:ring-maybelline-pink font-sans"
+                  placeholder="Why are you requesting a refund?"
+                  value={refundReason}
+                  onChange={(e) => setRefundReason(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-dark-gray mb-1 font-sans">
+                  Additional Note (optional)
+                </label>
+                <textarea
+                  rows={2}
+                  className="w-full px-3 py-2 border border-cool-gray rounded-lg focus:outline-none focus:ring-2 focus:ring-maybelline-pink font-sans"
+                  placeholder="Any extra details..."
+                  value={refundNote}
+                  onChange={(e) => setRefundNote(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-dark-gray mb-1 font-sans">
+                  Photo (optional)
+                </label>
+                {!refundImage ? (
+                  <label className="flex items-center justify-center gap-2 px-4 py-3 border border-dashed border-cool-gray rounded-lg cursor-pointer hover:border-maybelline-pink hover:text-maybelline-pink text-dark-gray transition-all font-sans">
+                    <FaUpload />
+                    {refundImageUploading ? 'Uploading...' : 'Attach photo'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      disabled={refundImageUploading}
+                      onChange={handleRefundImageSelect}
+                    />
+                  </label>
+                ) : (
+                  <div className="relative inline-block">
+                    <img
+                      src={refundImage}
+                      alt="Refund evidence"
+                      className="h-24 w-24 object-cover rounded-lg border border-cool-gray"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setRefundImage('')}
+                      className="absolute -top-2 -right-2 text-white bg-maybelline-pink rounded-full w-6 h-6 flex items-center justify-center"
+                      aria-label="Remove image"
+                    >
+                      <FaTimes className="text-xs" />
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-dark-gray mb-1 font-sans">
+                  bKash Number <span className="text-maybelline-pink">*</span>
+                </label>
+                <input
+                  type="tel"
+                  className="w-full px-3 py-2 border border-cool-gray rounded-lg focus:outline-none focus:ring-2 focus:ring-maybelline-pink font-sans"
+                  placeholder="Your bKash number (refund will be sent here)"
+                  value={refundBkash}
+                  onChange={(e) => setRefundBkash(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="mt-4 text-xs text-dark-gray font-sans bg-pure-white border border-cool-gray rounded-lg p-3 space-y-1.5">
+              <p><span className="font-medium text-black">Delivery charge</span> must be paid before the parcel is sent.</p>
+              <p><span className="font-medium text-black">Please note:</span> if the product is damaged <em>after</em> delivery, a refund will not be available — upload images as soon as possible. Request timestamps are checked.</p>
+              <p>Need help? Use the <span className="font-medium text-black">message</span> option (the chat button) to message our admins directly about your refund.</p>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={handleRefundRequest}
+                disabled={refundSubmitting || !refundReason.trim() || !refundBkash.trim()}
+                className="btn-primary flex-1 disabled:opacity-50"
+              >
+                {refundSubmitting ? 'Submitting...' : 'Submit Request'}
+              </button>
+              <button
+                onClick={() => setRefundModalOrder(null)}
+                className="px-4 py-2 border border-cool-gray text-dark-gray rounded-lg hover:border-black hover:text-black transition-all font-sans"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

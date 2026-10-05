@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useContext, useRef } from "react";
 import Link from "next/link"
 import { useRouter, usePathname } from "next/navigation";
-import { FiSearch, FiUser, FiHeart, FiShoppingBag, FiMenu, FiX, FiChevronDown, FiGrid } from "react-icons/fi";
+import { FiSearch, FiUser, FiHeart, FiShoppingBag, FiMenu, FiX, FiChevronDown, FiGrid, FiLogOut } from "react-icons/fi";
 import { UserContext } from '../context/UserContext';
 import { CartContext } from '../context/CartContext';
 
@@ -24,10 +24,12 @@ const Navbar = () => {
   const [selectedCat, setSelectedCat] = useState(null);
   const [mobileCatOpen, setMobileCatOpen] = useState(false);
   const [mobileCatSelected, setMobileCatSelected] = useState(null);
+  const [catSheetOpen, setCatSheetOpen] = useState(false);
+  const [sheetCatSelected, setSheetCatSelected] = useState(null);
   const catDropdownRef = useRef(null);
   const pathname = usePathname();
   const router = useRouter();
-  const { isLoggedIn } = useContext(UserContext);
+  const { isLoggedIn, logout } = useContext(UserContext);
   const isProfile = pathname.startsWith('/profile');
 
   useEffect(() => {
@@ -93,6 +95,7 @@ const Navbar = () => {
   const isHome = pathname === "/" || pathname === "/home";
 
   const leftLinks = [
+    { label: "Home", href: "/" },
     { label: "Products", href: "/products" },
     { label: "About Us", href: "/about" },
     { label: "Contact", href: "/contact" },
@@ -287,12 +290,22 @@ const Navbar = () => {
               )}
             </Link>
             {isLoggedIn ? (
-              <Link href="/profile"
-                className="hidden sm:flex touch-target items-center justify-center text-black hover:text-maybelline-pink transition-colors"
-                aria-label="Account"
-              >
-                <FiUser size={20} />
-              </Link>
+              <>
+                <Link href="/profile"
+                  className="hidden sm:flex touch-target items-center justify-center text-black hover:text-maybelline-pink transition-colors"
+                  aria-label="Account"
+                >
+                  <FiUser size={20} />
+                </Link>
+                <button
+                  onClick={() => logout()}
+                  className="hidden sm:flex touch-target items-center justify-center text-black hover:text-maybelline-pink transition-colors"
+                  aria-label="Log out"
+                  title="Log out"
+                >
+                  <FiLogOut size={20} />
+                </button>
+              </>
             ) : (
               <Link href="/login"
                 className="hidden sm:flex touch-target items-center justify-center text-black hover:text-maybelline-pink transition-colors font-medium text-xs tracking-wider uppercase"
@@ -470,7 +483,16 @@ const Navbar = () => {
 
                 <div className="pt-4 space-y-1">
                   {isLoggedIn ? (
-                    <Link href="/profile" onClick={() => setMobileMenuOpen(false)} className="block text-sm text-black hover:text-maybelline-pink font-medium py-3">My Account</Link>
+                    <>
+                      <Link href="/profile" onClick={() => setMobileMenuOpen(false)} className="block text-sm text-black hover:text-maybelline-pink font-medium py-3">My Account</Link>
+                      <button
+                        onClick={() => { setMobileMenuOpen(false); logout(); }}
+                        className="flex items-center gap-2 text-sm text-red-500 hover:text-red-600 font-medium py-3 w-full"
+                      >
+                        <FiLogOut size={14} />
+                        Log Out
+                      </button>
+                    </>
                   ) : (
                     <>
                       <Link href="/login" onClick={() => setMobileMenuOpen(false)} className="block text-sm text-black hover:text-maybelline-pink font-medium py-3">Sign In</Link>
@@ -481,6 +503,10 @@ const Navbar = () => {
               </div>
               <div className="absolute bottom-0 left-0 right-0 px-6 py-6 border-t border-cool-gray">
                 <div className="flex items-center justify-around text-black">
+                  <button onClick={() => setCatSheetOpen(true)} className="flex flex-col items-center gap-1 text-black hover:text-maybelline-pink transition-colors">
+                    <FiGrid size={18} />
+                    <span className="text-[10px]">Categories</span>
+                  </button>
                   <Link href="/products" onClick={() => setMobileMenuOpen(false)} className="flex flex-col items-center gap-1 text-black hover:text-maybelline-pink transition-colors">
                     <FiSearch size={18} />
                     <span className="text-[10px]">Search</span>
@@ -509,6 +535,98 @@ const Navbar = () => {
                       <span className="text-[10px]">Sign In</span>
                     </Link>
                   )}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Categories Bottom Sheet (Mobile) */}
+        {catSheetOpen && (
+          <>
+            <div className="fixed inset-0 bg-black/40 z-50 lg:hidden" onClick={() => { setCatSheetOpen(false); setSheetCatSelected(null); }} />
+            <div className="fixed bottom-0 left-0 right-0 z-50 lg:hidden bg-pure-white rounded-t-2xl shadow-2xl max-h-[80vh] flex flex-col animate-slide-up">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-cool-gray">
+                <h3 className="text-sm font-bold text-black tracking-wide uppercase">Categories</h3>
+                <button
+                  onClick={() => { setCatSheetOpen(false); setSheetCatSelected(null); }}
+                  className="text-mid-gray hover:text-black transition-colors"
+                  aria-label="Close categories"
+                >
+                  <FiX size={20} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                <div className="flex min-h-[300px]">
+                  <div className="w-2/5 border-r border-cool-gray/20 overflow-y-auto">
+                    {categories.map((cat) => (
+                      <button
+                        key={cat._id}
+                        onClick={() => setSheetCatSelected(sheetCatSelected?._id === cat._id ? null : cat)}
+                        className={`w-full text-left px-4 py-3 text-sm font-medium flex items-center justify-between transition-colors ${
+                          sheetCatSelected?._id === cat._id
+                            ? 'bg-maybelline-light text-maybelline-pink'
+                            : 'text-black hover:bg-gray-50 hover:text-maybelline-pink'
+                        }`}
+                      >
+                        <span>{cat.name}</span>
+                        {cat.children && cat.children.length > 0 && (
+                          <FiChevronDown size={14} className={`transition-transform ${sheetCatSelected?._id === cat._id ? 'rotate-180' : ''}`} />
+                        )}
+                      </button>
+                    ))}
+                    <Link
+                      href="/products"
+                      onClick={() => { setCatSheetOpen(false); setSheetCatSelected(null); }}
+                      className="block px-4 py-3 text-sm font-bold text-maybelline-pink border-t border-cool-gray/20 hover:bg-maybelline-light"
+                    >
+                      View All Products
+                    </Link>
+                  </div>
+                  <div className="w-3/5 overflow-y-auto">
+                    {sheetCatSelected ? (
+                      <div className="p-4">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-dark-gray mb-3">
+                          {sheetCatSelected.name}
+                        </h4>
+                        {sheetCatSelected.children && sheetCatSelected.children.length > 0 ? (
+                          <div className="space-y-3">
+                            {sheetCatSelected.children.map((child) => (
+                              <div key={child._id}>
+                                <Link
+                                  href={`/products?category=${child.slug}`}
+                                  onClick={() => { setCatSheetOpen(false); setSheetCatSelected(null); }}
+                                  className="block text-sm font-medium text-black hover:text-maybelline-pink transition-colors"
+                                >
+                                  {child.name}
+                                </Link>
+                                {child.brands && child.brands.length > 0 && (
+                                  <div className="flex flex-wrap gap-1.5 mt-1.5 ml-2">
+                                    {child.brands.map((brand) => (
+                                      <Link
+                                        key={brand}
+                                        href={`/products?category=${child.slug}&brand=${encodeURIComponent(brand)}`}
+                                        onClick={() => { setCatSheetOpen(false); setSheetCatSelected(null); }}
+                                        className="text-xs text-dark-gray hover:text-maybelline-pink transition-colors"
+                                      >
+                                        {brand}
+                                      </Link>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-dark-gray">No subcategories</p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="p-4 flex items-center justify-center h-full text-sm text-dark-gray">
+                        Select a category to browse
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

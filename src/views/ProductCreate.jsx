@@ -8,15 +8,14 @@ import { FiChevronDown, FiChevronUp } from 'react-icons/fi';
 import { useRouter } from "next/navigation";
 import { getStorage } from "../lib/storage";
 import SEOEditor from '../components/SEOEditor';
+import { useAdminProduct } from '../context/AdminProductContext';
 
 const ProductCreate = () => {
-  const [categoryTree, setCategoryTree] = useState([]);
-  const [colors, setColors] = useState([]);
-  const [sizes, setSizes] = useState([]);
-  const [genders, setGenders] = useState([]);
-  const [badges, setBadges] = useState([]);
-  const [measureTypes, setMeasureTypes] = useState([]);
-  const [shippingTypes, setShippingTypes] = useState([]);
+  const {
+    categoryTree, colors, sizes, genders, badges, measureTypes, shippingTypes,
+    createCategory, createBrand, createColor, createSize, createGender, createBadge,
+    createMeasureType, findCategoryByName,
+  } = useAdminProduct();
   const [selectedCategoryObj, setSelectedCategoryObj] = useState(null);
   const [selectedSubcategoryObj, setSelectedSubcategoryObj] = useState(null);
 
@@ -70,34 +69,6 @@ const ProductCreate = () => {
   const [variantCount, setVariantCount] = useState(0);
 
   const router = useRouter();
-
-  useEffect(() => {
-    const fetchOptions = async () => {
-      try {
-        const [treeRes, colorsRes, sizesRes, gendersRes, badgesRes, unitsRes, shippingRes] = await Promise.all([
-          axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/categories/tree`),
-          axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/colors`),
-          axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/sizes`),
-          axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/genders`),
-          axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/badges`),
-          axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/units`),
-          axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/shipping`),
-        ]);
-
-        setCategoryTree(treeRes.data);
-        setColors(colorsRes.data);
-        setSizes(sizesRes.data);
-        setGenders(gendersRes.data);
-        setBadges(badgesRes.data);
-        setMeasureTypes(unitsRes.data);
-        setShippingTypes(shippingRes.data || []);
-      } catch (error) {
-        console.error('Error fetching options:', error);
-      }
-    };
-
-    fetchOptions();
-  }, []);
 
   const topLevelOptions = categoryTree.map(c => ({ value: c.name, label: c.name }));
   const subcategoryOptions = (selectedCategoryObj?.children || []).map(c => ({ value: c.name, label: c.name }));
@@ -244,26 +215,19 @@ const ProductCreate = () => {
 
   const handleCreateGender = async (inputValue) => {
     try {
-      const res = await axios.post(`${process.env.NEXT_PUBLIC_API_URI}/api/genders`, { type: inputValue }, {
-        headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` },
-      });
-      setGenders(prev => [...prev, res.data]);
+      await createGender(inputValue);
       setProduct(prev => ({ ...prev, gender: inputValue }));
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to create gender');
+      alert(err.message || 'Failed to create gender');
     }
   };
 
   const handleCreateSize = async (inputValue) => {
     try {
-      const res = await axios.post(`${process.env.NEXT_PUBLIC_API_URI}/api/sizes`, { name: inputValue }, {
-        headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` },
-      });
-      setSizes(prev => [...prev, res.data]);
-      const newOpt = { value: inputValue, label: inputValue };
+      await createSize(inputValue);
       setVariant(prev => ({ ...prev, sizes: [...prev.sizes, inputValue] }));
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to create size');
+      alert(err.message || 'Failed to create size');
     }
   };
 
@@ -274,16 +238,13 @@ const ProductCreate = () => {
   const handleCreateColorConfirm = async () => {
     if (!pendingColorName || !newColorHex) return;
     try {
-      const res = await axios.post(`${process.env.NEXT_PUBLIC_API_URI}/api/colors`, { name: pendingColorName, hexCode: newColorHex }, {
-        headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` },
-      });
-      setColors(prev => [...prev, res.data]);
+      await createColor(pendingColorName, newColorHex);
       setVariant(prev => ({ ...prev, selectedColor: pendingColorName, selectedColorHex: newColorHex }));
       setShowColorHexPicker(false);
       setPendingColorName('');
       setNewColorHex('#DC143C');
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to create color');
+      alert(err.message || 'Failed to create color');
     }
   };
 
@@ -291,13 +252,64 @@ const ProductCreate = () => {
     const unitName = prompt('Enter unit name (e.g. g, ml, cm):');
     if (!unitName) return;
     try {
-      const res = await axios.post(`${process.env.NEXT_PUBLIC_API_URI}/api/units`, { measureType: inputValue, unitName }, {
-        headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` },
-      });
-      setMeasureTypes(prev => [...prev, res.data]);
+      await createMeasureType(inputValue, unitName);
       setProduct(prev => ({ ...prev, measureType: inputValue, unitName }));
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to create measure type');
+      alert(err.message || 'Failed to create measure type');
+    }
+  };
+
+  const handleCreateBrand = async (inputValue) => {
+    if (!selectedSubcategoryObj?._id) {
+      alert('Select a subcategory first');
+      return;
+    }
+    try {
+      await createBrand(selectedSubcategoryObj._id, inputValue);
+      const fresh = findCategoryByName(selectedSubcategoryObj.name);
+      setSelectedSubcategoryObj(fresh);
+      setProduct(prev => ({ ...prev, brand: inputValue }));
+    } catch (err) {
+      alert(err.message || 'Failed to create brand');
+    }
+  };
+
+  const handleCreateBadge = async (inputValue) => {
+    const color = prompt('Enter badge color (hex, e.g. #DC143C):', '#DC143C');
+    if (!color) return;
+    try {
+      await createBadge(inputValue, color);
+      setProduct(prev => ({ ...prev, mainBadgeName: inputValue, mainBadgeColor: color }));
+    } catch (err) {
+      alert(err.message || 'Failed to create badge');
+    }
+  };
+
+  const handleCreateCategory = async (inputValue) => {
+    try {
+      await createCategory(inputValue, null);
+      const fresh = findCategoryByName(inputValue);
+      setProduct(prev => ({ ...prev, category: inputValue, subcategory: '', brand: '' }));
+      setSelectedCategoryObj(fresh);
+      setSelectedSubcategoryObj(null);
+    } catch (err) {
+      alert(err.message || 'Failed to create category');
+    }
+  };
+
+  const handleCreateSubcategory = async (inputValue) => {
+    if (!selectedCategoryObj?._id) {
+      alert('Select a category first');
+      return;
+    }
+    try {
+      await createCategory(inputValue, selectedCategoryObj._id);
+      const freshParent = findCategoryByName(selectedCategoryObj.name);
+      setSelectedCategoryObj(freshParent);
+      setProduct(prev => ({ ...prev, subcategory: inputValue, brand: '' }));
+      setSelectedSubcategoryObj((freshParent?.children || []).find(c => c.name === inputValue) || null);
+    } catch (err) {
+      alert(err.message || 'Failed to create subcategory');
     }
   };
 
@@ -578,32 +590,41 @@ const ProductCreate = () => {
           <div className={`${basicOpen ? '' : 'hidden'} sm:block`}>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-            <Select
+            <Creatable
               name="category"
               options={topLevelOptions}
               value={topLevelOptions.find(o => o.value === product.category) || null}
               onChange={handleCategoryChange}
-              placeholder="Select Category"
+              onCreateOption={handleCreateCategory}
+              placeholder="Select or Create Category"
               isClearable
+              isSearchable
+              formatCreateLabel={(input) => `Create "${input}"`}
             />
             {product.category && (
-              <Select
+              <Creatable
                 name="subcategory"
                 options={subcategoryOptions}
                 value={subcategoryOptions.find(o => o.value === product.subcategory) || null}
                 onChange={handleSubcategoryChange}
-                placeholder="Select Subcategory"
+                onCreateOption={handleCreateSubcategory}
+                placeholder="Select or Create Subcategory"
                 isClearable
+                isSearchable
+                formatCreateLabel={(input) => `Create "${input}"`}
               />
             )}
             {product.subcategory && (
-              <Select
+              <Creatable
                 name="brand"
                 options={brandOptionsFromSubcategory}
-                value={brandOptionsFromSubcategory.find(o => o.value === product.brand) || null}
+                value={brandOptionsFromSubcategory.find(o => o.value === product.brand) || (product.brand ? { value: product.brand, label: product.brand } : null)}
                 onChange={handleBrandChange}
-                placeholder="Select Brand"
+                onCreateOption={handleCreateBrand}
+                placeholder="Select or Create Brand"
                 isClearable
+                isSearchable
+                formatCreateLabel={(input) => `Create "${input}"`}
               />
             )}
           </div>
@@ -672,14 +693,17 @@ const ProductCreate = () => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-            <Select
+            <Creatable
               name="mainBadgeName"
               options={badgeOptions}
               classNamePrefix="select"
-              value={badgeOptions.find((opt) => opt.value === product.mainBadgeName) || null}
+              value={badgeOptions.find((opt) => opt.value === product.mainBadgeName) || (product.mainBadgeName ? { value: product.mainBadgeName, label: product.mainBadgeName } : null)}
               onChange={handleMainBadgeChange}
-              placeholder="Select Main Badge"
+              onCreateOption={handleCreateBadge}
+              placeholder="Select or Create Badge"
               isClearable
+              isSearchable
+              formatCreateLabel={(input) => `Create "${input}"`}
             />
             <Creatable
               name="gender"

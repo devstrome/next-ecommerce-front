@@ -9,17 +9,16 @@ import { FiChevronDown, FiChevronUp } from 'react-icons/fi';
 import { useRouter, useParams } from "next/navigation";
 import io from 'socket.io-client';
 import SEOEditor from '../components/SEOEditor';
+import { useAdminProduct } from '../context/AdminProductContext';
 
 const ProductEdit = () => {
-  const [categoryTree, setCategoryTree] = useState([]);
+  const {
+    categoryTree, colors, sizes, genders, badges, measureTypes, shippingTypes,
+    createCategory, createBrand, createColor, createSize, createGender, createBadge,
+    createMeasureType, findCategoryByName,
+  } = useAdminProduct();
   const [selectedCategoryObj, setSelectedCategoryObj] = useState(null);
   const [selectedSubcategoryObj, setSelectedSubcategoryObj] = useState(null);
-  const [colors, setColors] = useState([]);
-  const [sizes, setSizes] = useState([]);
-  const [genders, setGenders] = useState([]);
-  const [badges, setBadges] = useState([]);
-  const [shippingTypes, setShippingTypes] = useState([]);
-  const [measureTypes, setMeasureTypes] = useState([]);
 
   const {id} = useParams();
   
@@ -52,6 +51,7 @@ const ProductEdit = () => {
   const [seoOpen, setSeoOpen] = useState(false);
   const [basicOpen, setBasicOpen] = useState(true);
   const [variantOpen, setVariantOpen] = useState(false);
+  const [seoRowIdx, setSeoRowIdx] = useState(null);
   const [newVariantImages, setNewVariantImages] = useState({});
   const [deleteVariantImages, setDeleteVariantImages] = useState({});
 
@@ -60,8 +60,8 @@ const ProductEdit = () => {
   const socketRef = useRef(null);
 
   useEffect(() => {
-    fetchOptions();
-    
+    loadProduct();
+
     socketRef.current = io(`${process.env.NEXT_PUBLIC_API_URI}`, {
       transports: ['websocket', 'polling'],
       auth: { token: getStorage('adminAccessToken') || '' },
@@ -72,30 +72,22 @@ const ProductEdit = () => {
         socketRef.current.disconnect();
       }
     };
-  }, []);
+  }, [id]);
 
-  const fetchOptions = async () => {
+  useEffect(() => {
+    const catObj = categoryTree.find(c => c.name === product.category) || null;
+    const subObj = catObj?.children?.find(c => c.name === product.subcategory) || null;
+    setSelectedCategoryObj(catObj);
+    setSelectedSubcategoryObj(subObj);
+  }, [categoryTree, product.category, product.subcategory]);
+
+  const loadProduct = async () => {
     try {
-      const [treeRes, colorsRes, sizesRes, gendersRes, badgesRes, productRes, shippingRes, unitsRes] = await Promise.all([
-        axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/categories/tree`),
-        axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/colors`),
-        axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/sizes`),
-        axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/genders`),
-        axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/badges`),
-        axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/products/${id}`),
-        axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/shipping`),
-        axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/units`),
-      ]);
-      setCategoryTree(treeRes.data);
-      setColors(colorsRes.data);
-      setSizes(sizesRes.data);
-      setGenders(gendersRes.data);
-      setBadges(badgesRes.data);
-      setShippingTypes(shippingRes.data || []);
-      setMeasureTypes(unitsRes.data || []);
+      const productRes = await axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/products/${id}`);
 
       const prod = productRes.data;
       const normalizedVariants = (prod.variants || []).map(v => ({
+        _id: v._id,
         selectedColor: v.colorName || '',
         selectedColorHex: v.hexCode || '',
         sizes: Array.isArray(v.sizes) ? v.sizes : [],
@@ -111,14 +103,27 @@ const ProductEdit = () => {
         specifications: Array.isArray(v.specifications) ? v.specifications : [],
         measureType: v.measureType || prod.measureType || '',
         unitName: v.unitName || prod.unitName || '',
+        seo: v.seo || {},
       }));
 
-      const prodCatNames = Array.isArray(prod.categories) ? prod.categories : [];
-      const catName = prodCatNames.length > 0 ? prodCatNames[0] : '';
-      const subName = prodCatNames.length > 1 ? prodCatNames[1] : '';
-
-      const catObj = treeRes.data.find(c => c.name === catName) || null;
-      const subObj = catObj?.children?.find(c => c.name === subName) || null;
+      const rawCats = Array.isArray(prod.categories) ? prod.categories : [];
+      const flatCats = [];
+      const pushCat = (v, depth = 0) => {
+        if (Array.isArray(v)) { v.forEach((x) => pushCat(x, depth + 1)); return; }
+        if (typeof v === 'string') {
+          const t = v.trim();
+          if (!t) return;
+          if (depth < 10) {
+            try { pushCat(JSON.parse(t), depth + 1); return; } catch {}
+          }
+          flatCats.push(t);
+          return;
+        }
+        if (v !== null && v !== undefined) flatCats.push(String(v));
+      };
+      rawCats.forEach((item) => pushCat(item));
+      const catName = flatCats.length > 0 ? flatCats[0] : '';
+      const subName = flatCats.length > 1 ? flatCats[1] : '';
 
       setProduct({
         name: prod.name || '',
@@ -146,12 +151,10 @@ const ProductEdit = () => {
           ogImage: prod.seo?.ogImage || '',
         },
       });
-      setSelectedCategoryObj(catObj);
-      setSelectedSubcategoryObj(subObj);
       setDeleteVariantImages({});
       setNewVariantImages({});
     } catch (error) {
-      console.error('Error fetching options:', error);
+      console.error('Error fetching product:', error);
     }
   };
 
@@ -181,13 +184,10 @@ const ProductEdit = () => {
 
   const handleCreateGender = async (inputValue) => {
     try {
-      const res = await axios.post(`${process.env.NEXT_PUBLIC_API_URI}/api/genders`, { type: inputValue }, {
-        headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` },
-      });
-      setGenders(prev => [...prev, res.data]);
+      await createGender(inputValue);
       setProduct(prev => ({ ...prev, gender: inputValue }));
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to create gender');
+      alert(err.message || 'Failed to create gender');
     }
   };
 
@@ -198,15 +198,12 @@ const ProductEdit = () => {
   const handleCreateColorConfirm = async () => {
     if (!pendingColorName || !newColorHex) return;
     try {
-      const res = await axios.post(`${process.env.NEXT_PUBLIC_API_URI}/api/colors`, { name: pendingColorName, hexCode: newColorHex }, {
-        headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` },
-      });
-      setColors(prev => [...prev, res.data]);
+      await createColor(pendingColorName, newColorHex);
       setShowColorHexPicker(false);
       setPendingColorName('');
       setNewColorHex('#DC143C');
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to create color');
+      alert(err.message || 'Failed to create color');
     }
   };
 
@@ -214,24 +211,64 @@ const ProductEdit = () => {
     const unitName = prompt('Enter unit name (e.g. g, ml, cm):');
     if (!unitName) return;
     try {
-      const res = await axios.post(`${process.env.NEXT_PUBLIC_API_URI}/api/units`, { measureType: inputValue, unitName }, {
-        headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` },
-      });
-      setMeasureTypes(prev => [...prev, res.data]);
+      await createMeasureType(inputValue, unitName);
       setProduct(prev => ({ ...prev, measureType: inputValue, unitName }));
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to create measure type');
+      alert(err.message || 'Failed to create measure type');
     }
   };
 
   const handleCreateSize = async (inputValue) => {
     try {
-      const res = await axios.post(`${process.env.NEXT_PUBLIC_API_URI}/api/sizes`, { name: inputValue }, {
-        headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` },
-      });
-      setSizes(prev => [...prev, res.data]);
+      await createSize(inputValue);
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to create size');
+      alert(err.message || 'Failed to create size');
+    }
+  };
+
+  const handleCreateBrand = async (inputValue) => {
+    if (!selectedSubcategoryObj?._id) {
+      alert('Select a subcategory first');
+      return;
+    }
+    try {
+      await createBrand(selectedSubcategoryObj._id, inputValue);
+      setProduct(prev => ({ ...prev, brand: inputValue }));
+    } catch (err) {
+      alert(err.message || 'Failed to create brand');
+    }
+  };
+
+  const handleCreateBadge = async (inputValue) => {
+    const color = prompt('Enter badge color (hex, e.g. #DC143C):', '#DC143C');
+    if (!color) return;
+    try {
+      await createBadge(inputValue, color);
+      setProduct(prev => ({ ...prev, mainBadgeName: inputValue, mainBadgeColor: color }));
+    } catch (err) {
+      alert(err.message || 'Failed to create badge');
+    }
+  };
+
+  const handleCreateCategory = async (inputValue) => {
+    try {
+      await createCategory(inputValue, null);
+      setProduct(prev => ({ ...prev, category: inputValue, subcategory: '', brand: '' }));
+    } catch (err) {
+      alert(err.message || 'Failed to create category');
+    }
+  };
+
+  const handleCreateSubcategory = async (inputValue) => {
+    if (!selectedCategoryObj?._id) {
+      alert('Select a category first');
+      return;
+    }
+    try {
+      await createCategory(inputValue, selectedCategoryObj._id);
+      setProduct(prev => ({ ...prev, subcategory: inputValue, brand: '' }));
+    } catch (err) {
+      alert(err.message || 'Failed to create subcategory');
     }
   };
 
@@ -412,6 +449,7 @@ const ProductEdit = () => {
     formData.append('seo', JSON.stringify(product.seo));
 
     const variantsWithoutImages = product.variants.map((v) => ({
+      _id: v._id,
       colorName: v.selectedColor,
       hexCode: v.selectedColorHex,
       sizes: v.sizes,
@@ -426,6 +464,7 @@ const ProductEdit = () => {
       unitName: product.unitName,
       shippingIds: Array.isArray(v.shippingIds) ? v.shippingIds : (v.shippingId ? [v.shippingId] : []),
       specifications: Array.isArray(v.specifications) ? v.specifications : [],
+      seo: v.seo || {},
     }));
     formData.append('variants', JSON.stringify(variantsWithoutImages));
 
@@ -464,7 +503,7 @@ const ProductEdit = () => {
         });
       }
       
-      fetchOptions();
+      loadProduct();
       setNewVariantImages({});
       setDeleteVariantImages({});
     } catch (error) {
@@ -521,32 +560,41 @@ const ProductEdit = () => {
           </div>
           <div className={`${basicOpen ? '' : 'hidden'} sm:block`}>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <Select
+              <Creatable
                 name="category"
                 options={topLevelOptions}
                 value={topLevelOptions.find(o => o.value === product.category) || null}
                 onChange={handleCategoryChange}
-                placeholder="Select Category"
+                onCreateOption={handleCreateCategory}
+                placeholder="Select or Create Category"
                 isClearable
+                isSearchable
+                formatCreateLabel={(input) => `Create "${input}"`}
               />
               {product.category && (
-                <Select
+                <Creatable
                   name="subcategory"
                   options={subcategoryOptions}
                   value={subcategoryOptions.find(o => o.value === product.subcategory) || null}
                   onChange={handleSubcategoryChange}
-                  placeholder="Select Subcategory"
+                  onCreateOption={handleCreateSubcategory}
+                  placeholder="Select or Create Subcategory"
                   isClearable
+                  isSearchable
+                  formatCreateLabel={(input) => `Create "${input}"`}
                 />
               )}
               {product.subcategory && (
-                <Select
+                <Creatable
                   name="brand"
                   options={brandOptionsFromSubcategory}
-                  value={brandOptionsFromSubcategory.find(o => o.value === product.brand) || null}
+                  value={brandOptionsFromSubcategory.find(o => o.value === product.brand) || (product.brand ? { value: product.brand, label: product.brand } : null)}
                   onChange={handleBrandChange}
-                  placeholder="Select Brand"
+                  onCreateOption={handleCreateBrand}
+                  placeholder="Select or Create Brand"
                   isClearable
+                  isSearchable
+                  formatCreateLabel={(input) => `Create "${input}"`}
                 />
               )}
             </div>
@@ -609,17 +657,19 @@ const ProductEdit = () => {
               />
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <Select
+              <Creatable
                 name="mainBadgeName"
                 options={badges.map(b => ({ value: b.name, label: `${b.name} (${b.color})` }))}
-                value={badges.map(b => ({ value: b.name, label: `${b.name} (${b.color})` })).find(o => o.value === product.mainBadgeName) || null}
+                value={badges.map(b => ({ value: b.name, label: `${b.name} (${b.color})` })).find(o => o.value === product.mainBadgeName) || (product.mainBadgeName ? { value: product.mainBadgeName, label: product.mainBadgeName } : null)}
                 onChange={(opt) => {
                   const badgeColor = opt ? badges.find(b => b.name === opt.value)?.color || '' : '';
                   setProduct(prev => ({ ...prev, mainBadgeName: opt ? opt.value : '', mainBadgeColor: badgeColor }));
                 }}
-                placeholder="Select Main Badge"
+                onCreateOption={handleCreateBadge}
+                placeholder="Select or Create Badge"
                 isSearchable
                 isClearable
+                formatCreateLabel={(input) => `Create "${input}"`}
               />
               <Creatable
                 name="gender"
@@ -677,18 +727,20 @@ const ProductEdit = () => {
                     <th className="py-3 px-4 text-left text-xs font-semibold text-dark-gray uppercase tracking-wider">Shipping</th>
                     <th className="py-3 px-4 text-left text-xs font-semibold text-dark-gray uppercase tracking-wider">Existing Images</th>
                     <th className="py-3 px-4 text-left text-xs font-semibold text-dark-gray uppercase tracking-wider">Add/Replace Images</th>
+                    <th className="py-3 px-4 text-left text-xs font-semibold text-dark-gray uppercase tracking-wider">SEO</th>
                   </tr>
                 </thead>
                 <tbody>
                   {product.variants.length === 0 ? (
                     <tr>
-                      <td colSpan="6" className="text-center py-4 text-dark-gray">
+                      <td colSpan="7" className="text-center py-4 text-dark-gray">
                         No variants found.
                       </td>
                     </tr>
                   ) : (
                     product.variants.map((v, vIdx) => (
-                      <tr key={vIdx} className="align-top border-b border-cool-gray">
+                      <React.Fragment key={vIdx}>
+                      <tr className="align-top border-b border-cool-gray">
                         <td className="py-3 px-4">
                           <div>
                             <Creatable
@@ -860,7 +912,34 @@ const ProductEdit = () => {
                             Remove Variant
                           </button>
                         </td>
+                        <td className="py-3 px-4">
+                          <button
+                            type="button"
+                            onClick={() => setSeoRowIdx(seoRowIdx === vIdx ? null : vIdx)}
+                            disabled={!v._id}
+                            title={v._id ? 'Edit this variant\'s SEO' : 'Save the product first to add variant SEO'}
+                            className={`px-3 py-1.5 text-xs font-semibold border transition ${seoRowIdx === vIdx ? 'bg-maybelline-pink text-white border-maybelline-pink' : v.seo?.metaTitle ? 'bg-green-50 text-green-700 border-green-300 hover:bg-green-100' : 'bg-cool-gray text-dark-gray border-cool-gray hover:bg-mid-gray'} ${!v._id ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          >
+                            {v.seo?.metaTitle ? 'SEO ✓' : 'SEO'}
+                          </button>
+                        </td>
                       </tr>
+                      {seoRowIdx === vIdx && (
+                        <tr className="border-b border-cool-gray bg-gray-50">
+                          <td colSpan="7" className="py-4 px-4">
+                            <SEOEditor
+                              seo={v.seo || {}}
+                              onChange={(s) => updateVariantField(vIdx, { seo: s })}
+                              type="variant"
+                              itemId={id}
+                              variantId={v._id}
+                              itemName={product.name}
+                              label={`Variant SEO — ${v.selectedColor || `Variant ${vIdx + 1}`}`}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
                     ))
                   )}
                 </tbody>

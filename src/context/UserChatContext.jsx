@@ -19,6 +19,7 @@ export const UserChatProvider = ({ children }) => {
   const { user, authRequest, isLoggedIn, getAuthHeader } = useContext(UserContext);
   const [isOpen, setIsOpen] = useState(false);
   const [inputMessage, setInputMessage] = useState("");
+  const [imageToSend, setImageToSend] = useState("");
   const [messages, setMessages] = useState([]);
   const [activeRoom, setActiveRoom] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -58,6 +59,13 @@ export const UserChatProvider = ({ children }) => {
   const [isOnline, setIsOnline] = useState(false);
   const [assignedAdmin, setAssignedAdmin] = useState(null);
   const [isTyping, setIsTyping] = useState(false);
+
+  // Refs mirroring latest values for one-time socket listeners (avoids stale closures)
+  const activeRoomRef = useRef(null);
+  const isOpenRef = useRef(false);
+  const fetchRoomRef = useRef(null);
+  activeRoomRef.current = activeRoom;
+  isOpenRef.current = isOpen;
 
 
 
@@ -177,8 +185,9 @@ export const UserChatProvider = ({ children }) => {
       auth: { token: isGuest ? '' : getStorage("accessToken") },
       forceNew: false,
       reconnection: true,
-      reconnectionAttempts: 3,
-      reconnectionDelay: 5000,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 10000,
       timeout: 10000,
       transports: ['websocket', 'polling']
     });
@@ -187,11 +196,14 @@ export const UserChatProvider = ({ children }) => {
       setIsConnected(true);
       if (!isGuest) socketClient.emit("joinUserRoom", user._id);
       setError(null);
+      // Resync missed messages after a reconnect
+      if (isOpenRef.current && activeRoomRef.current?._id && fetchRoomRef.current) {
+        fetchRoomRef.current();
+      }
     });
 
     socketClient.on("connect_error", () => {
       setIsConnected(false);
-      socketClient.disconnect();
     });
 
     socketClient.on("messageReceived", (message) => {
@@ -216,7 +228,9 @@ export const UserChatProvider = ({ children }) => {
           senderType: message.senderType || 'customer',
           senderName: message.senderName || '',
           text: message.text,
+          image: message.image || '',
           reaction: message.reaction || "",
+          reactions: Array.isArray(message.reactions) ? message.reactions : [],
           readBy: Array.isArray(message.readBy) ? message.readBy : [],
           createdAt: message.createdAt || new Date()
         };
@@ -224,13 +238,21 @@ export const UserChatProvider = ({ children }) => {
         return [...prev, cleanMessage];
       });
       
-      // Show notification if chat is not open
-      if (!isOpen) {
+      // Show notification if chat is not open (use ref — listener is attached once)
+      if (!isOpenRef.current) {
         showMessageNotification(message);
         setUnreadCount(prev => prev + 1);
         
         // Show browser notification
         showBrowserNotification(message);
+      } else if (activeRoomRef.current?._id === message.roomId && socketClient.connected) {
+        // Mark incoming messages read immediately for instant receipts on the other side
+        const isGuestNow = !user?._id || !isLoggedIn;
+        socketClient.emit("markMessagesAsRead", {
+          roomId: message.roomId,
+          readerType: isGuestNow ? 'guest' : 'customer',
+          readerId: user?._id || guestId
+        });
       }
     });
 
@@ -238,7 +260,7 @@ export const UserChatProvider = ({ children }) => {
     socketClient.on("readStatusUpdated", (data) => {
       
       // Update messages with read status - apply actual readBy from server
-      if (data.roomId === activeRoom?._id && data.readerType === 'admin') {
+      if (data.roomId === activeRoomRef.current?._id && data.readerType === 'admin') {
         setMessages(prev => prev.map(msg => {
           if (msg.senderType !== 'customer' && msg.senderType !== 'guest') return msg;
           const alreadyRead = (msg.readBy || []).some(r => r.readerType === 'admin');
@@ -254,11 +276,11 @@ export const UserChatProvider = ({ children }) => {
       }
       
       // Update active room with last read time
-      if (activeRoom?._id === data.roomId) {
-        setActiveRoom(prev => ({
+      if (activeRoomRef.current?._id === data.roomId) {
+        setActiveRoom(prev => prev ? ({
           ...prev,
           lastReadAt: data.readAt
-        }));
+        }) : prev);
       }
     });
 
@@ -272,13 +294,13 @@ export const UserChatProvider = ({ children }) => {
     });
 
     socketClient.on("onlineStatusChanged", (data) => {
-      if (data.userId === activeRoom?.assignedAdmin?._id) {
+      if (data.userId === activeRoomRef.current?.assignedAdmin?._id) {
         setIsOnline(data.isOnline);
       }
     });
 
     socketClient.on("roomAssigned", (data) => {
-      if (data.roomId === activeRoom?._id) {
+      if (data.roomId === activeRoomRef.current?._id) {
         setAssignedAdmin({
           _id: data.adminId,
           firstName: data.adminName
@@ -288,8 +310,8 @@ export const UserChatProvider = ({ children }) => {
 
     // Handle room updates silently via socket
     socketClient.on("roomUpdated", (data) => {
-      if (data.roomId === activeRoom?._id) {
-        setActiveRoom(prev => ({ ...prev, ...data.updates }));
+      if (data.roomId === activeRoomRef.current?._id) {
+        setActiveRoom(prev => prev ? ({ ...prev, ...data.updates }) : prev);
         if (data.updates.assignedAdmin) {
           setAssignedAdmin(data.updates.assignedAdmin);
         }
@@ -316,9 +338,17 @@ export const UserChatProvider = ({ children }) => {
 
     socketClient.on("messageUpdated", (data) => {
       const { messageId, updates } = data;
-      setMessages(prev => prev.map(msg =>
-        msg._id === messageId ? { ...msg, ...updates } : msg
-      ));
+      setMessages(prev => prev.map(msg => {
+        if (msg._id !== messageId) return msg;
+        if (updates) return { ...msg, ...updates };
+        // Flat payload emitted by the chat server for reaction updates
+        const patch = {};
+        if (Array.isArray(data.reactions)) patch.reactions = data.reactions;
+        if (data.reaction !== undefined) patch.reaction = data.reaction;
+        if (data.image !== undefined) patch.image = data.image;
+        if (data.text !== undefined) patch.text = data.text;
+        return { ...msg, ...patch };
+      }));
     });
 
     socketClient.on("userTyping", (data) => {
@@ -426,9 +456,9 @@ export const UserChatProvider = ({ children }) => {
       function processRoomData(room) {
         setActiveRoom(room);
         
-        // Process messages
+        // Process messages (keep image-only messages too)
         const cleanMessages = (room.messages || [])
-          .filter(msg => msg && msg.text)
+          .filter(msg => msg && (msg.text || msg.image))
           .map(msg => ({
             _id: msg._id || `msg_${Date.now()}_${Math.random()}`,
             senderId: msg.senderId,
@@ -436,7 +466,9 @@ export const UserChatProvider = ({ children }) => {
             guestId: msg.guestId,
             senderName: msg.senderName,
             text: msg.text,
+            image: msg.image || '',
             reaction: msg.reaction || "",
+            reactions: Array.isArray(msg.reactions) ? msg.reactions : [],
             readBy: Array.isArray(msg.readBy) ? msg.readBy : [],
             createdAt: msg.createdAt || new Date()
           }));
@@ -461,6 +493,9 @@ export const UserChatProvider = ({ children }) => {
       setIsLoading(false);
     }
   }, [user?._id, authRequest, API_URI, socket, isLoggedIn, guestInfo]);
+
+  // Keep latest fetchRoom available to the one-time socket listeners (reconnect resync)
+  fetchRoomRef.current = fetchRoom;
 
   // --- Single effect to handle room fetching and loading state ---
   useEffect(() => {
@@ -544,7 +579,8 @@ export const UserChatProvider = ({ children }) => {
   // --- Send message ---
   const handleSend = React.useCallback(async () => {
     const trimmed = inputMessage.trim();
-    if (!trimmed) return;
+    const image = imageToSend;
+    if (!trimmed && !image) return;
     if (!activeRoom?._id) {
       return;
     }
@@ -560,7 +596,8 @@ export const UserChatProvider = ({ children }) => {
         const tempMessage = {
           _id: tempId,
           senderType: isGuest ? "guest" : "customer",
-          text: inputMessage,
+          text: trimmed,
+          image,
           reaction: "",
           readBy: [],
           reactions: [],
@@ -580,7 +617,8 @@ export const UserChatProvider = ({ children }) => {
         const socketData = { 
           roomId: activeRoom._id, 
           senderType: isGuest ? "guest" : "customer", 
-          text: inputMessage,
+          text: trimmed,
+          image,
           tempId
         };
         if (isGuest) {
@@ -593,11 +631,12 @@ export const UserChatProvider = ({ children }) => {
       }
       
       setInputMessage("");
+      setImageToSend("");
     } catch (err) {
       console.error("Error sending message:", err);
       setError(err.response?.data?.message || "Failed to send message");
     }
-  }, [inputMessage, activeRoom?._id, socket, user?._id, isLoggedIn, guestInfo]);
+  }, [inputMessage, imageToSend, activeRoom?._id, socket, user?._id, isLoggedIn, guestInfo]);
 
   // --- Mark messages as read (with debouncing) ---
   const markAsReadTimeoutRef = useRef(null);
@@ -652,20 +691,20 @@ export const UserChatProvider = ({ children }) => {
       if (isTyping) {
         socket.emit("typingStart", {
           roomId: activeRoom._id,
-          senderId: user._id,
-          senderType: "customer"
+          senderId: user?._id || guestId,
+          senderType: user?._id ? "customer" : "guest"
         });
       } else {
         socket.emit("typingStop", {
           roomId: activeRoom._id,
-          senderId: user._id,
-          senderType: "customer"
+          senderId: user?._id || guestId,
+          senderType: user?._id ? "customer" : "guest"
         });
       }
     } catch (err) {
       console.error("Error sending typing indicator:", err);
     }
-  }, [activeRoom?._id, socket, user?._id]);
+  }, [activeRoom?._id, socket, user?._id, guestId]);
 
   // --- Open/Close chat ---
   const openChat = React.useCallback(() => {
@@ -763,6 +802,24 @@ export const UserChatProvider = ({ children }) => {
     const isGuest = !user?._id || !isLoggedIn;
     const senderId = user?._id || guestId;
     const userName = isGuest ? (guestInfo?.name || 'Guest') : `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'User';
+    const uid = String(senderId);
+
+    // Optimistic: apply instantly, server broadcast will reconcile
+    setMessages(prev => prev.map(m => {
+      if (m._id !== messageId) return m;
+      const current = Array.isArray(m.reactions) ? m.reactions : [];
+      const idx = current.findIndex(r => String(r.userId) === uid);
+      let next;
+      if (idx >= 0) {
+        next = current[idx].emoji === emoji
+          ? current.filter((_, i) => i !== idx)
+          : current.map((r, i) => i === idx ? { ...r, emoji } : r);
+      } else {
+        next = [...current, { emoji, userId: uid, senderType: 'customer', userName, createdAt: new Date().toISOString() }];
+      }
+      return { ...m, reactions: next, reaction: next.length ? next[0].emoji : '' };
+    }));
+
     socket.emit("addReaction", {
       roomId: activeRoom._id,
       messageId,
@@ -842,6 +899,8 @@ export const UserChatProvider = ({ children }) => {
     openChat,
     closeChat,
     setInputMessage,
+    imageToSend,
+    setImageToSend,
     handleSend,
     clearError,
     clearNotifications,

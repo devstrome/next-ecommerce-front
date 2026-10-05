@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { getStorage } from '../lib/storage';
-import { FaPlus, FaEdit, FaTrash, FaArrowLeft, FaToggleOn, FaToggleOff, FaGripVertical } from 'react-icons/fa';
+import { FaPlus, FaEdit, FaTrash, FaArrowLeft, FaToggleOn, FaToggleOff, FaGripVertical, FaUpload } from 'react-icons/fa';
 import { useRouter } from "next/navigation";
 import { toast } from 'react-toastify';
 
@@ -26,6 +26,7 @@ const AdminHeroSlides = () => {
   const [slides, setSlides] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({
@@ -188,7 +189,35 @@ const AdminHeroSlides = () => {
               </div>
               <div className="sm:col-span-2">
                 <label className="block text-xs sm:text-sm font-medium text-[#4A4A4A] mb-1">Background Image URL</label>
-                <input type="text" value={form.bgImage} onChange={(e) => setField('bgImage', e.target.value)} className="w-full px-3 py-2 border border-[#BDBDBD] bg-white text-[#1B1B1B] text-sm" placeholder="https://..." />
+                <div className="flex gap-2">
+                  <input type="text" value={form.bgImage} onChange={(e) => setField('bgImage', e.target.value)} className="flex-1 min-w-0 px-3 py-2 border border-[#BDBDBD] bg-white text-[#1B1B1B] text-sm" placeholder="https://..." />
+                  <label className={`flex items-center gap-2 px-4 py-2 bg-[#1B1B1B] text-white text-sm font-semibold cursor-pointer hover:bg-[#B1123B] transition whitespace-nowrap ${uploadingImage ? 'opacity-60 pointer-events-none' : ''}`}>
+                    <FaUpload size={13} />
+                    {uploadingImage ? 'Uploading...' : 'Upload'}
+                    <input type="file" accept="image/*" className="hidden"
+                      disabled={uploadingImage}
+                      onChange={async (e) => {
+                        const file = e.target.files && e.target.files[0];
+                        if (!file) return;
+                        const fd = new FormData();
+                        fd.append('image', file);
+                        setUploadingImage(true);
+                        try {
+                          const res = await axios.post(`${API_URI}/api/upload/image`, fd, {
+                            headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` },
+                          });
+                          setField('bgImage', res.data.url);
+                          toast.success('Image uploaded');
+                        } catch (err) {
+                          toast.error(err.response?.data?.message || 'Image upload failed');
+                          console.error('Image upload failed:', err);
+                        } finally {
+                          setUploadingImage(false);
+                          e.target.value = '';
+                        }
+                      }} />
+                  </label>
+                </div>
                 {form.bgImage && <img src={form.bgImage} alt="preview" className="mt-2 h-16 sm:h-20 w-full sm:w-auto object-cover border border-[#BDBDBD] rounded" onError={(e) => e.target.style.display='none'} />}
               </div>
               <div>

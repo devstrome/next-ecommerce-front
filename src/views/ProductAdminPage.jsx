@@ -1,7 +1,7 @@
 'use client'
 import React from 'react';
 import Link from "next/link";
-import { FiArrowLeft, FiPackage, FiTag, FiGrid, FiTruck, FiPercent, FiImage, FiStar, FiLink2, FiBox, FiMonitor, FiLayers } from 'react-icons/fi';
+import { FiArrowLeft, FiPackage, FiTag, FiGrid, FiTruck, FiPercent, FiImage, FiStar, FiLink2, FiBox, FiMonitor, FiLayers, FiFilter } from 'react-icons/fi';
 import { LuBadgeCheck } from "react-icons/lu";
 import { FaTransgenderAlt } from "react-icons/fa";
 import { TbGeometry } from "react-icons/tb";
@@ -19,6 +19,7 @@ const ProductAdminPage = () => {
     { name: 'Top Rated', icon: <FiStar />, path: '/admin/dashboard/products/top-rated' },
     { name: 'Related', icon: <FiLink2 />, path: '/admin/dashboard/products/related' },
     { name: 'Shipping', icon: <FiTruck />, path: '/admin/dashboard/products/shipping' },
+    { name: 'Checkout Rules', icon: <FiFilter />, path: '/admin/dashboard/products/checkout-rules' },
     { name: 'Measure Type', icon: <TbGeometry />, path: '/admin/dashboard/products/measure-type' },
     { name: 'Popup Ads', icon: <FiMonitor />, path: '/admin/dashboard/products/popup-ads' },
     { name: 'Hero Slides', icon: <FiLayers />, path: '/admin/dashboard/products/hero-slides' },

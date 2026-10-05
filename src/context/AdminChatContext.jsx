@@ -20,6 +20,7 @@ export const AdminChatProvider = ({ children }) => {
   const [activeRoomId, setActiveRoomId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState("");
+const [imageToSend, setImageToSend] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [socket, setSocket] = useState(null);
@@ -43,6 +44,11 @@ export const AdminChatProvider = ({ children }) => {
   useEffect(() => {
     activeRoomIdRef.current = activeRoom?._id || activeRoomId || null;
   }, [activeRoom?._id, activeRoomId]);
+
+  // Mirror latest admin id + fetchRoom for one-time socket listeners
+  const adminIdRef = React.useRef(null);
+  adminIdRef.current = admin?._id || null;
+  const fetchRoomRef = React.useRef(null);
 
   // Use environment variable with fallback to port 5000
   const API_URI = process.env.NEXT_PUBLIC_API_URI || "http://localhost:3000";
@@ -134,7 +140,7 @@ export const AdminChatProvider = ({ children }) => {
         event.preventDefault();
         window.focus();
         if (message.roomId) {
-          window.location.href = `/admin/dashboard/message/${message.roomId}`;
+          window.location.href = `/admin/dashboard/inbox/${message.roomId}`;
         }
         notification.close();
       };
@@ -145,7 +151,7 @@ export const AdminChatProvider = ({ children }) => {
         if (event.action === 'open') {
           window.focus();
           if (message.roomId) {
-            window.location.href = `/admin/dashboard/message/${message.roomId}`;
+            window.location.href = `/admin/dashboard/inbox/${message.roomId}`;
           }
         } else if (event.action === 'mark_read') {
           // Mark messages as read via socket
@@ -242,7 +248,9 @@ export const AdminChatProvider = ({ children }) => {
           senderId: msg.senderId,
           senderType: msg.senderType,
           text: msg.text,
+          image: msg.image || '',
           reaction: msg.reaction || "",
+          reactions: Array.isArray(msg.reactions) ? msg.reactions : [],
           readBy: msg.readBy || [],
           createdAt: msg.createdAt || new Date()
         }))
@@ -292,7 +300,9 @@ export const AdminChatProvider = ({ children }) => {
         senderId: msg.senderId,
         senderType: msg.senderType,
         text: msg.text,
+        image: msg.image || '',
         reaction: msg.reaction || "",
+        reactions: Array.isArray(msg.reactions) ? msg.reactions : [],
         readBy: msg.readBy || [],
         createdAt: msg.createdAt || new Date()
       }));
@@ -306,9 +316,14 @@ export const AdminChatProvider = ({ children }) => {
     }
   }, [API_URI]);
 
+  // Keep latest fetchRoom available to one-time socket listeners (reconnect resync)
+  fetchRoomRef.current = fetchRoom;
+
   // --- Send message ---
   const handleSend = React.useCallback(async () => {
-    if (!inputMessage.trim() || !activeRoom?._id) return;
+    const trimmed = inputMessage.trim();
+    const image = imageToSend;
+    if ((!trimmed && !image) || !activeRoom?._id) return;
     
     try {
       setError(null);
@@ -320,7 +335,8 @@ export const AdminChatProvider = ({ children }) => {
           _id: tempId,
           senderId: admin._id,
           senderType: "admin",
-          text: inputMessage,
+          text: trimmed,
+          image,
           reaction: "",
           readBy: [],
           reactions: [],
@@ -335,17 +351,19 @@ export const AdminChatProvider = ({ children }) => {
           roomId: activeRoom._id, 
           senderId: admin._id, 
           senderType: "admin", 
-          text: inputMessage,
+          text: trimmed,
+          image,
           tempId
         });
       }
       
       setInputMessage("");
+      setImageToSend("");
     } catch (err) {
       console.error("Error sending message:", err);
       setError(err.response?.data?.message || "Failed to send message");
     }
-  }, [inputMessage, activeRoom?._id, socket, admin?._id]);
+  }, [inputMessage, imageToSend, activeRoom?._id, socket, admin?._id]);
 
   // --- Transfer room ---
   const transferRoom = async (roomId, newAdminId) => {
@@ -422,19 +440,25 @@ export const AdminChatProvider = ({ children }) => {
       timeout: 10000,
       forceNew: false,
       reconnection: true,
-      reconnectionAttempts: 3,
-      reconnectionDelay: 5000
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 10000
     });
 
     socketClient.on("connect", () => {
       setIsConnected(true);
       socketClient.emit("joinAdminRoom");
       setError(null);
+      // Rejoin + resync the active chat room after a reconnect
+      const rid = activeRoomIdRef.current;
+      if (rid) {
+        socketClient.emit("joinChatRoom", { roomId: rid, userType: "admin" });
+        fetchRoomRef.current?.(rid);
+      }
     });
 
     socketClient.on("connect_error", () => {
       setIsConnected(false);
-      socketClient.disconnect();
     });
 
     socketClient.on("disconnect", () => {
@@ -482,7 +506,7 @@ export const AdminChatProvider = ({ children }) => {
         notification.onclick = (event) => {
           event.preventDefault();
           window.focus();
-          window.location.href = `/admin/dashboard/message/${room._id}`;
+          window.location.href = `/admin/dashboard/inbox/${room._id}`;
           notification.close();
         };
         
@@ -493,7 +517,7 @@ export const AdminChatProvider = ({ children }) => {
             // Auto-assign the room to current admin
             autoAssignAdmin();
           } else if (event.action === 'view') {
-            window.location.href = `/admin/dashboard/message/${room._id}`;
+            window.location.href = `/admin/dashboard/inbox/${room._id}`;
           }
           notification.close();
         };
@@ -510,7 +534,9 @@ export const AdminChatProvider = ({ children }) => {
         senderType: message.senderType || 'customer',
         senderName: message.senderName || '',
         text: message.text,
+        image: message.image || '',
         reaction: message.reaction || "",
+        reactions: Array.isArray(message.reactions) ? message.reactions : [],
         readBy: Array.isArray(message.readBy) ? message.readBy : [],
         createdAt: message.createdAt || new Date()
       };
@@ -561,6 +587,15 @@ export const AdminChatProvider = ({ children }) => {
           
           return [...prev, cleanMessage];
         });
+
+        // Mark read instantly so the customer's read receipt updates immediately
+        if (message.senderType !== 'admin' && adminIdRef.current) {
+          socketClient.emit("markMessagesAsRead", {
+            roomId: message.roomId,
+            readerType: "admin",
+            readerId: adminIdRef.current
+          });
+        }
       }
       
       // Show notification for customer messages, always
@@ -599,8 +634,8 @@ export const AdminChatProvider = ({ children }) => {
           : room
       ));
       
-      if (activeRoom?._id === data.roomId) {
-        setActiveRoom(prev => ({ ...prev, ...data.updates }));
+      if (activeRoomIdRef.current === data.roomId) {
+        setActiveRoom(prev => prev ? ({ ...prev, ...data.updates }) : prev);
       }
     });
 
@@ -648,11 +683,11 @@ export const AdminChatProvider = ({ children }) => {
       );
       
       // If this is the active room, update it
-      if (activeRoom?._id === data.roomId) {
-        setActiveRoom(prev => ({
+      if (activeRoomIdRef.current === data.roomId) {
+        setActiveRoom(prev => prev ? ({
           ...prev,
           assignedAdmin: { _id: data.adminId, firstName: data.adminName }
-        }));
+        }) : prev);
       }
     });
 
@@ -685,7 +720,7 @@ export const AdminChatProvider = ({ children }) => {
       });
       
       // Update active room messages if it's the current room
-      if (activeRoom?._id === data.roomId) {
+      if (activeRoomIdRef.current === data.roomId) {
         setMessages(prev => prev.map(msg => {
           if (msg.senderType !== 'admin') return msg;
           const alreadyRead = (msg.readBy || []).some(r => r.readerType === data.readerType);
@@ -712,14 +747,23 @@ export const AdminChatProvider = ({ children }) => {
 
     socketClient.on("messageUpdated", (data) => {
       const { messageId, updates } = data;
+      const patch = {};
+      if (updates) {
+        Object.assign(patch, updates);
+      } else {
+        if (Array.isArray(data.reactions)) patch.reactions = data.reactions;
+        if (data.reaction !== undefined) patch.reaction = data.reaction;
+        if (data.image !== undefined) patch.image = data.image;
+        if (data.text !== undefined) patch.text = data.text;
+      }
       setRooms(prev => prev.map(room => ({
         ...room,
         messages: room.messages.map(msg =>
-          msg._id === messageId ? { ...msg, ...updates } : msg
+          msg._id === messageId ? { ...msg, ...patch } : msg
         )
       })));
       setMessages(prev => prev.map(msg =>
-        msg._id === messageId ? { ...msg, ...updates } : msg
+        msg._id === messageId ? { ...msg, ...patch } : msg
       ));
     });
 
@@ -734,10 +778,10 @@ export const AdminChatProvider = ({ children }) => {
     });
 
     socketClient.on("userTyping", (data) => {
-      // Handle typing indicator from customer
-      if (data.senderType === "customer" && data.isTyping) {
+      // Handle typing indicator from customer (or guest)
+      if ((data.senderType === "customer" || data.senderType === "guest") && data.isTyping) {
         setIsTyping(true);
-      } else if (data.senderType === "customer" && !data.isTyping) {
+      } else if ((data.senderType === "customer" || data.senderType === "guest") && !data.isTyping) {
         setIsTyping(false);
       }
     });
@@ -956,12 +1000,32 @@ export const AdminChatProvider = ({ children }) => {
   // --- Add reaction to message ---
   const addReaction = React.useCallback((messageId, emoji) => {
     if (!activeRoom?._id || !socket || !admin?._id) return;
+    const uid = String(admin._id);
+    const userName = `${admin.firstName || ''} ${admin.lastName || ''}`.trim() || 'Admin';
+
+    // Optimistic: apply instantly, server broadcast will reconcile
+    setMessages(prev => prev.map(m => {
+      if (m._id !== messageId) return m;
+      const current = Array.isArray(m.reactions) ? m.reactions : [];
+      const idx = current.findIndex(r => String(r.userId) === uid);
+      let next;
+      if (idx >= 0) {
+        next = current[idx].emoji === emoji
+          ? current.filter((_, i) => i !== idx)
+          : current.map((r, i) => i === idx ? { ...r, emoji } : r);
+      } else {
+        next = [...current, { emoji, userId: uid, senderType: 'admin', userName, createdAt: new Date().toISOString() }];
+      }
+      return { ...m, reactions: next, reaction: next.length ? next[0].emoji : '' };
+    }));
+
     socket.emit("addReaction", {
       roomId: activeRoom._id,
       messageId,
       emoji,
       userId: admin._id,
-      userName: `${admin.firstName || ''} ${admin.lastName || ''}`.trim() || 'Admin'
+      senderType: 'admin',
+      userName
     });
   }, [activeRoom?._id, socket, admin]);
 
@@ -1021,6 +1085,8 @@ export const AdminChatProvider = ({ children }) => {
     fetchRooms,
     fetchRoom,
     handleSend, // Use the new socket-based handleSend
+    imageToSend,
+    setImageToSend,
     transferRoom,
     closeRoom,
     joinRoom,

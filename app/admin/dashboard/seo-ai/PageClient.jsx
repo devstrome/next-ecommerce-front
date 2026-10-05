@@ -4,8 +4,60 @@ import axios from 'axios'
 import { getStorage } from '../../../../src/lib/storage'
 import {
   FiSearch, FiRefreshCw, FiZap, FiCheck, FiAlertCircle,
-  FiDatabase, FiChevronDown, FiChevronUp, FiFileText
+  FiDatabase, FiChevronDown, FiChevronUp, FiFileText, FiLayers, FiTrash2
 } from 'react-icons/fi'
+
+function SeoEditFields({ editSeo, setEditSeo }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+      <div>
+        <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Meta Title</label>
+        <input value={editSeo.metaTitle || ''} onChange={e => setEditSeo({ ...editSeo, metaTitle: e.target.value })}
+          className="w-full text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 focus:outline-none focus:border-[#DC143C] transition" />
+        <span className={`text-xs mt-1 ${editSeo.metaTitle?.length > 60 ? 'text-red-500' : 'text-[#9CA3AF]'}`}>{editSeo.metaTitle?.length || 0}/60</span>
+      </div>
+      <div>
+        <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Meta Description</label>
+        <textarea value={editSeo.metaDescription || ''} onChange={e => setEditSeo({ ...editSeo, metaDescription: e.target.value })} rows={3}
+          className="w-full text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 focus:outline-none focus:border-[#DC143C] transition resize-none" />
+        <span className={`text-xs mt-1 ${editSeo.metaDescription?.length > 160 ? 'text-red-500' : 'text-[#9CA3AF]'}`}>{editSeo.metaDescription?.length || 0}/160</span>
+      </div>
+      <div>
+        <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Keywords</label>
+        <input value={editSeo.metaKeywords || ''} onChange={e => setEditSeo({ ...editSeo, metaKeywords: e.target.value })}
+          className="w-full text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 focus:outline-none focus:border-[#DC143C] transition" />
+      </div>
+      <div>
+        <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">OG Image URL</label>
+        <input value={editSeo.ogImage || ''} onChange={e => setEditSeo({ ...editSeo, ogImage: e.target.value })}
+          className="w-full text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 focus:outline-none focus:border-[#DC143C] transition" />
+      </div>
+    </div>
+  )
+}
+
+function SeoViewFields({ seo }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+      <div>
+        <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Meta Title</label>
+        <p className="text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2">{seo?.metaTitle || 'Not generated'}</p>
+      </div>
+      <div>
+        <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Meta Description</label>
+        <p className="text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2">{seo?.metaDescription || 'Not generated'}</p>
+      </div>
+      <div>
+        <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Keywords</label>
+        <p className="text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2">{seo?.metaKeywords || '—'}</p>
+      </div>
+      <div>
+        <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">OG Image</label>
+        <p className="text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 truncate">{seo?.ogImage || '—'}</p>
+      </div>
+    </div>
+  )
+}
 
 export default function PageClient() {
   const [stats, setStats] = useState({ total: 0, withSEO: 0, pending: 0, blogTotal: 0, blogWithSEO: 0, blogPending: 0, staticTotal: 0, staticWithSEO: 0, staticPending: 0 })
@@ -28,19 +80,32 @@ export default function PageClient() {
     headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` }
   })
 
+  const extractArray = (response) => {
+    if (!response) return []
+    const d = response.data
+    if (Array.isArray(d)) return d
+    if (Array.isArray(d?.blogs)) return d.blogs
+    if (Array.isArray(d?.data)) return d.data
+    if (Array.isArray(d?.pages)) return d.pages
+    if (Array.isArray(d?.staticPages)) return d.staticPages
+    if (Array.isArray(d?.items)) return d.items
+    if (Array.isArray(d?.results)) return d.results
+    return []
+  }
+
   const fetchData = async () => {
     try {
       setLoading(true)
       const [statsRes, productsRes, blogsRes, staticRes] = await Promise.allSettled([
         axios.get(`${API_URI}/api/seo/stats`, getAuthHeader()),
         axios.get(`${API_URI}/api/products`, getAuthHeader()),
-        axios.get(`${API_URI}/api/admin/blogs`, getAuthHeader()),
+        axios.get(`${API_URI}/api/admin/blogs?limit=1000`, getAuthHeader()),
         axios.get(`${API_URI}/api/seo/static-pages`, getAuthHeader()),
       ])
       setStats(statsRes.status === 'fulfilled' ? statsRes.value.data : { total: 0, withSEO: 0, pending: 0, blogTotal: 0, blogWithSEO: 0, blogPending: 0, staticTotal: 0, staticWithSEO: 0, staticPending: 0 })
-      setProducts(productsRes.status === 'fulfilled' ? productsRes.value.data : [])
-      setBlogs(blogsRes.status === 'fulfilled' ? (Array.isArray(blogsRes.value.data) ? blogsRes.value.data : []) : [])
-      setStaticPages(staticRes.status === 'fulfilled' ? (Array.isArray(staticRes.value.data) ? staticRes.value.data : []) : [])
+      setProducts(extractArray(productsRes.status === 'fulfilled' ? productsRes.value : null))
+      setBlogs(extractArray(blogsRes.status === 'fulfilled' ? blogsRes.value : null))
+      setStaticPages(extractArray(staticRes.status === 'fulfilled' ? staticRes.value : null))
     } catch (err) {
       console.error('Failed to fetch SEO data:', err)
     } finally {
@@ -65,10 +130,7 @@ export default function PageClient() {
   const handleForceRegenerate = async () => {
     try {
       setForceGenerating(true)
-      await Promise.all([
-        axios.post(`${API_URI}/api/seo/force`, {}, getAuthHeader()),
-        axios.post(`${API_URI}/api/seo/static-pages/force`, {}, getAuthHeader()),
-      ])
+      await axios.post(`${API_URI}/api/seo/force`, {}, getAuthHeader())
       await fetchData()
     } catch (err) {
       console.error('Failed to force regenerate:', err)
@@ -125,7 +187,7 @@ export default function PageClient() {
     setEditSeo({})
   }
 
-  const handleSaveSeo = async (type, id) => {
+  const handleSaveSeo = async (type, id, variantId) => {
     try {
       setSaving(true)
       if (type === 'product') {
@@ -134,6 +196,8 @@ export default function PageClient() {
         await axios.put(`${API_URI}/api/seo/blog/${id}`, { seo: editSeo }, getAuthHeader())
       } else if (type === 'static') {
         await axios.put(`${API_URI}/api/seo/static-page/${id}`, { seo: editSeo }, getAuthHeader())
+      } else if (type === 'variant') {
+        await axios.put(`${API_URI}/api/seo/product/${id}/variant/${variantId}`, { seo: editSeo }, getAuthHeader())
       }
       setEditingItem(null)
       setEditSeo({})
@@ -142,6 +206,26 @@ export default function PageClient() {
       console.error('Failed to save SEO:', err)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleRegenerateVariant = async (productId, variantId) => {
+    try {
+      await axios.post(`${API_URI}/api/seo/product/${productId}/variant/${variantId}`, {}, getAuthHeader())
+      await fetchData()
+    } catch (err) {
+      console.error('Failed to regenerate variant SEO:', err)
+    }
+  }
+
+  const handleClearVariant = async (productId, variantId) => {
+    if (!window.confirm("Clear this variant's custom SEO? The page will inherit the product SEO.")) return
+    try {
+      await axios.delete(`${API_URI}/api/seo/product/${productId}/variant/${variantId}`, getAuthHeader())
+      if (editingItem === `v-${productId}:${variantId}`) cancelEditing()
+      await fetchData()
+    } catch (err) {
+      console.error('Failed to clear variant SEO:', err)
     }
   }
 
@@ -335,30 +419,7 @@ export default function PageClient() {
                       <div className="px-4 pb-4 pt-1 border-t border-[#F3F4F6] bg-[#FAFAFA]">
                         {editingItem === `p-${product._id}` ? (
                           <>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Meta Title</label>
-                                <input value={editSeo.metaTitle || ''} onChange={e => setEditSeo({ ...editSeo, metaTitle: e.target.value })}
-                                  className="w-full text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 focus:outline-none focus:border-[#DC143C] transition" />
-                                <span className={`text-xs mt-1 ${editSeo.metaTitle?.length > 60 ? 'text-red-500' : 'text-[#9CA3AF]'}`}>{editSeo.metaTitle?.length || 0}/60</span>
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Meta Description</label>
-                                <textarea value={editSeo.metaDescription || ''} onChange={e => setEditSeo({ ...editSeo, metaDescription: e.target.value })} rows={3}
-                                  className="w-full text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 focus:outline-none focus:border-[#DC143C] transition resize-none" />
-                                <span className={`text-xs mt-1 ${editSeo.metaDescription?.length > 160 ? 'text-red-500' : 'text-[#9CA3AF]'}`}>{editSeo.metaDescription?.length || 0}/160</span>
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Keywords</label>
-                                <input value={editSeo.metaKeywords || ''} onChange={e => setEditSeo({ ...editSeo, metaKeywords: e.target.value })}
-                                  className="w-full text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 focus:outline-none focus:border-[#DC143C] transition" />
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">OG Image URL</label>
-                                <input value={editSeo.ogImage || ''} onChange={e => setEditSeo({ ...editSeo, ogImage: e.target.value })}
-                                  className="w-full text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 focus:outline-none focus:border-[#DC143C] transition" />
-                              </div>
-                            </div>
+                            <SeoEditFields editSeo={editSeo} setEditSeo={setEditSeo} />
                             <div className="flex justify-end gap-2">
                               <button onClick={cancelEditing} className="px-4 py-2 border border-[#E5E7EB] text-[#6B7280] text-sm font-semibold rounded-lg hover:bg-[#F9FAFB] transition">Cancel</button>
                               <button onClick={() => handleSaveSeo('product', product._id)} disabled={saving}
@@ -369,24 +430,7 @@ export default function PageClient() {
                           </>
                         ) : (
                           <>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Meta Title</label>
-                                <p className="text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2">{product.seo?.metaTitle || 'Not generated'}</p>
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Meta Description</label>
-                                <p className="text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2">{product.seo?.metaDescription || 'Not generated'}</p>
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Keywords</label>
-                                <p className="text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2">{product.seo?.metaKeywords || '—'}</p>
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">OG Image</label>
-                                <p className="text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 truncate">{product.seo?.ogImage || '—'}</p>
-                              </div>
-                            </div>
+                            <SeoViewFields seo={product.seo} />
                             <div className="flex justify-end gap-2">
                               <button onClick={() => startEditing(`p-${product._id}`, product.seo)}
                                 className="flex items-center gap-2 px-4 py-2 border border-[#E5E7EB] text-[#1A1A1A] text-sm font-semibold rounded-lg hover:bg-[#F9FAFB] transition">
@@ -398,6 +442,74 @@ export default function PageClient() {
                               </button>
                             </div>
                           </>
+                        )}
+
+                        {/* Variant SEO */}
+                        {Array.isArray(product.variants) && product.variants.length > 0 && (
+                          <div className="mt-5 pt-4 border-t border-[#E5E7EB]">
+                            <div className="flex items-center gap-2 mb-3">
+                              <FiLayers size={14} className="text-[#6B7280]" />
+                              <p className="text-xs font-semibold text-[#6B7280] uppercase tracking-wide">Variant SEO ({product.variants.length})</p>
+                            </div>
+                            <div className="space-y-3">
+                              {product.variants.map((variant) => {
+                                const vSeo = variant.seo
+                                const hasCustom = !!vSeo?.metaTitle
+                                const vKey = `v-${product._id}:${variant._id}`
+                                const vEditing = editingItem === vKey
+                                const prices = (variant.prices || []).filter(p => typeof p === 'number')
+                                const priceLabel = prices.length === 0 ? ''
+                                  : prices.length === 1 ? `BDT ${prices[0]}`
+                                  : `BDT ${Math.min(...prices)}–${Math.max(...prices)}`
+                                const vLabel = [variant.colorName, ...(variant.sizes || [])].filter(Boolean).join(' · ') || 'Variant'
+                                return (
+                                  <div key={variant._id} className="bg-white border border-[#E5E7EB] rounded-lg px-4 py-3">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <div className="flex items-center gap-3 min-w-0">
+                                        <p className="text-sm font-semibold text-[#1A1A1A] truncate">{vLabel}</p>
+                                        {priceLabel && <span className="text-xs text-[#6B7280] shrink-0">{priceLabel}</span>}
+                                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${hasCustom ? 'bg-[#D1FAE5] text-[#059669]' : 'bg-[#F3F4F6] text-[#6B7280]'}`}>
+                                          {hasCustom ? <FiCheck size={11} /> : <FiAlertCircle size={11} />}
+                                          {hasCustom ? 'Custom SEO' : 'Inherits product'}
+                                        </span>
+                                      </div>
+                                      {!vEditing && (
+                                        <div className="flex items-center gap-2">
+                                          <button onClick={() => startEditing(vKey, vSeo)}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 border border-[#E5E7EB] text-[#1A1A1A] text-xs font-semibold rounded-lg hover:bg-[#F9FAFB] transition">
+                                            <FiSearch size={13} /> {hasCustom ? 'Edit SEO' : 'Add SEO'}
+                                          </button>
+                                          <button onClick={() => handleRegenerateVariant(product._id, variant._id)}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1A1A1A] text-white text-xs font-semibold rounded-lg hover:bg-[#DC143C] transition-all duration-200">
+                                            <FiRefreshCw size={13} /> Regenerate
+                                          </button>
+                                          {hasCustom && (
+                                            <button onClick={() => handleClearVariant(product._id, variant._id)}
+                                              title="Clear variant SEO (inherit product SEO)"
+                                              className="flex items-center justify-center w-8 h-8 border border-[#E5E7EB] text-[#DC143C] rounded-lg hover:bg-[#FEF2F2] transition">
+                                              <FiTrash2 size={14} />
+                                            </button>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                    {vEditing && (
+                                      <div className="mt-3 pt-3 border-t border-[#F3F4F6]">
+                                        <SeoEditFields editSeo={editSeo} setEditSeo={setEditSeo} />
+                                        <div className="flex justify-end gap-2">
+                                          <button onClick={cancelEditing} className="px-4 py-2 border border-[#E5E7EB] text-[#6B7280] text-sm font-semibold rounded-lg hover:bg-[#F9FAFB] transition">Cancel</button>
+                                          <button onClick={() => handleSaveSeo('variant', product._id, variant._id)} disabled={saving}
+                                            className="flex items-center gap-2 px-4 py-2 bg-[#DC143C] text-white text-sm font-semibold rounded-lg hover:bg-[#B91C1C] transition disabled:opacity-50">
+                                            {saving ? <FiRefreshCw size={14} className="animate-spin" /> : <FiCheck size={14} />} Save
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
                         )}
                       </div>
                     )}
@@ -463,30 +575,7 @@ export default function PageClient() {
                       <div className="px-4 pb-4 pt-1 border-t border-[#F3F4F6] bg-[#FAFAFA]">
                         {editingItem === `b-${blog._id}` ? (
                           <>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Meta Title</label>
-                                <input value={editSeo.metaTitle || ''} onChange={e => setEditSeo({ ...editSeo, metaTitle: e.target.value })}
-                                  className="w-full text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 focus:outline-none focus:border-[#DC143C] transition" />
-                                <span className={`text-xs mt-1 ${editSeo.metaTitle?.length > 60 ? 'text-red-500' : 'text-[#9CA3AF]'}`}>{editSeo.metaTitle?.length || 0}/60</span>
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Meta Description</label>
-                                <textarea value={editSeo.metaDescription || ''} onChange={e => setEditSeo({ ...editSeo, metaDescription: e.target.value })} rows={3}
-                                  className="w-full text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 focus:outline-none focus:border-[#DC143C] transition resize-none" />
-                                <span className={`text-xs mt-1 ${editSeo.metaDescription?.length > 160 ? 'text-red-500' : 'text-[#9CA3AF]'}`}>{editSeo.metaDescription?.length || 0}/160</span>
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Keywords</label>
-                                <input value={editSeo.metaKeywords || ''} onChange={e => setEditSeo({ ...editSeo, metaKeywords: e.target.value })}
-                                  className="w-full text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 focus:outline-none focus:border-[#DC143C] transition" />
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">OG Image URL</label>
-                                <input value={editSeo.ogImage || ''} onChange={e => setEditSeo({ ...editSeo, ogImage: e.target.value })}
-                                  className="w-full text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 focus:outline-none focus:border-[#DC143C] transition" />
-                              </div>
-                            </div>
+                            <SeoEditFields editSeo={editSeo} setEditSeo={setEditSeo} />
                             <div className="flex justify-end gap-2">
                               <button onClick={cancelEditing} className="px-4 py-2 border border-[#E5E7EB] text-[#6B7280] text-sm font-semibold rounded-lg hover:bg-[#F9FAFB] transition">Cancel</button>
                               <button onClick={() => handleSaveSeo('blog', blog._id)} disabled={saving}
@@ -497,24 +586,7 @@ export default function PageClient() {
                           </>
                         ) : (
                           <>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Meta Title</label>
-                                <p className="text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2">{blog.seo?.metaTitle || 'Not generated'}</p>
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Meta Description</label>
-                                <p className="text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2">{blog.seo?.metaDescription || 'Not generated'}</p>
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Keywords</label>
-                                <p className="text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2">{blog.seo?.metaKeywords || '—'}</p>
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">OG Image</label>
-                                <p className="text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 truncate">{blog.seo?.ogImage || '—'}</p>
-                              </div>
-                            </div>
+                            <SeoViewFields seo={blog.seo} />
                             <div className="flex justify-end gap-2">
                               <button onClick={() => startEditing(`b-${blog._id}`, blog.seo)}
                                 className="flex items-center gap-2 px-4 py-2 border border-[#E5E7EB] text-[#1A1A1A] text-sm font-semibold rounded-lg hover:bg-[#F9FAFB] transition">
@@ -574,30 +646,7 @@ export default function PageClient() {
                       <div className="px-4 pb-4 pt-1 border-t border-[#F3F4F6] bg-[#FAFAFA]">
                         {editingItem === `static-${page.slug}` ? (
                           <>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Meta Title</label>
-                                <input value={editSeo.metaTitle || ''} onChange={e => setEditSeo({ ...editSeo, metaTitle: e.target.value })}
-                                  className="w-full text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 focus:outline-none focus:border-[#DC143C] transition" />
-                                <span className={`text-xs mt-1 ${editSeo.metaTitle?.length > 60 ? 'text-red-500' : 'text-[#9CA3AF]'}`}>{editSeo.metaTitle?.length || 0}/60</span>
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Meta Description</label>
-                                <textarea value={editSeo.metaDescription || ''} onChange={e => setEditSeo({ ...editSeo, metaDescription: e.target.value })} rows={3}
-                                  className="w-full text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 focus:outline-none focus:border-[#DC143C] transition resize-none" />
-                                <span className={`text-xs mt-1 ${editSeo.metaDescription?.length > 160 ? 'text-red-500' : 'text-[#9CA3AF]'}`}>{editSeo.metaDescription?.length || 0}/160</span>
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Keywords</label>
-                                <input value={editSeo.metaKeywords || ''} onChange={e => setEditSeo({ ...editSeo, metaKeywords: e.target.value })}
-                                  className="w-full text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 focus:outline-none focus:border-[#DC143C] transition" />
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">OG Image URL</label>
-                                <input value={editSeo.ogImage || ''} onChange={e => setEditSeo({ ...editSeo, ogImage: e.target.value })}
-                                  className="w-full text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 focus:outline-none focus:border-[#DC143C] transition" />
-                              </div>
-                            </div>
+                            <SeoEditFields editSeo={editSeo} setEditSeo={setEditSeo} />
                             <div className="flex justify-end gap-2">
                               <button onClick={cancelEditing} className="px-4 py-2 border border-[#E5E7EB] text-[#6B7280] text-sm font-semibold rounded-lg hover:bg-[#F9FAFB] transition">Cancel</button>
                               <button onClick={() => handleSaveSeo('static', page.slug)} disabled={saving}
@@ -608,24 +657,7 @@ export default function PageClient() {
                           </>
                         ) : (
                           <>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Meta Title</label>
-                                <p className="text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2">{page.seo?.metaTitle || 'Not generated'}</p>
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Meta Description</label>
-                                <p className="text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2">{page.seo?.metaDescription || 'Not generated'}</p>
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Keywords</label>
-                                <p className="text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2">{page.seo?.metaKeywords || '—'}</p>
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">OG Image</label>
-                                <p className="text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 truncate">{page.seo?.ogImage || '—'}</p>
-                              </div>
-                            </div>
+                            <SeoViewFields seo={page.seo} />
                             <div className="flex justify-end gap-2">
                               <button onClick={() => startEditing(`static-${page.slug}`, page.seo)}
                                 className="flex items-center gap-2 px-4 py-2 border border-[#E5E7EB] text-[#1A1A1A] text-sm font-semibold rounded-lg hover:bg-[#F9FAFB] transition">

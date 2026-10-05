@@ -14,6 +14,8 @@ const ProductCRUDPage = () => {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const router = useRouter();
 
+  const authHeaders = () => ({ headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` } });
+
   const fetchProducts = async () => {
     setLoading(true);
     try {
@@ -41,14 +43,14 @@ const ProductCRUDPage = () => {
     try {
       await Promise.all(
         Array.from(selectedIds).map(id =>
-          axios.delete(`${process.env.NEXT_PUBLIC_API_URI}/api/products/${id}`)
+          axios.delete(`${process.env.NEXT_PUBLIC_API_URI}/api/products/${id}`, authHeaders())
         )
       );
       setProducts(prev => prev.filter(p => !selectedIds.has(p._id)));
       setSelectedIds(new Set());
     } catch (error) {
       console.error('Error deleting products:', error);
-      alert('Failed to delete some products. Please try again.');
+      alert(error.response?.data?.message || 'Failed to delete some products. Please try again.');
     }
   };
 
@@ -96,11 +98,11 @@ const ProductCRUDPage = () => {
     if (!window.confirm('Are you sure you want to delete this product?')) return;
 
     try {
-      await axios.delete(`${process.env.NEXT_PUBLIC_API_URI}/api/products/${productId}`);
+      await axios.delete(`${process.env.NEXT_PUBLIC_API_URI}/api/products/${productId}`, authHeaders());
       setProducts((prev) => prev.filter((product) => product._id !== productId));
     } catch (error) {
       console.error('Error deleting product:', error);
-      alert('Failed to delete product. Please try again.');
+      alert(error.response?.data?.message || 'Failed to delete product. Please try again.');
     }
   };
 
@@ -117,7 +119,22 @@ const ProductCRUDPage = () => {
   };
 
   const normalizedProducts = products.map((p) => {
-    const categoriesStr = Array.isArray(p.categories) ? p.categories.join(", ") : (p.categories || "");
+    const flatCats = [];
+    const pushCat = (v, depth = 0) => {
+      if (Array.isArray(v)) { v.forEach((x) => pushCat(x, depth + 1)); return; }
+      if (typeof v === 'string') {
+        const t = v.trim();
+        if (!t) return;
+        if (depth < 10) {
+          try { pushCat(JSON.parse(t), depth + 1); return; } catch {}
+        }
+        flatCats.push(t);
+        return;
+      }
+      if (v !== null && v !== undefined) flatCats.push(String(v));
+    };
+    (Array.isArray(p.categories) ? p.categories : []).forEach((item) => pushCat(item));
+    const categoriesStr = flatCats.join(", ");
     const variantCount = Array.isArray(p.variants) ? p.variants.length : 0;
     const shippingNames = Array.isArray(p.variants)
       ? Array.from(new Set(
@@ -311,7 +328,7 @@ const ProductCRUDPage = () => {
                   <th className="py-3 px-4 text-left text-xs font-semibold text-dark-gray uppercase tracking-wider">Image</th>
                   <th className="py-3 px-4 text-left text-xs font-semibold text-dark-gray uppercase tracking-wider">Name</th>
                   <th className="py-3 px-4 text-left text-xs font-semibold text-dark-gray uppercase tracking-wider">Brand</th>
-                  <th className="py-3 px-4 text-left text-xs font-semibold text-dark-gray uppercase tracking-wider">Price ($)</th>
+                  <th className="py-3 px-4 text-left text-xs font-semibold text-dark-gray uppercase tracking-wider">Price (BDT)</th>
                   <th className="py-3 px-4 text-left text-xs font-semibold text-dark-gray uppercase tracking-wider">SKU</th>
                   <th className="py-3 px-4 text-left text-xs font-semibold text-dark-gray uppercase tracking-wider">Category</th>
                   <th className="py-3 px-4 text-left text-xs font-semibold text-dark-gray uppercase tracking-wider">Variants</th>
