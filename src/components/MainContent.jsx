@@ -134,6 +134,11 @@ const MainContent = () => {
       fetchRealTimeData();
     });
 
+    // Admin changed coupons / rules / shipping / prices → refresh admin views
+    newSocket.on('storeChanged', () => {
+      window.dispatchEvent(new CustomEvent('storeChanged'));
+    });
+
     setSocket(newSocket);
 
     return () => {
@@ -449,7 +454,7 @@ const MainContent = () => {
                           {Array.isArray(product.variants) && product.variants.length > 0 && (
                             <div className="mt-2 space-y-1">
                               {product.variants.map((v, vi) => (
-                                <div key={v.variantId || vi} className="flex flex-wrap items-center gap-x-2 text-xs text-dark-gray">
+                                <div key={`${v.variantId || 'v'}-${v.size || ''}-${v.color || ''}-${vi}`} className="flex flex-wrap items-center gap-x-2 text-xs text-dark-gray">
                                   <span className="inline-flex items-center bg-cool-gray rounded px-1.5 py-0.5 font-medium text-black">
                                     {v.color || 'Default'}
                                     {v.size ? ` · ${v.size}` : ''}

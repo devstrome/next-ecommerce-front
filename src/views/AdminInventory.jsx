@@ -35,6 +35,18 @@ import JsBarcode from 'jsbarcode';
 import { useAdmin } from '../context/AdminContext';
 import QRScanner from '../components/QRScanner';
 import Barcode from '../components/Barcode';
+import { printDocument } from '../lib/print';
+import { printThermalLabels } from '../lib/print/thermal';
+import { formatMeasureLine } from '../lib/measure';
+import { formatBDT } from '../config/brand';
+
+// Human measure line for an inventory item: 'Size: M' / 'Volume: 30 ml'
+const itemMeasure = (i) =>
+  formatMeasureLine({
+    measureType: i?.measureType || i?.variantId?.measureType,
+    unitName: i?.unitName || i?.variantId?.unitName,
+    size: i?.size
+  });
 
 const AdminInventory = () => {
   const [inventory, setInventory] = useState([]);
@@ -71,7 +83,10 @@ const AdminInventory = () => {
   const [filters, setFilters] = useState({
     search: '',
     status: '',
-    productId: ''
+    productId: '',
+    variantId: '',
+    color: '',
+    size: ''
   });
   const [pagination, setPagination] = useState({
     page: 1,
@@ -126,6 +141,36 @@ const AdminInventory = () => {
       setAvailableVariants([]);
     }
   }, [formData.productId, products]);
+
+  // Populate the form whenever an inventory item is selected for editing
+  // (covers Quick Scan / manual code lookup, which previously left the form blank)
+  useEffect(() => {
+    if (!selectedInventory) return;
+    setFormData({
+      productId: selectedInventory.productId?._id || selectedInventory.productId || '',
+      variantId: selectedInventory.variantId?._id || selectedInventory.variantId || '',
+      size: selectedInventory.size || '',
+      stockQuantity: selectedInventory.stockQuantity || 1,
+      price: selectedInventory.price || 0,
+      discountPrice: selectedInventory.discountPrice || 0,
+      manualPricing: true,
+      location: selectedInventory.location || { warehouse: 'Main Warehouse', shelf: '', section: '' },
+      notes: selectedInventory.notes || ''
+    });
+  }, [selectedInventory]);
+
+  // Cascading filter options: product -> variant -> color -> size
+  const filterProduct = products.find(p => p._id === filters.productId) || null;
+  const filterVariants = filterProduct?.variants || [];
+  const filterColors = [...new Set(filterVariants.map(v => v.colorName || 'Default'))];
+  const filterVariant = filters.variantId ? filterVariants.find(v => v._id === filters.variantId) : null;
+  const filterSizes = filterVariant
+    ? (filterVariant.sizes || [])
+    : [...new Set(
+        filterVariants
+          .filter(v => !filters.color || (v.colorName || 'Default') === filters.color)
+          .flatMap(v => v.sizes || [])
+      )];
 
   const fetchInventory = async () => {
     try {
@@ -348,7 +393,6 @@ const AdminInventory = () => {
 
   const handleQRScan = async (scannedData) => {
     try {
-      console.log('QR Scanner: Scanned data:', scannedData);
       
       const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URI}/api/inventory/scan`, 
         { code: scannedData },
@@ -387,24 +431,25 @@ const AdminInventory = () => {
     }
   };
 
-  const handlePrintCodes = async () => {
-    try {
-      const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URI}/api/inventory/print-codes`, 
-        { 
-          inventoryIds: selectedItems,
-          quantities: printQuantities
-        },
-        { headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` } }
-      );
-
-      setShowPrintModal(true);
-    } catch (error) {
-      toast.error('Failed to generate print codes');
-    }
-  };
-
   const handleFilterChange = (key, value) => {
-    setFilters(prev => ({ ...prev, [key]: value }));
+    setFilters(prev => {
+      const next = { ...prev, [key]: value };
+      // Cascade: changing a higher level clears the lower ones
+      if (key === 'productId') {
+        next.variantId = '';
+        next.color = '';
+        next.size = '';
+      } else if (key === 'color') {
+        next.variantId = '';
+        next.size = '';
+      } else if (key === 'variantId') {
+        const product = products.find(p => p._id === next.productId);
+        const variant = product?.variants?.find(v => v._id === value);
+        next.color = value ? (variant?.colorName || 'Default') : '';
+        next.size = '';
+      }
+      return next;
+    });
     setPagination(prev => ({ ...prev, page: 1 }));
   };
 
@@ -457,297 +502,32 @@ const AdminInventory = () => {
     }
   };
 
-  const generatePrintContent = async () => {
-    const content = [];
-    
-    const allCodes = [];
+  const generatePrintContent = () => {
+    const labels = [];
     selectedItems.forEach(itemId => {
       const item = inventory.find(inv => inv._id === itemId);
       if (!item) return;
-      
-      const quantity = printQuantities[itemId] || item.stockQuantity;
-      
+
+      const quantity = printQuantities[itemId] || item.stockQuantity || 1;
+      const showInfo = printSettings.showProductInfo;
+
       for (let i = 0; i < quantity; i++) {
-        allCodes.push({
-          productName: item.productId?.name,
-          size: item.size,
-          barcode: item.barcode,
-          qrCode: item.qrCode,
-          colorName: item.color?.name,
+        labels.push({
+          productName: showInfo ? item.productId?.name : '',
+          size: showInfo ? item.size : '',
+          measureType: item.measureType || item.variantId?.measureType,
+          unitName: item.unitName || item.variantId?.unitName,
+          colorName: showInfo ? item.color?.name : '',
           hexCode: item.color?.hexCode,
-          variantImage: item.imageUri,
+          barcode: printSettings.qrCodeType === 'qrCode' ? '' : item.barcode,
+          qrCode: item.qrCode,
+          qrDataUri: printSettings.qrCodeType !== 'barcode' && item.qrCode ? generateQRCodeDataURI(item.qrCode, 60) : '',
           price: item.price,
           discountPrice: item.discountPrice,
-          showQRCode: true,
-          showProductInfo: printSettings.showProductInfo
         });
       }
     });
-    
-    console.log('Generated print content with', allCodes.length, 'items');
-    console.log('Sample QR code data:', allCodes[0]?.qrCode);
-    console.log('Sample barcode data:', allCodes[0]?.barcode);
-    
-    if (printSettings.printerType === 'thermal') {
-      const itemsPerPage = 8;
-      for (let i = 0; i < allCodes.length; i += itemsPerPage) {
-        content.push(allCodes.slice(i, i + itemsPerPage));
-      }
-    } else {
-      const itemsPerPage = 80;
-      for (let i = 0; i < allCodes.length; i += itemsPerPage) {
-        content.push(allCodes.slice(i, i + itemsPerPage));
-      }
-    }
-    
-    return { content };
-  };
-
-  const generateCode = async (barcodeText, qrText) => {
-    try {
-      console.log('generateCode called with:', { barcodeText, qrText, qrCodeType: printSettings.qrCodeType });
-      
-      if (printSettings.qrCodeType === 'barcode') {
-        const barcodeData = generateBarcodeSync(barcodeText);
-        console.log('Generated barcode, length:', barcodeData.length);
-        return { 
-          type: 'barcode', 
-          data: barcodeData
-        };
-      } else if (printSettings.qrCodeType === 'qrCode') {
-        let qrTextFinal = qrText || 'NOQRCODE';
-        
-        let qrSize;
-        if (printSettings.printerType === 'thermal') {
-          switch (printSettings.labelSize) {
-            case 'small': qrSize = 12; break;
-            case 'large': qrSize = 18; break;
-            default: qrSize = 14;
-          }
-        } else {
-          switch (printSettings.labelSize) {
-            case 'small': qrSize = 14; break;
-            case 'large': qrSize = 20; break;
-            default: qrSize = 16;
-          }
-        }
-
-        try {
-          console.log('Generating QR code SVG for:', qrTextFinal, 'with size:', qrSize);
-          let svgString = await QRCode.toString(qrTextFinal, {
-            type: 'svg',
-            width: qrSize,
-            margin: 1,
-            color: {
-              dark: '#000000',
-              light: '#FFFFFF'
-            },
-            errorCorrectionLevel: 'M'
-          });
-          console.log('QR code SVG generated successfully, length:', svgString.length);
-          return { type: 'qr', data: svgString };
-        } catch (qrError) {
-          console.error('QR Code SVG generation error:', qrError);
-          console.log('Using fallback QR code SVG generator');
-          const fallbackData = generateSimpleQRCode(qrTextFinal, qrSize);
-          console.log('Fallback QR code SVG generated, length:', fallbackData.length);
-          return { 
-            type: 'qr', 
-            data: fallbackData
-          };
-        }
-      } else {
-        const barcodeSVG = generateBarcodeSync(barcodeText);
-        let qrTextFinal = qrText || 'NOQRCODE';
-        
-        let qrSize;
-        if (printSettings.printerType === 'thermal') {
-          switch (printSettings.labelSize) {
-            case 'small': qrSize = 10; break;
-            case 'large': qrSize = 16; break;
-            default: qrSize = 12;
-          }
-        } else {
-          switch (printSettings.labelSize) {
-            case 'small': qrSize = 12; break;
-            case 'large': qrSize = 18; break;
-            default: qrSize = 14;
-          }
-        }
-
-        try {
-          console.log('Generating QR code SVG for combined type:', qrTextFinal, 'size:', qrSize);
-          let qrSVG = await QRCode.toString(qrTextFinal, {
-            type: 'svg',
-            width: qrSize,
-            margin: 1,
-            color: {
-              dark: '#000000',
-              light: '#FFFFFF'
-            },
-            errorCorrectionLevel: 'M'
-          });
-          console.log('QR code SVG generated successfully for combined type, length:', qrSVG.length);
-          console.log('Barcode SVG length:', barcodeSVG.length);
-          
-          return { 
-            type: 'both', 
-            barcodeData: barcodeSVG, 
-            qrData: qrSVG 
-          };
-        } catch (qrError) {
-          console.error('QR Code SVG generation error for combined type:', qrError);
-          console.log('Using fallback QR code SVG for combined type');
-          const fallbackQR = generateSimpleQRCode(qrTextFinal, qrSize);
-          console.log('Fallback QR code SVG generated for combined type, length:', fallbackQR.length);
-          return { 
-            type: 'both', 
-            barcodeData: barcodeSVG, 
-            qrData: fallbackQR
-          };
-        }
-      }
-    } catch (error) {
-      console.error('Code generation error:', error);
-      if (printSettings.qrCodeType === 'barcode') {
-        return { 
-          type: 'barcode', 
-          data: generateBarcodeSync('ERROR')
-        };
-      } else if (printSettings.qrCodeType === 'qrCode') {
-        return { 
-          type: 'qr', 
-          data: generateSimpleQRCode('ERROR', 20)
-        };
-      } else {
-        return { 
-          type: 'both', 
-          barcodeData: generateBarcodeSync('ERROR'), 
-          qrData: generateSimpleQRCode('ERROR', 20)
-        };
-      }
-    }
-  };
-
-  const forceQRCodeGeneration = async (qrText, size = 40) => {
-    try {
-      console.log('Force generating QR code for:', qrText);
-      const qrCode = await generateSVGQRCode(qrText, size);
-      console.log('Force QR code generated, length:', qrCode.length);
-      return qrCode;
-    } catch (error) {
-      console.error('Force QR code generation failed:', error);
-      return generateSimpleQRCode(qrText, size);
-    }
-  };
-
-  const generateBarcode = (text) => {
-    if (!text || text.trim() === '') {
-      return '<div style="width: 100%; height: 40px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 8px; color: #666;">No Barcode</div>';
-    }
-
-    let pattern = '';
-    for (let i = 0; i < text.length; i++) {
-      const charCode = text.charCodeAt(i);
-      const barCount = (charCode % 5) + 1;
-      for (let j = 0; j < barCount; j++) {
-        pattern += (j % 2 === 0) ? '█' : ' ';
-      }
-    }
-    
-    if (pattern.length < 20) {
-      pattern = '█ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ █';
-    }
-    
-    let html = `
-      <div style="
-        width: 100%; 
-        height: 60px; 
-        background: white; 
-        border: 1px solid #ddd; 
-        border-radius: 4px;
-        display: flex; 
-        flex-direction: column; 
-        align-items: center; 
-        justify-content: center; 
-        padding: 4px;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-        font-family: 'Courier New', monospace;
-      ">
-        <div style="
-          display: flex;
-          align-items: stretch;
-          height: 40px;
-          background: white;
-          border: 1px solid #ccc;
-          border-radius: 2px;
-          overflow: hidden;
-          margin-bottom: 4px;
-        ">
-    `;
-    
-    const bars = pattern.split('').filter(char => char === '█' || char === ' ');
-    bars.forEach((bar, index) => {
-      const isBlack = bar === '█';
-      const width = isBlack ? '2px' : '1px';
-      const backgroundColor = isBlack ? '#000000' : '#ffffff';
-      const border = isBlack ? 'none' : '1px solid #eee';
-      
-      html += `
-        <div style="
-          width: ${width};
-          background-color: ${backgroundColor};
-          border: ${border};
-          height: 100%;
-          margin: 0 0.5px;
-        "></div>
-      `;
-    });
-    
-    html += `
-        </div>
-        <div style="
-          font-size: 9px; 
-          font-weight: bold; 
-          color: #333; 
-          text-align: center;
-          font-family: 'Courier New', monospace;
-          letter-spacing: 0.5px;
-        ">${text}</div>
-      </div>
-    `;
-    
-    return html;
-  };
-
-  const generateSVGQRCode = async (text, size = 20) => {
-    if (!text || text.trim() === '') {
-      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">
-        <rect width="${size}" height="${size}" fill="#ffffff"/>
-        <text x="${size/2}" y="${size/2}" text-anchor="middle" dy=".3em" font-size="${size/4}" fill="#cccccc" font-family="monospace">QR</text>
-        <text x="${size/2}" y="${size-2}" text-anchor="middle" font-size="${size/8}" fill="#cccccc">No Data</text>
-      </svg>`;
-    }
-
-    try {
-      console.log('Generating QR code for text:', text, 'size:', size);
-      const svgString = await QRCode.toString(text, {
-        type: 'svg',
-        width: size,
-        margin: 1,
-        color: {
-          dark: '#000000',
-          light: '#FFFFFF'
-        },
-        errorCorrectionLevel: 'M'
-      });
-      console.log('QR code generated successfully, length:', svgString.length);
-      return svgString;
-    } catch (error) {
-      console.error('QR Code SVG generation error:', error);
-      console.log('Falling back to simple QR code generator');
-      return generateSimpleQRCode(text, size);
-    }
+    return labels;
   };
 
   const generateSVGQRCodeSync = (text, size = 20) => {
@@ -781,8 +561,6 @@ const AdminInventory = () => {
       </svg>`;
     }
   };
-
-  const generateSimpleQRCode = (text, size = 20) => generateSVGQRCodeSync(text, size);
 
   const generateQRCodeDataURI = (text, size = 40) => {
     if (!text || text.trim() === '') return '';
@@ -822,63 +600,47 @@ const AdminInventory = () => {
     }
   };
 
-  const printCodes = async (printItems, printWindow) => {
-    if (!printWindow) {
-      toast.error('Print window blocked. Please allow popups.');
-      return;
-    }
+  const buildA4StickerSheetHTML = (labels) => {
+    const stickersHTML = labels.map(item => {
+      const showBarcode = printSettings.qrCodeType !== 'qrCode';
+      const showQR = printSettings.qrCodeType !== 'barcode';
+      const barcodeImg = showBarcode && item.barcode ? generateBarcodeSync(item.barcode) : '';
+      const qrImg = showQR && item.qrCode ? `<img src="${generateQRCodeDataURI(item.qrCode, 48)}" style="width:100%;height:100%;" />` : '';
+      const measure = formatMeasureLine({ measureType: item.measureType, unitName: item.unitName, size: item.size });
+      const discountBlock = item.discountPrice
+        ? `<span class="old">${formatBDT(item.price)}</span>${formatBDT(item.discountPrice)}`
+        : item.price ? formatBDT(item.price) : '';
+      const colorBlock = item.colorName
+        ? `<div class="sticker-color"><span class="swatch" style="background:${item.hexCode || '#999'}"></span> ${item.colorName}</div>`
+        : '';
 
-    try {
-      const flatItems = Array.isArray(printItems) ? printItems.flat() : printItems;
-      const stickersHTML = flatItems.map(item => {
-        const barcodeImg = item.barcode ? generateBarcodeSync(item.barcode) : '';
-        const qrImg = item.qrCode ? `<img src="${generateQRCodeDataURI(item.qrCode)}" style="width:100%;height:100%;" />` : '';
-        const discountBlock = item.discountPrice
-          ? `<span class="old">BDT${item.price}</span>BDT${item.discountPrice}`
-          : item.price ? `BDT${item.price}` : '';
-        const colorBlock = item.colorName
-          ? `<div class="sticker-color"><span class="swatch" style="background:${item.hexCode || '#999'}"></span> ${item.colorName}</div>`
-          : '';
-
-        return `
+      return `
           <div class="sticker">
             <div class="sticker-name">${item.productName || 'Product'}</div>
             ${colorBlock}
-            <div class="sticker-size">${item.size || 'N/A'}</div>
+            <div class="sticker-size">${measure || 'N/A'}</div>
             <div class="sticker-price">${discountBlock}</div>
-            <div class="sticker-barcode">${barcodeImg}</div>
-            <div class="sticker-qr">${qrImg}</div>
+            ${barcodeImg ? `<div class="sticker-barcode">${barcodeImg}</div>` : ''}
+            ${qrImg ? `<div class="sticker-qr">${qrImg}</div>` : ''}
           </div>`;
-      }).join('');
+    }).join('');
 
-      printWindow.document.write(`
+    return `
         <!DOCTYPE html>
         <html>
           <head>
             <title>Print Stickers</title>
             <style>
-              @page { margin: 5mm; size: A4; }
+              @page {
+                size: A4;
+                margin: 8mm 8mm 12mm;
+                @bottom-center { content: "Page " counter(page) " of " counter(pages); font-family: Arial, sans-serif; font-size: 8pt; color: #888; }
+                @bottom-left { content: "BELORELLA"; font-family: Arial, sans-serif; font-size: 7.5pt; color: #999; }
+              }
               * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
               body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
-              .sticker-grid {
-                display: grid;
-                grid-template-columns: repeat(5, 1fr);
-                gap: 2mm;
-                padding: 2mm;
-              }
-              .sticker {
-                border: 0.5px solid #ccc;
-                border-radius: 2px;
-                padding: 2mm;
-                text-align: center;
-                break-inside: avoid;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: space-between;
-                min-height: 35mm;
-                background: white;
-              }
+              .sticker-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2mm; }
+              .sticker { border: 0.5px solid #ccc; border-radius: 2px; padding: 2mm; text-align: center; break-inside: avoid; page-break-inside: avoid; display: flex; flex-direction: column; align-items: center; justify-content: space-between; min-height: 35mm; background: white; }
               .sticker-name { font-size: 7px; font-weight: 700; text-transform: uppercase; line-height: 1.1; max-height: 8mm; overflow: hidden; word-break: break-word; }
               .sticker-size { font-size: 6px; background: #f0f0f0; padding: 0.5mm 1mm; border-radius: 1px; border: 0.3px solid #ddd; display: inline-block; }
               .sticker-color { font-size: 5.5px; color: #555; }
@@ -896,35 +658,8 @@ const AdminInventory = () => {
             </div>
           </body>
         </html>
-      `);
-      printWindow.document.close();
-      printWindow.focus();
-      setTimeout(() => {
-        printWindow.print();
-        printWindow.close();
-      }, 500);
-    } catch (error) {
-      console.error('Error generating print content:', error);
-      toast.error('Failed to generate print content');
-    }
+      `;
   };
-
-
-
-  const generateVisualBarcode = (text) => {
-    if (!text) return '<span style="font-size:8px;color:#999">NO CODE</span>';
-    let bars = '';
-    for (let i = 0; i < text.length; i++) {
-      const code = text.charCodeAt(i);
-      const w = (code % 3) + 1;
-      for (let j = 0; j < w; j++) {
-        bars += `<div class="bar" style="width:${(code % 2 === 0 ? 2 : 1)}px;height:100%"></div>`;
-        bars += `<div class="space" style="width:${((code + j) % 2) + 1}px;height:100%"></div>`;
-      }
-    }
-    return bars;
-  };
-
   return (
     <div className="flex flex-col items-center justify-start min-h-screen bg-[#FAF8F6] p-4 sm:p-6">
       <div className="w-full max-w-7xl mb-8">
@@ -940,7 +675,7 @@ const AdminInventory = () => {
             <div className="flex items-center space-x-4">
               <img 
                 src="/logo.png" 
-                alt="Belorella" 
+                alt="BELORELLA" 
                 className="h-12 w-auto object-contain"
               />
               <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-[#1B1B1B]" style={{ fontFamily: "'Inter', serif" }}>Inventory Management</h1>
@@ -1108,10 +843,57 @@ const AdminInventory = () => {
               </select>
             </div>
 
+            <div>
+              <label className="block text-sm font-medium text-[#4A4A4A] mb-1">Variant</label>
+              <select
+                value={filters.variantId}
+                onChange={(e) => handleFilterChange('variantId', e.target.value)}
+                disabled={!filters.productId}
+                className="w-full px-4 py-2 border border-[#BDBDBD] bg-white text-[#1B1B1B] rounded focus:outline-none focus:ring-2 focus:ring-[#B1123B] disabled:bg-[#F4F4F4] disabled:text-[#BDBDBD]"
+              >
+                <option value="">{filters.productId ? 'All Variants' : 'Select a product first'}</option>
+                {filterVariants.map((v) => (
+                  <option key={v._id} value={v._id}>
+                    {v.colorName || 'Default'}{v.sizes?.length ? ` — ${v.sizes.join(', ')}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-[#4A4A4A] mb-1">Color</label>
+              <select
+                value={filters.color}
+                onChange={(e) => handleFilterChange('color', e.target.value)}
+                disabled={!filters.productId}
+                className="w-full px-4 py-2 border border-[#BDBDBD] bg-white text-[#1B1B1B] rounded focus:outline-none focus:ring-2 focus:ring-[#B1123B] disabled:bg-[#F4F4F4] disabled:text-[#BDBDBD]"
+              >
+                <option value="">{filters.productId ? 'All Colors' : 'Select a product first'}</option>
+                {filterColors.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-[#4A4A4A] mb-1">Size</label>
+              <select
+                value={filters.size}
+                onChange={(e) => handleFilterChange('size', e.target.value)}
+                disabled={!filters.productId}
+                className="w-full px-4 py-2 border border-[#BDBDBD] bg-white text-[#1B1B1B] rounded focus:outline-none focus:ring-2 focus:ring-[#B1123B] disabled:bg-[#F4F4F4] disabled:text-[#BDBDBD]"
+              >
+                <option value="">{filters.productId ? 'All Sizes' : 'Select a product first'}</option>
+                {filterSizes.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+
             <div className="flex items-end">
               <button
                 onClick={() => {
-                  setFilters({ search: '', status: '', productId: '' });
+                  setFilters({ search: '', status: '', productId: '', variantId: '', color: '', size: '' });
                   setPagination(prev => ({ ...prev, page: 1 }));
                 }}
                 className="w-full px-4 py-2 bg-[#F4F4F4] text-[#4A4A4A] rounded hover:bg-[#BDBDBD] transition-colors duration-200"
@@ -1230,11 +1012,11 @@ const AdminInventory = () => {
                               <div className="text-sm text-[#4A4A4A]">
                                 {item.discountPrice ? (
                                   <>
-                                    <span className="line-through text-[#BDBDBD]">BDT{item.price}</span>
-                                    <span className="ml-2 text-green-600 font-medium">BDT{item.discountPrice}</span>
+                                    <span className="line-through text-[#BDBDBD]">{formatBDT(item.price)}</span>
+                                    <span className="ml-2 text-green-600 font-medium">{formatBDT(item.discountPrice)}</span>
                                   </>
                                 ) : (
-                                  <span>BDT{item.price}</span>
+                                  <span>{formatBDT(item.price)}</span>
                                 )}
                               </div>
                             </div>
@@ -1243,7 +1025,7 @@ const AdminInventory = () => {
                        <td className="py-3 px-4 text-[#4A4A4A]">
                          <div className="flex items-center space-x-3">
                            <div>
-                             <div className="font-medium text-[#1B1B1B]">{item.size}</div>
+                             <div className="font-medium text-[#1B1B1B]">{itemMeasure(item) || '—'}</div>
                              <div className="text-sm text-[#4A4A4A]">
                                {item.color?.name || 'Default Color'}
                              </div>
@@ -1386,7 +1168,7 @@ const AdminInventory = () => {
                       />
                       <div className="ml-2">
                         <div className="font-semibold text-[#1B1B1B] text-sm">{item.productId?.name}</div>
-                        <div className="text-xs text-[#4A4A4A]">{item.size} - {item.color?.name || 'Default Color'}</div>
+                        <div className="text-xs text-[#4A4A4A]">{itemMeasure(item)} - {item.color?.name || 'Default Color'}</div>
                       </div>
                     </div>
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(item.status)}`}>
@@ -1401,11 +1183,11 @@ const AdminInventory = () => {
                       <span className="ml-1 text-[#1B1B1B] font-medium">
                         {item.discountPrice ? (
                           <>
-                            <span className="line-through text-[#BDBDBD]">BDT{item.price}</span>
-                            <span className="ml-1 text-green-600">BDT{item.discountPrice}</span>
+                            <span className="line-through text-[#BDBDBD]">{formatBDT(item.price)}</span>
+                            <span className="ml-1 text-green-600">{formatBDT(item.discountPrice)}</span>
                           </>
                         ) : (
-                          <span>BDT{item.price}</span>
+                          <span>{formatBDT(item.price)}</span>
                         )}
                       </span>
                     </div>
@@ -1589,7 +1371,7 @@ const AdminInventory = () => {
                     />
                     <div>
                       <h3 className="font-semibold text-[#1B1B1B]">{selectedProduct.name}</h3>
-                      <p className="text-sm text-[#4A4A4A]">BDT{selectedProduct.mainPrice}</p>
+                      <p className="text-sm text-[#4A4A4A]">{formatBDT(selectedProduct.mainPrice)}</p>
                       <p className="text-xs text-[#4A4A4A]">{availableVariants.length} variants available</p>
                     </div>
                   </div>
@@ -1623,14 +1405,14 @@ const AdminInventory = () => {
                              {selectedProduct && availableVariants.length > 0 && !bulkMode && (
                  <div>
                    <label className="block text-sm font-medium text-[#4A4A4A] mb-2">Variant & Size</label>
-                   <select
+                    <select
                      value={formData.variantId}
                      onChange={(e) => {
                        const variant = availableVariants.find(v => v._id === e.target.value);
                        setFormData(prev => ({ 
                          ...prev, 
                          variantId: e.target.value,
-                         size: variant ? variant.size : '',
+                         size: variant?.sizes?.[0] || '',
                          price: variant ? (variant.prices?.[0] || variant.price || 0) : 0,
                          discountPrice: variant ? (variant.discountPrices?.[0] || 0) : 0
                        }));
@@ -1641,50 +1423,66 @@ const AdminInventory = () => {
                      <option value="">Select Variant</option>
                      {availableVariants.map((variant) => (
                        <option key={variant._id} value={variant._id}>
-                         {variant.colorName || 'Default'} - {variant.sizes?.join(', ') || 'No sizes'} - BDT{variant.prices?.[0] || variant.price || 0} (Stock: {variant.stock || 0})
+                         {variant.colorName || 'Default'} - {variant.sizes?.join(', ') || 'No sizes'} - {formatBDT(variant.prices?.[0] || variant.price || 0)} (Stock: {variant.stock || 0})
                        </option>
                      ))}
                    </select>
                    
-                   {formData.variantId && (
-                     <div className="mt-3 p-3 bg-[#F4F4F4] rounded-lg">
+                    {formData.variantId && (
+                      <div className="mt-3 p-3 bg-[#F4F4F4] rounded-lg">
                         {(() => {
-                           const selectedVariant = availableVariants.find(v => v._id === formData.variantId);
-                           if (!selectedVariant) return null;
-                           return (
-                             <div className="flex items-center space-x-3">
+                          const selectedVariant = availableVariants.find(v => v._id === formData.variantId);
+                          if (!selectedVariant) return null;
+                          const sizeIdx = selectedVariant.sizes?.indexOf(formData.size) ?? -1;
+                          const sizePrice = sizeIdx >= 0
+                            ? selectedVariant.prices?.[sizeIdx]
+                            : selectedVariant.prices?.[0];
+                          const sizeDiscount = sizeIdx >= 0
+                            ? selectedVariant.discountPrices?.[sizeIdx]
+                            : selectedVariant.discountPrices?.[0];
+                          const sizeStock = sizeIdx >= 0
+                            ? (selectedVariant.stockBySize?.[sizeIdx] ?? selectedVariant.stock)
+                            : selectedVariant.stock;
+                          return (
+                            <div className="flex items-center space-x-3">
                               <div className="w-16 h-16 rounded-lg border-2 border-[#BDBDBD] overflow-hidden flex-shrink-0">
-                                 {selectedVariant.images && selectedVariant.images.length > 0 ? (
-                                   <img 
-                                     src={selectedVariant.images[0].url || selectedVariant.images[0]} 
-                                     alt={selectedVariant.colorName || 'Variant'}
-                                     className="w-full h-full object-cover"
-                                     onError={(e) => {
-                                       e.target.style.display = 'none';
-                                       e.target.nextSibling.style.display = 'flex';
-                                     }}
-                                   />
-                                 ) : null}
-                                 <div className="w-full h-full bg-[#F4F4F4] flex items-center justify-center" style={{ display: selectedVariant.images && selectedVariant.images.length > 0 ? 'none' : 'flex' }}>
-                                   <FaBox className="text-[#BDBDBD]" />
-                                 </div>
-                               </div>
+                                {selectedVariant.images && selectedVariant.images.length > 0 ? (
+                                  <img 
+                                    src={selectedVariant.images[0].url || selectedVariant.images[0]} 
+                                    alt={selectedVariant.colorName || 'Variant'}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                      e.target.style.display = 'none';
+                                      e.target.nextSibling.style.display = 'flex';
+                                    }}
+                                  />
+                                ) : null}
+                                <div className="w-full h-full bg-[#F4F4F4] flex items-center justify-center" style={{ display: selectedVariant.images && selectedVariant.images.length > 0 ? 'none' : 'flex' }}>
+                                  <FaBox className="text-[#BDBDBD]" />
+                                </div>
+                              </div>
                              
                              <div className="flex-1">
                                <div className="font-medium text-[#1B1B1B]">
                                  {selectedVariant.colorName || 'Default Color'}
+                                 {formData.size && (
+                                   <span className="ml-2 inline-block bg-[#B1123B] text-white text-xs px-2 py-0.5 rounded">{formData.size}</span>
+                                 )}
                                </div>
                                <div className="text-sm text-[#4A4A4A]">
                                  Sizes: {selectedVariant.sizes?.join(', ') || 'No sizes'}
                                </div>
                                                                <div className="text-sm text-[#4A4A4A]">
-                                  Price: BDT{selectedVariant.prices?.[0] || selectedVariant.price || 0}
-                                  {selectedVariant.discountPrices?.[0] && (
-                                    <span className="ml-2 text-green-600">
-                                      (Discounted: BDT{selectedVariant.discountPrices[0]})
-                                    </span>
-                                  )}
-                                </div>
+                                 {formData.size ? `Price (${formData.size}):` : 'Price:'} {formatBDT(sizePrice || 0)}
+                                 {sizeDiscount ? (
+                                   <span className="ml-2 text-green-600">
+                                     (Discounted: {formatBDT(sizeDiscount)})
+                                   </span>
+                                 ) : null}
+                               </div>
+                               {typeof sizeStock !== 'undefined' && (
+                                 <div className="text-sm text-[#4A4A4A]">Stock: {sizeStock}</div>
+                               )}
                                {selectedVariant.hexCode && (
                                  <div className="flex items-center space-x-2 mt-1">
                                    <div 
@@ -1696,12 +1494,43 @@ const AdminInventory = () => {
                                )}
                               </div>
                             </div>
-                           );
+                          );
                         })()}
-                     </div>
-                   )}
-                 </div>
-               )}
+                      </div>
+                    )}
+
+                    {formData.variantId && (
+                      <div className="mt-3">
+                        <label className="block text-sm font-medium text-[#4A4A4A] mb-2">Size</label>
+                        <select
+                          value={formData.size}
+                          onChange={(e) => {
+                            const newSize = e.target.value;
+                            const variant = availableVariants.find(v => v._id === formData.variantId);
+                            const idx = variant?.sizes?.indexOf(newSize) ?? -1;
+                            setFormData(prev => ({
+                              ...prev,
+                              size: newSize,
+                              price: idx >= 0
+                                ? (variant.prices?.[idx] || variant.prices?.[0] || prev.price)
+                                : prev.price,
+                              discountPrice: idx >= 0
+                                ? (variant.discountPrices?.[idx] || 0)
+                                : prev.discountPrice
+                            }));
+                          }}
+                          className="w-full px-3 py-2 border border-[#BDBDBD] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#B1123B] bg-white text-[#1B1B1B]"
+                          disabled={!!selectedInventory}
+                        >
+                          <option value="">Select Size</option>
+                          {(availableVariants.find(v => v._id === formData.variantId)?.sizes || []).map((s) => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                              {selectedProduct && bulkMode && availableVariants.length > 0 && (
                  <div>
@@ -1746,7 +1575,7 @@ const AdminInventory = () => {
                               </div>
                              <div className="text-right">
                                <div className="text-sm font-medium text-[#1B1B1B]">
-                                 BDT{variant.prices?.[0] || variant.price || 0}
+                                 {formatBDT(variant.prices?.[0] || variant.price || 0)}
                                </div>
                                <div className="text-xs text-[#4A4A4A]">
                                  Current Stock: {variant.stock || 0}
@@ -1768,10 +1597,10 @@ const AdminInventory = () => {
                                           Size: {size}
                                         </label>
                                         <div className="text-xs text-[#4A4A4A]">
-                                          Price: BDT{variant.prices?.[index] || variant.prices?.[0] || 0}
+                                          Price: {formatBDT(variant.prices?.[index] || variant.prices?.[0] || 0)}
                                           {variant.discountPrices?.[index] && (
                                             <span className="ml-2 text-green-600">
-                                              (Discounted: BDT{variant.discountPrices[index]})
+                                              (Discounted: {formatBDT(variant.discountPrices[index])})
                                             </span>
                                           )}
                                         </div>
@@ -1933,8 +1762,9 @@ const AdminInventory = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-[#4A4A4A] mb-2">Barcode</label>
-                      <div className="bg-[#F4F4F4] p-3 rounded-lg">
-                        <div className="text-sm font-mono text-[#1B1B1B]">{selectedInventory.barcode}</div>
+                      <div className="bg-white p-3 rounded-lg border border-[#BDBDBD]">
+                        <Barcode value={selectedInventory.barcode || 'NOBARCODE'} className="w-full h-10" />
+                        <div className="text-sm font-mono text-[#1B1B1B] text-center mt-1">{selectedInventory.barcode}</div>
                       </div>
                     </div>
                     <div>
@@ -1993,12 +1823,16 @@ const AdminInventory = () => {
                   </button>
                   <button
                     onClick={() => {
-                      const pw = window.open('', '_blank');
-                      if (!pw) { toast.error('Please allow popups for this site'); return; }
-                      (async () => {
-                        const { content: printContent } = await generatePrintContent();
-                        await printCodes(printContent, pw);
-                      })();
+                      const labels = generatePrintContent();
+                      if (labels.length === 0) {
+                        toast.warn('Select at least one inventory item to print');
+                        return;
+                      }
+                      const labelHeights = { small: 25, medium: 30, large: 35 };
+                      const ok = printSettings.printerType === 'thermal'
+                        ? printThermalLabels(labels, { paperWidth: 50, labelHeight: labelHeights[printSettings.labelSize] || 30 })
+                        : printDocument(buildA4StickerSheetHTML(labels));
+                      if (!ok) toast.error('Print window blocked - please allow popups for this site');
                     }}
                     className="px-4 py-2 bg-[#B1123B] text-white rounded-lg hover:bg-[#1B1B1B] transition-colors duration-200 min-h-[44px]"
                   >
@@ -2106,45 +1940,6 @@ const AdminInventory = () => {
                   <div className="text-sm text-[#B1123B] font-medium">
                     Current Mode: {printSettings.qrCodeType.toUpperCase()}
                   </div>
-                  <button
-                    onClick={async () => {
-                      const testItem = inventory.find(inv => inv._id === selectedItems[0]);
-                      if (testItem) {
-                        console.log('Testing raw QR code data conversion...');
-                        console.log('Raw QR code data:', testItem.qrCode);
-                        console.log('Raw barcode data:', testItem.barcode);
-                        console.log('Current print type:', printSettings.qrCodeType);
-                        
-                        try {
-                          const qrSVG = await QRCode.toString(testItem.qrCode, {
-                            type: 'svg',
-                            width: 16,
-                            margin: 1,
-                            color: {
-                              dark: '#000000',
-                              light: '#FFFFFF'
-                            },
-                            errorCorrectionLevel: 'M'
-                          });
-                          console.log('Raw QR code converted to SVG successfully!');
-                          console.log('QR SVG length:', qrSVG.length);
-                          console.log('QR SVG preview:', qrSVG.substring(0, 100) + '...');
-                          
-                          const barcodeSVG = generateBarcodeSync(testItem.barcode);
-                          console.log('Raw barcode converted to SVG successfully!');
-                          console.log('Barcode SVG length:', barcodeSVG.length);
-                          
-                          toast.success('Raw data conversion working! Check console for details.');
-                        } catch (error) {
-                          console.error('Raw data conversion failed:', error);
-                          toast.error('Raw data conversion failed! Check console for details.');
-                        }
-                      }
-                    }}
-                    className="px-3 py-1 bg-[#B1123B] text-white text-sm rounded hover:bg-[#1B1B1B] transition"
-                  >
-                    Test Raw Data Conversion
-                  </button>
 
                 </div>
               </div>
@@ -2177,16 +1972,16 @@ const AdminInventory = () => {
                          </div>
                          
                          <h3 className="font-medium text-sm mb-2 text-[#1B1B1B]">{item.productId?.name}</h3>
-                         <p className="text-xs text-[#4A4A4A] mb-1">Size: {item.size}</p>
+                         <p className="text-xs text-[#4A4A4A] mb-1">{itemMeasure(item) || 'No size'}</p>
                          
                                                    <div className="text-xs mb-2">
                              {item.discountPrice ? (
                                <>
-                                 <span className="line-through text-[#BDBDBD]">BDT{item.price}</span>
-                                 <span className="ml-1 text-green-600 font-medium">BDT{item.discountPrice}</span>
+                                 <span className="line-through text-[#BDBDBD]">{formatBDT(item.price)}</span>
+                                 <span className="ml-1 text-green-600 font-medium">{formatBDT(item.discountPrice)}</span>
                                </>
                              ) : (
-                               <span className="text-[#4A4A4A]">BDT{item.price}</span>
+                               <span className="text-[#4A4A4A]">{formatBDT(item.price)}</span>
                              )}
                            </div>
                                                  {item.color?.name && (
@@ -2281,10 +2076,10 @@ const AdminInventory = () => {
                             <div className="flex items-center justify-between text-xs">
                               <div className="flex-1 text-left">
                                 <div className="font-bold text-[#1B1B1B]">{item.productId?.name}</div>
-                                <div className="text-[#4A4A4A]">Size: {item.size}</div>
+                                <div className="text-[#4A4A4A]">{itemMeasure(item) || 'No size'}</div>
                                 {item.color?.name && <div className="text-[#4A4A4A]">Color: {item.color.name}</div>}
                                 <div className="font-bold text-[#1B1B1B]">
-                                  {item.discountPrice ? `BDT${item.discountPrice}` : `BDT${item.price}`}
+                                  {item.discountPrice ? formatBDT(item.discountPrice) : formatBDT(item.price)}
                                 </div>
                               </div>
                                                              <div className="flex-1 text-center flex flex-col items-center justify-center space-y-1">
@@ -2340,7 +2135,7 @@ const AdminInventory = () => {
                               {printSettings.showProductInfo && (
                                 <div className="mb-2">
                                   <div className="text-xs font-semibold text-[#1B1B1B] uppercase tracking-wide">{item.productId?.name}</div>
-                                  <div className="text-xs text-[#4A4A4A] bg-[#F4F4F4] px-1 py-0.5 rounded border border-[#BDBDBD] inline-block">Size: {item.size}</div>
+                                  <div className="text-xs text-[#4A4A4A] bg-[#F4F4F4] px-1 py-0.5 rounded border border-[#BDBDBD] inline-block">{itemMeasure(item) || 'No size'}</div>
                                   {item.color?.name && (
                                     <>
                                       <div className="text-xs text-[#4A4A4A] font-medium">Color: {item.color.name}</div>
@@ -2358,11 +2153,11 @@ const AdminInventory = () => {
                                   <div className="text-xs text-green-600 font-medium mt-1">
                                     {item.discountPrice ? (
                                       <>
-                                        <span className="line-through text-[#BDBDBD]">BDT{item.price}</span>
-                                        <span className="ml-1">BDT{item.discountPrice}</span>
+                                        <span className="line-through text-[#BDBDBD]">{formatBDT(item.price)}</span>
+                                        <span className="ml-1">{formatBDT(item.discountPrice)}</span>
                                       </>
                                     ) : (
-                                      <span>BDT{item.price}</span>
+                                      <span>{formatBDT(item.price)}</span>
                                     )}
                                   </div>
 
@@ -2524,7 +2319,7 @@ const AdminInventory = () => {
                   <div>
                     <h3 className="font-semibold text-[#1B1B1B]">{restockItem.productId?.name}</h3>
                     <p className="text-sm text-[#4A4A4A]">
-                      {restockItem.size} - {restockItem.color?.name || 'Default'}
+                      {itemMeasure(restockItem)} - {restockItem.color?.name || 'Default'}
                     </p>
                     <p className="text-xs text-[#BDBDBD] font-mono">{restockItem.barcode}</p>
                   </div>

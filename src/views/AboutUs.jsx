@@ -11,7 +11,7 @@ export default function AboutUs() {
       <section className="bg-gradient-to-br from-black via-dark-gray to-maybelline-magenta text-pure-white py-20 md:py-28">
         <div className="max-w-4xl mx-auto px-4 text-center">
           <h1 className="font-heading text-4xl md:text-5xl lg:text-6xl font-bold mb-6 tracking-wide">
-            About Belorella
+            About BELORELLA
           </h1>
           <p className="text-lg md:text-xl text-pure-white/80 leading-relaxed max-w-2xl mx-auto">
             Your trusted destination for premium fashion and lifestyle products in Bangladesh
@@ -25,14 +25,14 @@ export default function AboutUs() {
           <div>
             <h2 className="font-heading text-2xl md:text-3xl font-bold text-black mb-6">Our Story</h2>
             <p className="text-dark-gray leading-relaxed mb-4">
-              Belorella was born from a passion for bringing quality fashion and beauty products to Bangladesh. We believe everyone deserves access to premium products without compromise.
+              BELORELLA was born from a passion for bringing quality fashion and beauty products to Bangladesh. We believe everyone deserves access to premium products without compromise.
             </p>
             <p className="text-dark-gray leading-relaxed">
               What started as a small venture has grown into a trusted e-commerce destination, serving thousands of satisfied customers across the country with genuine products and exceptional service.
             </p>
           </div>
           <div className="bg-gradient-to-br from-maybelline-light via-maybelline-light to-pure-white rounded-2xl p-8 md:p-12 flex items-center justify-center overflow-hidden">
-            <img src="/logo.png" alt="Belorella" className="w-44 h-44 md:w-52 md:h-52 object-contain rounded-2xl mix-blend-multiply" style={{ filter: 'drop-shadow(0 8px 24px rgba(220,20,60,0.15))' }} />
+            <img src="/logo.png" alt="BELORELLA" className="w-44 h-44 md:w-52 md:h-52 object-contain rounded-2xl mix-blend-multiply" style={{ filter: 'drop-shadow(0 8px 24px rgba(220,20,60,0.15))' }} />
           </div>
         </div>
       </section>

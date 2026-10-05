@@ -6,7 +6,7 @@ import axios from 'axios';
 const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
 
 const defaultSettings = {
-  businessName: 'Belorella',
+  businessName: 'BELORELLA',
   email: 'info.belorella@gmail.com',
   phone: '01601-886367',
   address: '200/1 North Ibrahimpur, Mushibari Road, Dhaka-1206',
@@ -164,7 +164,7 @@ export default function ContactPageClient() {
               allowFullScreen=""
               loading="lazy"
               referrerPolicy="no-referrer-when-downgrade"
-              title="Belorella Store Location"
+              title="BELORELLA Store Location"
             />
             <a
               href="https://www.google.com/maps/search/200/1+North+Ibrahimpur+Mushibari+Road+Dhaka"

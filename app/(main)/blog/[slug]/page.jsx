@@ -3,7 +3,7 @@ import BlogDetailClient from './BlogDetailClient';
 
 const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://belorella.com';
-const SITE_NAME = 'Belorella';
+const SITE_NAME = 'BELORELLA';
 
 export async function generateMetadata({ params }) {
   const { slug } = await params;
@@ -13,14 +13,14 @@ export async function generateMetadata({ params }) {
     const blog = await res.json();
     const seo = blog.seo || {};
     const title = seo.metaTitle || `${blog.title} | ${SITE_NAME} Blog`;
-    const description = seo.metaDescription || blog.excerpt || `Read "${blog.title}" on Belorella. Tips, trends, and more.`;
+    const description = seo.metaDescription || blog.excerpt || `Read "${blog.title}" on BELORELLA. Tips, trends, and more.`;
     const image = seo.ogImage || blog.coverImage || '/logo.png';
     const url = `${SITE_URL}/blog/${slug}`;
 
     return {
       title,
       description,
-      keywords: seo.metaKeywords || `${blog.title}, ${blog.category}, Belorella, blog`,
+      keywords: seo.metaKeywords || `${blog.title}, ${blog.category}, BELORELLA, blog`,
       openGraph: {
         title,
         description,

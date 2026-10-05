@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from "next/navigation";
 import { useAdmin } from '../context/AdminContext';
+import { FaEye, FaEyeSlash } from 'react-icons/fa';
 
 function AdminLoginForm() {
   const [formData, setFormData] = useState({
@@ -9,6 +10,7 @@ function AdminLoginForm() {
     password: ''
   });
   const [formError, setFormError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const { login, loading, error } = useAdmin();
   const router = useRouter();
 
@@ -79,16 +81,26 @@ function AdminLoginForm() {
               <label htmlFor="password" className="block text-sm font-medium text-gray-700">
                 Password
               </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                value={formData.password}
-                onChange={handleChange}
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-maybelline-pink focus:border-maybelline-pink"
-              />
+              <div className="relative">
+                <input
+                  id="password"
+                  name="password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  required
+                  value={formData.password}
+                  onChange={handleChange}
+                  className="mt-1 block w-full px-3 py-2 pr-10 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-maybelline-pink focus:border-maybelline-pink"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((s) => !s)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
+                >
+                  {showPassword ? <FaEyeSlash /> : <FaEye />}
+                </button>
+              </div>
             </div>
           </div>
 

@@ -46,7 +46,7 @@ export default function BlogListPage() {
       <div className="bg-black text-pure-white py-16 px-4">
         <div className="max-w-4xl mx-auto text-center">
           <h1 className="font-heading text-4xl md:text-5xl font-bold mb-4">Our Blog</h1>
-          <p className="text-mid-gray text-lg">Beauty tips, trends, and inspiration from Belorella</p>
+          <p className="text-mid-gray text-lg">Beauty tips, trends, and inspiration from BELORELLA</p>
         </div>
       </div>
 

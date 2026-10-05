@@ -19,17 +19,17 @@ function Layout() {
 
   // Route-based SEO defaults
   const routeSEO = {
-    "/": { title: "Home", description: "Shop the latest trends with unbeatable prices at Belorella." },
+    "/": { title: "Home", description: "Shop the latest trends with unbeatable prices at BELORELLA." },
     "/products": { title: "Products", description: "Browse our wide range of high-quality products with amazing deals." },
     "/cart": { title: "Shopping Cart", description: "Review your items and proceed to checkout securely." },
     "/checkout": { title: "Checkout", description: "Complete your purchase securely with multiple payment options." },
-    "/login": { title: "Login", description: "Sign in to your Belorella account to manage orders and more." },
-    "/signup": { title: "Create Account", description: "Join Belorella today and start shopping!" },
+    "/login": { title: "Login", description: "Sign in to your BELORELLA account to manage orders and more." },
+    "/signup": { title: "Create Account", description: "Join BELORELLA today and start shopping!" },
     "/contactus": { title: "Contact Us", description: "Get in touch with our support team. We're here to help!" },
     "/wishlist": { title: "My Wishlist", description: "View your saved items and shop later." },
   };
   const matchedRoute = Object.entries(routeSEO).find(([route]) => path.startsWith(route));
-  const fallback = matchedRoute ? matchedRoute[1] : { title: "Belorella", description: "Quality products delivered to your doorstep." };
+  const fallback = matchedRoute ? matchedRoute[1] : { title: "BELORELLA", description: "Quality products delivered to your doorstep." };
 
   return (
     <HelmetProvider>

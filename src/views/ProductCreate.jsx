@@ -82,7 +82,7 @@ const ProductCreate = () => {
     label: `${m.measureType} (${m.unitName})`,
     unitName: m.unitName,
   }));
-  const shippingOptions = shippingTypes.map(s => ({ value: s._id, label: `${s.name} ($${Number(s.charge).toFixed(2)}, ${s.estimatedDays}d)` }));
+  const shippingOptions = shippingTypes.map(s => ({ value: s._id, label: `${s.name} (BDT ${Number(s.charge).toFixed(2)}, ${s.estimatedDays}d)` }));
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -203,13 +203,6 @@ const ProductCreate = () => {
     setProduct((prev) => ({
       ...prev,
       brand: selectedOption ? selectedOption.value : '',
-    }));
-  };
-
-  const handleMeasureTypeChange = (selectedOption) => {
-    setProduct((prev) => ({
-      ...prev,
-      measureType: selectedOption ? selectedOption.value : '',
     }));
   };
 
@@ -454,7 +447,6 @@ const ProductCreate = () => {
     }
 
     try {
-      console.log( 'Submitting product data:', product, variant);
 
       const formData = new FormData();
       formData.append('name', product.name);
@@ -516,6 +508,7 @@ const ProductCreate = () => {
         mainBadgeColor: '',
         gender: '',
         measureType: '',
+        unitName: '',
         isPreOrder: false,
         preOrderEstimatedDate: '',
         broadcast: false,

@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { FaPlus, FaEdit, FaTrash, FaArrowLeft, FaSearch, FaTruck } from 'react-icons/fa';
 import { useRouter } from "next/navigation";
+import { formatBDT } from '../config/brand';
 
 const ShippingAdmin = () => {
   const [items, setItems] = useState([]);
@@ -54,6 +55,12 @@ const ShippingAdmin = () => {
 
   useEffect(() => { 
     load(); 
+  }, []);
+
+  useEffect(() => {
+    const onStore = () => load();
+    window.addEventListener('storeChanged', onStore);
+    return () => window.removeEventListener('storeChanged', onStore);
   }, []);
 
   const submit = async (e) => {
@@ -237,7 +244,7 @@ const ShippingAdmin = () => {
                 filtered.map(it => (
                   <tr key={it._id} className="hover:bg-[#F4F4F4] border-b border-[#BDBDBD]">
                     <td className="py-3 px-4 font-medium text-[#1B1B1B]">{it.name}</td>
-                    <td className="py-3 px-4 text-[#1B1B1B]">BDT{Number(it.charge).toFixed(2)}</td>
+                    <td className="py-3 px-4 text-[#1B1B1B]">{formatBDT(Number(it.charge).toFixed(2))}</td>
                     <td className="py-3 px-4 text-[#4A4A4A]">{it.estimatedDays} days</td>
                     <td className="py-3 px-4">
                       <button
@@ -301,7 +308,7 @@ const ShippingAdmin = () => {
                   </button>
                 </div>
                 <div className="text-sm text-[#4A4A4A] mb-3">
-                  <span>BDT{Number(it.charge).toFixed(2)}</span>
+                  <span>{formatBDT(Number(it.charge).toFixed(2))}</span>
                   <span className="mx-2">•</span>
                   <span>{it.estimatedDays} days</span>
                 </div>

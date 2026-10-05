@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import axios from 'axios';
 import { FiShoppingCart, FiX, FiMinus, FiPlus } from 'react-icons/fi';
 import { CartContext } from '../context/CartContext';
+import { formatBDT } from '../config/brand';
 
 const ProductCartModal = ({ productId, isOpen, onClose }) => {
   const cartCtx = useContext(CartContext);
@@ -142,11 +143,11 @@ const ProductCartModal = ({ productId, isOpen, onClose }) => {
                   <div className="flex items-center gap-2 mt-1">
                     {selectedDiscountPrice ? (
                       <>
-                        <span className="text-xs text-gray-400 line-through">BDT{originalPrice}</span>
-                        <span className="text-base font-bold text-[#DC143C]">BDT{displayPrice}</span>
+                        <span className="text-xs text-gray-400 line-through">{formatBDT(originalPrice)}</span>
+                        <span className="text-base font-bold text-[#DC143C]">{formatBDT(displayPrice)}</span>
                       </>
                     ) : (
-                      <span className="text-base font-bold text-[#DC143C]">BDT{displayPrice}</span>
+                      <span className="text-base font-bold text-[#DC143C]">{formatBDT(displayPrice)}</span>
                     )}
                   </div>
                 </div>
@@ -241,7 +242,7 @@ const ProductCartModal = ({ productId, isOpen, onClose }) => {
               <div className="bg-gray-50 p-4 space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Price per unit</span>
-                  <span className="text-black font-medium">BDT{displayPrice}</span>
+                  <span className="text-black font-medium">{formatBDT(displayPrice)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Quantity</span>
@@ -249,7 +250,7 @@ const ProductCartModal = ({ productId, isOpen, onClose }) => {
                 </div>
                 <div className="flex justify-between text-sm font-bold border-t border-gray-200 pt-2 mt-2">
                   <span className="text-black">TOTAL</span>
-                  <span className="text-[#DC143C]">BDT{(displayPrice * quantity).toFixed(2)}</span>
+                  <span className="text-[#DC143C]">{formatBDT((displayPrice * quantity).toFixed(2))}</span>
                 </div>
               </div>
             </>

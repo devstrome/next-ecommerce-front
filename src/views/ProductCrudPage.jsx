@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { FaPlus, FaEdit, FaTrash, FaArrowLeft, FaSearch, FaRedo, FaBarcode } from 'react-icons/fa';
 import { getStorage } from "../lib/storage";
 import { useRouter } from "next/navigation";
+import { formatBDT } from '../config/brand';
 
 const ProductCRUDPage = () => {
   const [products, setProducts] = useState([]);
@@ -475,7 +476,7 @@ const ProductCRUDPage = () => {
                       <div className="flex-1 min-w-0">
                         <h3 className="text-black font-medium truncate">{product.name}</h3>
                         <p className="text-sm text-dark-gray">{product._brand || '-'}</p>
-                        <p className="text-sm text-maybelline-pink font-semibold">BDT{parseFloat(product.mainPrice).toFixed(2)}</p>
+                        <p className="text-sm text-maybelline-pink font-semibold">{formatBDT(parseFloat(product.mainPrice).toFixed(2))}</p>
                         <p className="text-xs text-dark-gray mt-1">SKU: {product.sku || 'N/A'} | Category: {product._categoriesStr || 'N/A'}</p>
                         <p className="text-xs text-dark-gray">Shipping: {product._shippingLabel}</p>
                         <div className="flex items-center justify-between mt-2">

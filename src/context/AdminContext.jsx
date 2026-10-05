@@ -4,6 +4,7 @@ import { getStorage, setStorage, removeStorage } from "../lib/storage"
 import { createContext, useContext, useReducer, useEffect } from 'react';
 import axios from 'axios';
 import { useRouter } from "next/navigation";
+import { withDevice } from '../lib/device';
 
 export const AdminContext = createContext();
 
@@ -181,7 +182,7 @@ export const AdminProvider = ({ children }) => {
   const login = async (credentials) => {
     dispatch({ type: 'SET_LOADING' });
     try {
-      const res = await axios.post(`${API_BASE_URL}/api/admin/login`, credentials);
+      const res = await axios.post(`${API_BASE_URL}/api/admin/login`, withDevice(credentials));
       const { accessToken, refreshToken, admin } = res.data || {};
       if (!accessToken || !refreshToken) throw new Error('Invalid login response');
 

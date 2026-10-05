@@ -1,8 +1,8 @@
 import '../src/index.css'
 
-const SITE_NAME = 'Belorella';
+const SITE_NAME = 'BELORELLA';
 const DEFAULT_DESCRIPTION = 'Shop the latest trends with unbeatable prices. Quality fashion, beauty, and lifestyle products delivered to your doorstep in Bangladesh.';
-const DEFAULT_KEYWORDS = 'Belorella, online shopping, Bangladesh, ecommerce, fashion, beauty, makeup, luxury, skincare, haircare';
+const DEFAULT_KEYWORDS = 'BELORELLA, online shopping, Bangladesh, ecommerce, fashion, beauty, makeup, luxury, skincare, haircare';
 const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://belorella.com';
 
 export const metadata = {

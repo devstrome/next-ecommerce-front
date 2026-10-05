@@ -3,7 +3,7 @@ import ProductViewPageClient from './ProductViewPageClient'
 
 const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://belorella.com';
-const SITE_NAME = 'Belorella';
+const SITE_NAME = 'BELORELLA';
 
 export async function generateMetadata({ params, searchParams }) {
   const { id } = await params;
@@ -22,14 +22,14 @@ export async function generateMetadata({ params, searchParams }) {
     const seo = hasVariantSeo ? variant.seo : (product.seo || {});
 
     const title = seo.metaTitle || `${product.brand ? product.brand + ' ' : ''}${product.name}${variant?.colorName ? ` — ${variant.colorName}` : ''} | ${SITE_NAME}`;
-    const description = seo.metaDescription || `Shop ${product.name} at Belorella. Best prices, fast delivery in Bangladesh.`;
+    const description = seo.metaDescription || `Shop ${product.name} at BELORELLA. Best prices, fast delivery in Bangladesh.`;
     const image = seo.ogImage || product.mainImage || '/logo.png';
     const url = variant ? `${SITE_URL}/products/${id}?variant=${variant._id}` : `${SITE_URL}/products/${id}`;
 
     return {
       title: { absolute: title },
       description,
-      keywords: seo.metaKeywords || `${product.name}, ${product.brand}, Belorella, buy online, Bangladesh`,
+      keywords: seo.metaKeywords || `${product.name}, ${product.brand}, BELORELLA, buy online, Bangladesh`,
       openGraph: {
         title,
         description,

@@ -26,6 +26,13 @@ const CouponManagement = () => {
     fetchProducts();
   }, []);
 
+  // Refresh when another admin changes a coupon (live via socket)
+  useEffect(() => {
+    const onStore = () => fetchCoupons();
+    window.addEventListener('storeChanged', onStore);
+    return () => window.removeEventListener('storeChanged', onStore);
+  }, []);
+
   useEffect(() => {
     if (editingCoupon) {
       setCode(editingCoupon.code);

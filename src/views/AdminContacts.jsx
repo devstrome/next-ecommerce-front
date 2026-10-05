@@ -125,7 +125,7 @@ const AdminContacts = () => {
       `"${selectedContact.message}"\n\n` +
       `We will get back to you shortly.\n\n` +
       `Best regards,\n` +
-      `Belorella Support`
+      `BELORELLA Support`
     );
     setShowReplyModal(true);
   };
@@ -664,7 +664,7 @@ const AdminContacts = () => {
                 />
               </div>
               <p className="text-xs text-[#888888]">
-                This email is sent through Belorella's server email account and recorded on the contact.
+                This email is sent through BELORELLA's server email account and recorded on the contact.
               </p>
             </div>
 

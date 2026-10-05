@@ -2,6 +2,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { getStorage } from '../../../../src/lib/storage';
+import { toast } from 'react-toastify';
+import { printDocument } from '../../../../src/lib/print';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { FiPlus, FiTrash2, FiEdit2, FiDownload, FiCalendar, FiDollarSign, FiTrendingUp, FiShoppingBag, FiFilter, FiX } from 'react-icons/fi';
 
@@ -260,24 +262,33 @@ export default function FinancePageClient() {
     body { font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a1a; background: white; }
     html, body { height: 100%; }
     @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
-    @page { size: A4 portrait; margin: 0; }
-    .page { display: flex; flex-direction: column; min-height: 100vh; }
-    .content { flex: 1; padding: 24px 40px; }
-    .header { background: linear-gradient(135deg, #DC143C 0%, #9F123C 100%); padding: 28px 40px 24px; text-align: center; }
+    @page {
+      size: A4 portrait;
+      margin: 16mm 14mm 16mm;
+      @top-center { content: "BELORELLA — Confidential Report"; font-family: 'Segoe UI', Arial, sans-serif; font-size: 8pt; color: #999; }
+      @bottom-center { content: "Page " counter(page) " of " counter(pages); font-family: 'Segoe UI', Arial, sans-serif; font-size: 8pt; color: #999; }
+      @bottom-left { content: "BELORELLA"; font-family: 'Segoe UI', Arial, sans-serif; font-size: 7.5pt; color: #aaa; }
+    }
+    thead { display: table-header-group; }
+    tr, .keep-together { break-inside: avoid; page-break-inside: avoid; }
+    h1, h2, h3, h4 { break-after: avoid; page-break-after: avoid; }
+    .page { display: flex; flex-direction: column; min-height: 100%; }
+    .content { flex: 1; padding: 24px 0; }
+    .header { background: linear-gradient(135deg, #DC143C 0%, #9F123C 100%); padding: 28px 40px 24px; text-align: center; border-radius: 8px; }
     .header .brand { font-size: 30px; font-weight: 800; letter-spacing: 10px; color: white; text-transform: uppercase; margin: 8px 0 2px; }
     .header .sub { font-size: 11px; letter-spacing: 4px; color: rgba(255,255,255,0.75); text-transform: uppercase; }
-    .titlebar { background: #FFF1F2; padding: 14px 40px; border-bottom: 2px solid #FECDD3; display: flex; justify-content: space-between; align-items: center; }
+    .titlebar { background: #FFF1F2; padding: 14px 20px; border-bottom: 2px solid #FECDD3; display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
     .section { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #FECDD3; }
     .section .bar { width: 4px; height: 18px; background: #DC143C; border-radius: 2px; }
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
     th { text-align: left; padding: 10px 12px; border-bottom: 2px solid #FECDD3; color: #DC143C; font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; background: #FFF1F2; }
     th:last-child, td:last-child { text-align: right; }
-    .auth-section { padding: 16px 40px; display: flex; justify-content: space-between; align-items: flex-end; border-top: 1px solid #FECDD3; }
+    .auth-section { padding: 16px 0; display: flex; justify-content: space-between; align-items: flex-end; border-top: 1px solid #FECDD3; break-inside: avoid; }
     .auth-box { text-align: center; }
     .auth-box img { max-height: 80px; object-fit: contain; }
     .auth-box .label { font-size: 9px; color: #888; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
     .auth-box .line { width: 140px; border-bottom: 1px solid #ccc; margin: 0 auto 6px; }
-    .footer { background: #1a1a1a; padding: 14px 40px; text-align: center; margin-top: auto; }
+    .footer { padding: 14px 0; text-align: center; margin-top: auto; border-top: 1px solid #eee; }
   `;
 
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
@@ -302,7 +313,7 @@ export default function FinancePageClient() {
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title><style>${commonCSS}</style></head><body>
       <div class="page">
         <div class="header">
-          ${logo ? `<img src="${logo}" alt="Belorella" style="border-radius: 10px;height:60px;object-fit:contain;" />` : `<div style="font-size:36px;font-weight:900;color:white;letter-spacing:8px">B</div>`}
+          ${logo ? `<img src="${logo}" alt="BELORELLA" style="border-radius: 10px;height:60px;object-fit:contain;" />` : `<div style="font-size:36px;font-weight:900;color:white;letter-spacing:8px">B</div>`}
           <div class="brand">BELORELLA</div>
           <div class="sub">Premium Fashion &amp; Lifestyle</div>
         </div>
@@ -335,7 +346,7 @@ export default function FinancePageClient() {
           </div>
         </div>
         <div class="footer">
-          <div style="font-size:10px;color:rgba(255,255,255,0.5);letter-spacing:1px">BELORELLA &copy; ${new Date().getFullYear()} &mdash; Confidential Report</div>
+          <div style="font-size:10px;color:#999;letter-spacing:1px">BELORELLA &copy; ${new Date().getFullYear()} &mdash; Confidential Report</div>
         </div>
       </div>
     </body></html>`;
@@ -348,8 +359,9 @@ export default function FinancePageClient() {
       fetchImageAsDataURI('/seal.png'),
     ]);
     const html = buildPDF(title, subtitle, bodyContent, { logo, sign, seal });
-    const w = window.open('', '_blank', 'width=794,height=1123');
-    if (w) { w.document.write(html); w.document.close(); w.onload = () => { setTimeout(() => w.print(), 500); }; }
+    if (!printDocument(html)) {
+      toast.error('Print window blocked - allow popups for this site');
+    }
   };
 
   const handleExportPDF = async () => {

@@ -7,12 +7,14 @@ import axios from 'axios';
 import io from 'socket.io-client';
 import Badge from '../components/Badge';
 import SEOHead from '../components/SEOHead';
+import ProductCartModal from '../components/ProductCartModal';
 import { CartContext } from '../context/CartContext';
 import { UserContext } from '../context/UserContext';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { FaHeart, FaRegHeart, FaStar, FaMinus, FaPlus } from 'react-icons/fa';
 import { FiTruck, FiShield, FiRotateCcw, FiShare2, FiShoppingCart, FiX } from 'react-icons/fi';
+import { formatBDT } from '../config/brand';
 
 const ProductView = () => {
   const cartCtx = useContext(CartContext);
@@ -44,6 +46,7 @@ const ProductView = () => {
   const [quantity, setQuantity] = useState(1);
   const [activeTab, setActiveTab] = useState('description');
   const [showCartModal, setShowCartModal] = useState(false);
+  const [relatedCartProductId, setRelatedCartProductId] = useState(null);
 
   const fetchProduct = async () => {
     try {
@@ -105,7 +108,11 @@ const ProductView = () => {
         params: { excludeId: id }
       });
       if (response.status === 200) {
-        const relatedProductArray = response.data[0]?.relatedProducts || [];
+        const relatedProductArray = (response.data[0]?.relatedProducts || []).map((rp) => ({
+          ...rp,
+          // API populates productId — collapse back to a plain id string
+          productId: rp.productId && rp.productId._id ? rp.productId._id : rp.productId,
+        }));
         setRelatedProducts(relatedProductArray);
         console.log('Related Products:', relatedProductArray);
       } else {
@@ -501,13 +508,10 @@ const ProductView = () => {
                   ))
                 )}
                 {product.brand && (
-                  <span className="text-xs font-sans text-dark-gray bg-cool-gray px-3 py-1 rounded-full">{product.brand}</span>
+                  <span className="text-xs font-sans font-semibold text-pure-white bg-black px-3 py-1 rounded-full tracking-wide">{product.brand}</span>
                 )}
                 {product.gender && (
                   <span className="text-xs font-sans text-dark-gray bg-cool-gray px-3 py-1 rounded-full">{product.gender}</span>
-                )}
-                {product.measureType && (
-                  <span className="text-xs font-sans text-dark-gray bg-cool-gray px-3 py-1 rounded-full">{product.measureType}</span>
                 )}
                 {product.isPreOrder && (
                   <span className="text-xs font-sans text-pure-white bg-maybelline-pink px-3 py-1 rounded-full">Pre-Order{product.preOrderEstimatedDate ? ` — Est. ${new Date(product.preOrderEstimatedDate).toLocaleDateString()}` : ''}</span>
@@ -521,13 +525,13 @@ const ProductView = () => {
               <div className="flex items-center gap-3 mb-6">
                 {selectedDiscountPrice ? (
                   <>
-                    <span className="text-lg text-dark-gray line-through font-sans">BDT{selectedPrice}</span>
-                    <span className="text-2xl text-maybelline-pink font-heading font-bold">BDT{selectedDiscountPrice}</span>
+                    <span className="text-lg text-dark-gray line-through font-sans">{formatBDT(selectedPrice)}</span>
+                    <span className="text-2xl text-maybelline-pink font-heading font-bold">{formatBDT(selectedDiscountPrice)}</span>
                   </>
                 ) : (
                   <>
-                    <span className="text-lg text-dark-gray line-through font-sans">BDT{product.mainPrice}</span>
-                    <span className="text-2xl text-maybelline-pink font-heading font-bold">BDT{product.discountPrice}</span>
+                    <span className="text-lg text-dark-gray line-through font-sans">{formatBDT(product.mainPrice)}</span>
+                    <span className="text-2xl text-maybelline-pink font-heading font-bold">{formatBDT(product.discountPrice)}</span>
                   </>
                 )}
                 {(() => {
@@ -751,7 +755,7 @@ const ProductView = () => {
                         {variantShipping.map((opt, idx) => (
                           <li key={idx} className="flex items-center gap-2">
                             <span className="w-1.5 h-1.5 bg-maybelline-pink rounded-full"></span>
-                            {opt.name} — BDT{Number(opt.charge).toFixed(2)} • {opt.estimatedDays} days
+                            {opt.name} — {formatBDT(Number(opt.charge).toFixed(2))} • {opt.estimatedDays} days
                           </li>
                         ))}
                       </ul>
@@ -804,13 +808,33 @@ const ProductView = () => {
               )}
               {activeTab === 'details' && (
                 selectedVariant?.specifications && selectedVariant.specifications.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {selectedVariant.specifications.map((spec, index) => (
-                      <div key={index} className="flex justify-between items-center py-2 border-b border-cool-gray">
-                        <span className="font-sans font-medium text-dark-gray">{spec.name}:</span>
-                        <span className="font-sans text-black">{spec.value} {spec.unit}</span>
-                      </div>
-                    ))}
+                  <div className="space-y-3">
+                    {selectedVariant.specifications.map((spec, index) => {
+                      const label = [spec.name, spec.unit].filter(Boolean).join(' — ');
+                      const value = String(spec.value ?? '').trim();
+                      // Long multi-line values (Ingredients, Directions…) render as
+                      // a full-width card instead of a cramped inline row.
+                      const isLong = value.length > 60 || value.includes('\n');
+                      return isLong ? (
+                        <div key={index} className="border border-cool-gray bg-[#F7F5F3]/40 p-4 sm:p-5">
+                          <p className="font-sans text-[11px] font-semibold uppercase tracking-[0.18em] text-maybelline-pink mb-2">
+                            {spec.name}
+                          </p>
+                          <p className="font-sans text-sm leading-relaxed text-dark-gray whitespace-pre-wrap">
+                            {value}
+                            {spec.unit ? ` ${spec.unit}` : ''}
+                          </p>
+                        </div>
+                      ) : (
+                        <div
+                          key={index}
+                          className="flex justify-between items-start gap-4 py-2.5 border-b border-cool-gray last:border-b-0"
+                        >
+                          <span className="font-sans text-sm font-medium text-black shrink-0">{label}</span>
+                          <span className="font-sans text-sm text-dark-gray text-right">{value}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
                   <p className="font-sans text-mid-gray">No specifications available.</p>
@@ -970,34 +994,85 @@ const ProductView = () => {
                 {relatedProducts
                   .filter((relatedProduct) => relatedProduct.productId !== product._id)
                   .slice(0, 8)
-                  .map((relatedProduct) => (
-                    <Link href={`/products/${relatedProduct.productId}`}
+                  .map((relatedProduct) => {
+                    const hasDiscount =
+                      relatedProduct.discountPrice > 0 &&
+                      relatedProduct.discountPrice < relatedProduct.mainPrice;
+                    const pctOff = hasDiscount
+                      ? Math.round(
+                          ((relatedProduct.mainPrice - relatedProduct.discountPrice) /
+                            relatedProduct.mainPrice) *
+                            100
+                        )
+                      : 0;
+                    return (
+                    <div
                       key={relatedProduct.productId}
-                      className="group border border-cool-gray hover:border-mid-gray transition-all duration-200 p-4"
+                      className="group border border-cool-gray hover:border-mid-gray hover:shadow-[0_8px_24px_rgba(0,0,0,0.08)] transition-all duration-300 p-4 flex flex-col bg-pure-white"
                     >
-                      <div className="aspect-square bg-pure-white flex items-center justify-center mb-3 overflow-hidden">
-                        <img
-                          src={relatedProduct.mainImage}
-                          alt={relatedProduct.name}
-                          className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-105"
-                          loading="lazy"
-                        />
-                      </div>
-                      {relatedProduct.mainBadgeName && relatedProduct.mainBadgeColor && (
-                        <div className="mb-2">
+                      <Link href={`/products/${relatedProduct.productId}`} className="block relative">
+                        {relatedProduct.mainBadgeName && relatedProduct.mainBadgeColor && (
                           <Badge
                             name={relatedProduct.mainBadgeName}
                             color={relatedProduct.mainBadgeColor}
                             position="topRight"
                           />
+                        )}
+                        {hasDiscount && (
+                          <span className="absolute top-2 left-2 z-10 bg-maybelline-pink text-pure-white text-[10px] font-sans font-bold px-2 py-1 rounded-full tracking-wide">
+                            {pctOff}% OFF
+                          </span>
+                        )}
+                        <div className="aspect-square bg-[#F7F5F3] flex items-center justify-center mb-3 overflow-hidden relative">
+                          <img
+                            src={relatedProduct.mainImage}
+                            alt={relatedProduct.name}
+                            className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-105"
+                            loading="lazy"
+                          />
+                          {relatedProduct.brand && (
+                            <span className="absolute bottom-2 left-2 z-10 font-sans text-[10px] font-semibold uppercase tracking-wider text-pure-white bg-black/85 px-2 py-0.5 rounded-full">
+                              {relatedProduct.brand}
+                            </span>
+                          )}
                         </div>
-                      )}
-                      <h3 className="text-sm font-sans font-semibold text-black line-clamp-2 group-hover:text-maybelline-pink transition-colors mb-1">
-                        {relatedProduct.name}
-                      </h3>
-                      <p className="text-sm text-maybelline-pink font-sans font-bold">BDT{relatedProduct.mainPrice}</p>
-                    </Link>
-                  ))}
+                        <h3 className="text-sm font-sans font-semibold text-black line-clamp-2 group-hover:text-maybelline-pink transition-colors mb-1.5 min-h-[2.5rem]">
+                          {relatedProduct.name}
+                        </h3>
+                        <div className="flex items-baseline gap-2 flex-wrap">
+                          <span
+                            className={`text-sm font-sans font-bold ${
+                              hasDiscount ? 'text-maybelline-pink' : 'text-black'
+                            }`}
+                          >
+                            {formatBDT((hasDiscount ? relatedProduct.discountPrice : relatedProduct.mainPrice).toFixed(2))}
+                          </span>
+                          {hasDiscount && (
+                            <span className="text-xs font-sans text-mid-gray line-through">
+                              {formatBDT(relatedProduct.mainPrice.toFixed(2))}
+                            </span>
+                          )}
+                        </div>
+                      </Link>
+                      <div className="mt-auto pt-3 grid grid-cols-2 gap-2">
+                        <Link
+                          href={`/products/${relatedProduct.productId}`}
+                          className="text-[11px] font-sans font-semibold uppercase tracking-wider text-black border border-black text-center py-2.5 hover:bg-black hover:text-pure-white transition-colors duration-200"
+                        >
+                          View Details
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => setRelatedCartProductId(relatedProduct.productId)}
+                          className="text-[11px] font-sans font-semibold uppercase tracking-wider text-pure-white bg-maybelline-pink text-center py-2.5 hover:bg-opacity-90 transition-opacity duration-200 flex items-center justify-center gap-1.5"
+                        >
+                          <FiShoppingCart size={12} />
+                          Add to Cart
+                        </button>
+                      </div>
+                    </div>
+                    );
+                  })}
               </div>
             </div>
           )}
@@ -1047,13 +1122,13 @@ const ProductView = () => {
                   <div className="flex items-center gap-2 mt-1">
                     {selectedDiscountPrice ? (
                       <>
-                        <span className="text-xs text-dark-gray line-through font-sans">BDT{selectedPrice}</span>
-                        <span className="text-base text-maybelline-pink font-heading font-bold">BDT{selectedDiscountPrice}</span>
+                        <span className="text-xs text-dark-gray line-through font-sans">{formatBDT(selectedPrice)}</span>
+                        <span className="text-base text-maybelline-pink font-heading font-bold">{formatBDT(selectedDiscountPrice)}</span>
                       </>
                     ) : (
                       <>
-                        <span className="text-xs text-dark-gray line-through font-sans">BDT{product.mainPrice}</span>
-                        <span className="text-base text-maybelline-pink font-heading font-bold">BDT{product.discountPrice}</span>
+                        <span className="text-xs text-dark-gray line-through font-sans">{formatBDT(product.mainPrice)}</span>
+                        <span className="text-base text-maybelline-pink font-heading font-bold">{formatBDT(product.discountPrice)}</span>
                       </>
                     )}
                   </div>
@@ -1154,7 +1229,7 @@ const ProductView = () => {
               <div className="bg-cool-gray bg-opacity-50 p-4 space-y-2">
                 <div className="flex justify-between items-center text-sm font-sans">
                   <span className="text-dark-gray">Price per unit</span>
-                  <span className="text-black font-medium">BDT{selectedDiscountPrice || product.discountPrice}</span>
+                  <span className="text-black font-medium">{formatBDT(selectedDiscountPrice || product.discountPrice)}</span>
                 </div>
                 <div className="flex justify-between items-center text-sm font-sans">
                   <span className="text-dark-gray">Quantity</span>
@@ -1163,7 +1238,7 @@ const ProductView = () => {
                 <div className="border-t border-cool-gray pt-2 flex justify-between items-center">
                   <span className="text-sm font-sans font-semibold text-black uppercase tracking-wider">Total</span>
                   <span className="text-xl font-heading font-bold text-maybelline-pink">
-                    BDT{((selectedDiscountPrice || product.discountPrice) * quantity).toFixed(2)}
+                    {formatBDT(((selectedDiscountPrice || product.discountPrice) * quantity).toFixed(2))}
                   </span>
                 </div>
               </div>
@@ -1185,6 +1260,12 @@ const ProductView = () => {
           </div>
         </div>
       )}
+      {/* Add-to-cart modal for "You May Also Like" products */}
+      <ProductCartModal
+        productId={relatedCartProductId}
+        isOpen={!!relatedCartProductId}
+        onClose={() => setRelatedCartProductId(null)}
+      />
     </>
   );
 };

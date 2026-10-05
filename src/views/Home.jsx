@@ -58,6 +58,8 @@ function Home() {
   const [newLoading, setNewLoading] = useState(true);
   const [topRated, setTopRated] = useState([]);
   const [topRatedLoading, setTopRatedLoading] = useState(true);
+  const [topProducts, setTopProducts] = useState([]);
+  const [topProductsLoading, setTopProductsLoading] = useState(true);
   const [cartModalProductId, setCartModalProductId] = useState(null);
 
   useEffect(() => {
@@ -100,6 +102,21 @@ function Home() {
         console.error('Error fetching best sellers:', err);
       } finally {
         setTopRatedLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  // Real top-rated products (sorted by averageRating, fallback to curated slides)
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const { data } = await axios.get(`${API_URI}/api/products/top-rated`, { params: { limit: 8 } });
+        if (Array.isArray(data)) setTopProducts(data);
+      } catch (err) {
+        console.error('Error fetching top rated products:', err);
+      } finally {
+        setTopProductsLoading(false);
       }
     };
     load();
@@ -267,7 +284,7 @@ function Home() {
                 &ldquo;Style is a way to say who you are<br />without having to speak.&rdquo;
               </p>
               <p className="mt-5 font-sans text-[11px] tracking-[0.25em] uppercase text-white/40">
-                — The Belorella Journal
+                — The BELORELLA Journal
               </p>
             </div>
           </div>
@@ -338,11 +355,83 @@ function Home() {
         </section>
       )}
 
+      {/* ─── TOP RATED PRODUCTS ─────────────────────────── */}
+      {(!topProductsLoading && topProducts.length > 0) && (
+        <section className="pb-16 sm:pb-20 lg:pb-24">
+          <div className="max-w-[1440px] mx-auto page-padding">
+            <SectionHeading
+              index="§ 04"
+              tag="Highest Rated"
+              title="Top Rated Products"
+              action={<ViewAllLink href="/products" label="Shop Top Rated" />}
+            />
+            <div className="flex gap-5 overflow-x-auto snap-x pb-6 -mx-4 px-4 sm:mx-0 sm:px-0 scrollbar-none">
+              {topProducts.slice(0, 10).map((item) => {
+                const hasDiscount = item.discountPrice > 0 && item.discountPrice < item.mainPrice;
+                return (
+                  <Link
+                    key={item._id}
+                    href={`/products/${item._id}`}
+                    className="group snap-start shrink-0 w-[70%] sm:w-[46%] md:w-[31%] lg:w-[23%]"
+                  >
+                    <div className="relative aspect-[3/4] bg-[#F7F5F3] overflow-hidden">
+                      <img
+                        src={item.mainImage}
+                        alt={item.name}
+                        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                        loading="lazy"
+                      />
+                      {item.mainBadgeName && (
+                        <span
+                          className="absolute top-3 left-3 font-sans text-[10px] tracking-wider uppercase text-pure-white px-2.5 py-1"
+                          style={{ backgroundColor: item.mainBadgeColor || '#DC143C' }}
+                        >
+                          {item.mainBadgeName}
+                        </span>
+                      )}
+                      {item.averageRating > 0 && (
+                        <span className="absolute top-3 right-3 flex items-center gap-1 font-sans text-[11px] text-black bg-pure-white/95 px-2 py-1">
+                          <FiStar size={10} className="text-maybelline-pink" />
+                          {Number(item.averageRating).toFixed(1)}
+                        </span>
+                      )}
+                      {item.brand && (
+                        <span className="absolute bottom-3 left-3 font-sans text-[10px] font-semibold tracking-wider uppercase text-pure-white bg-black/85 px-2.5 py-1">
+                          {item.brand}
+                        </span>
+                      )}
+                    </div>
+                    <div className="pt-4">
+                      <h3 className="font-display text-base sm:text-lg leading-snug text-black group-hover:text-maybelline-pink transition-colors duration-300 line-clamp-2">
+                        {item.name}
+                      </h3>
+                      <div className="mt-2 flex items-baseline gap-2.5">
+                        <span className="font-sans text-sm font-semibold text-black">
+                          BDT {salePrice(item)}
+                        </span>
+                        {hasDiscount && (
+                          <span className="font-sans text-xs text-mid-gray line-through">
+                            BDT {item.mainPrice}
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 font-sans text-[11px] text-dark-gray/60">
+                        {item.totalReviews || 0} review{(item.totalReviews || 0) === 1 ? '' : 's'}
+                      </p>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* ─── SPECIAL OFFERS ─────────────────────────────── */}
       <section className="pb-16 sm:pb-20 lg:pb-24">
         <div className="max-w-[1440px] mx-auto page-padding">
           <SectionHeading
-            index="§ 04"
+            index="§ 05"
             tag="On Offer"
             title="Special Offers"
             action={<ViewAllLink href="/products" label="All Offers" />}
@@ -358,7 +447,7 @@ function Home() {
             <div className="relative aspect-[4/5] bg-[#F6F1EC] flex items-center justify-center overflow-hidden">
               <img
                 src="/logo.png"
-                alt="Belorella"
+                alt="BELORELLA"
                 className="w-40 h-40 md:w-48 md:h-48 object-contain mix-blend-multiply"
               />
               <span className="absolute top-6 left-6 font-sans text-[11px] tracking-[0.28em] uppercase text-black/40">
@@ -380,7 +469,7 @@ function Home() {
                 Where beauty meets <em className="text-maybelline-pink">confidence</em>
               </h2>
               <p className="font-sans text-sm sm:text-base text-dark-gray/80 leading-relaxed mb-6 max-w-lg">
-                At Belorella, beauty is an expression of individuality. Our curated collections
+                At BELORELLA, beauty is an expression of individuality. Our curated collections
                 bring together the finest products from around the world — because you deserve
                 nothing less than extraordinary.
               </p>
@@ -431,7 +520,7 @@ function Home() {
             <span className="block w-8 h-[1px] bg-black/20" />
           </div>
           <h2 className="font-display font-medium text-3xl sm:text-4xl lg:text-5xl leading-tight text-black mb-5">
-            Join the Belorella World
+            Join the BELORELLA World
           </h2>
           <p className="font-sans text-sm sm:text-base text-dark-gray/70 mb-9 max-w-md mx-auto">
             New arrivals, exclusive offers and beauty insights — delivered first to your inbox.

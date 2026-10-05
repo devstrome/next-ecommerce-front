@@ -31,6 +31,11 @@ import {
 } from 'react-icons/fa';
 import { useRouter } from "next/navigation";
 import { useAdmin } from '../context/AdminContext';
+import { BRAND, formatBDT } from '../config/brand';
+import { formatMeasureLine } from '../lib/measure';
+import { printThermalReceipt } from '../lib/print/thermal';
+import { buildA4Document } from '../lib/print/a4';
+import { printDocument } from '../lib/print';
 
 const AdminPOSOrders = () => {
   const [orders, setOrders] = useState([]);
@@ -145,227 +150,13 @@ const AdminPOSOrders = () => {
         url: `${process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000'}/api/pos/orders/${orderId}/receipt`
       });
       const receipt = response.data.receipt;
-      
-      const thermalReceiptContent = `
-        <html>
-          <head>
-            <title>Receipt - ${receipt.orderNumber}</title>
-            <style>
-              @page {
-                size: 80mm auto;
-                margin: 0;
-              }
-              * {
-                margin: 0;
-                padding: 0;
-                box-sizing: border-box;
-              }
-              body { 
-                font-family: 'Courier New', monospace; 
-                font-size: 9px; 
-                margin: 0;
-                padding: 2mm;
-                width: 76mm;
-                max-width: 76mm;
-                background: white;
-                line-height: 1.2;
-                word-wrap: break-word;
-              }
-              .logo {
-                text-align: center;
-                font-size: 10px;
-                font-weight: bold;
-                margin-bottom: 3mm;
-                border-bottom: 1px dashed #000;
-                padding-bottom: 2mm;
-              }
-              .receipt-header {
-                text-align: center;
-                margin-bottom: 3mm;
-                font-size: 7px;
-              }
-              .customer-info {
-                margin-bottom: 3mm;
-                font-size: 7px;
-              }
-              .items-section {
-                margin-bottom: 3mm;
-              }
-              .item {
-                margin-bottom: 2mm;
-                padding-bottom: 1mm;
-                border-bottom: 1px dotted #ccc;
-                font-size: 7px;
-              }
-              .item-details {
-                margin: 0.5mm 0;
-              }
-              .order-barcode-section {
-                text-align: center;
-                margin: 3mm 0;
-                padding: 2mm 0;
-                border-top: 1px dashed #000;
-                border-bottom: 1px dashed #000;
-              }
-              .barcode-container {
-                text-align: center;
-                margin: 1mm 0;
-              }
-              .barcode-image {
-                max-width: 60mm;
-                height: auto;
-              }
-              .totals {
-                border-top: 1px dashed #000;
-                padding-top: 2mm;
-                margin-top: 3mm;
-                font-size: 7px;
-              }
-              .total-row {
-                display: flex;
-                justify-content: space-between;
-                margin: 0.5mm 0;
-              }
-              .final-total {
-                font-weight: bold;
-                font-size: 9px;
-                border-top: 1px solid #000;
-                padding-top: 1mm;
-                margin-top: 1mm;
-              }
-              .footer {
-                text-align: center;
-                margin-top: 3mm;
-                border-top: 1px dashed #000;
-                padding-top: 2mm;
-                font-size: 7px;
-              }
-              .divider {
-                text-align: center;
-                margin: 2mm 0;
-                font-size: 6px;
-              }
-              @media print {
-                body {
-                  width: 76mm;
-                  max-width: 76mm;
-                  margin: 0;
-                  padding: 2mm;
-                }
-                .barcode-image {
-                  max-width: 60mm;
-                }
-                * {
-                  -webkit-print-color-adjust: exact;
-                  color-adjust: exact;
-                }
-              }
-            </style>
-          </head>
-          <body>
-            <div class="logo">
-              ╔══════════════════════════════════════════════════════════╗
-              ║                                                          ║
-              ║                    BELORELLA                             ║
-              ║              Premium Fashion & Lifestyle                 ║
-              ║                                                          ║
-              ╚══════════════════════════════════════════════════════════╝
-            </div>
-            
-            <div class="receipt-header">
-              <div>POS RECEIPT</div>
-              <div>Order #: ${receipt.orderNumber}</div>
-              <div>Date: ${new Date(receipt.date).toLocaleString()}</div>
-              <div>Cashier: ${receipt.cashier.firstName} ${receipt.cashier.lastName}</div>
-            </div>
-            
-            <div class="divider">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
-            
-            <div class="customer-info">
-              <div><strong>Customer:</strong> ${receipt.customer.name}</div>
-              <div><strong>Phone:</strong> ${receipt.customer.phone || 'N/A'}</div>
-            </div>
-            
-            <div class="divider">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
-            
-            <div class="items-section">
-              <div style="text-align: center; font-weight: bold; margin-bottom: 2mm;">ITEMS:</div>
-              ${receipt.items.map(item => `
-                <div class="item">
-                  <div class="item-details">
-                    <div><strong>${item.productName}</strong></div>
-                    <div>Size: ${item.variantInfo.size}</div>
-                    <div>${item.quantity} x ৳${item.unitPrice}</div>
-                    ${item.discountPrice && item.discountPrice < item.unitPrice ? 
-                      `<div style="color: #666; font-size: 6px;">Original: ৳${item.unitPrice} | Discounted: ৳${item.discountPrice}</div>` : 
-                      ''
-                    }
-                    <div><strong>Total: ৳${item.totalPrice}</strong></div>
-                  </div>
-                </div>
-              `).join('')}
-            </div>
-            
-            <div class="order-barcode-section">
-              <div style="font-weight: bold; margin-bottom: 1mm;">ORDER BARCODE:</div>
-              <div class="barcode-container">
-                <img 
-                  src="https://barcodeapi.org/api/auto/${receipt.orderNumber}" 
-                  alt="Order Barcode ${receipt.orderNumber}"
-                  class="barcode-image"
-                  onerror="this.style.display='none'"
-                  onload="this.style.display='block'"
-                />
-              </div>
-              <div style="font-size: 6px; margin-top: 1mm; font-family: monospace;">${receipt.orderNumber}</div>
-            </div>
-            
-            <div class="totals">
-              <div class="total-row">
-                <span>Subtotal:</span>
-                <span>৳${receipt.subtotal.toFixed(2)}</span>
-              </div>
-              <div class="total-row">
-                <span>Tax:</span>
-                <span>৳${receipt.tax.toFixed(2)}</span>
-              </div>
-              <div class="total-row">
-                <span>Discount:</span>
-                <span>৳${receipt.discount.toFixed(2)}</span>
-              </div>
-              <div class="total-row final-total">
-                <span>TOTAL:</span>
-                <span>৳${receipt.total.toFixed(2)}</span>
-              </div>
-              <div class="total-row">
-                <span>Payment:</span>
-                <span>${receipt.paymentMethod.toUpperCase()}</span>
-              </div>
-            </div>
-            
-            <div class="divider">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
-            
-            <div class="footer">
-              <div>Thank you for your purchase!</div>
-              <div style="margin-top: 1mm;">Please come again</div>
-              <div style="margin-top: 3mm; font-size: 6px;">
-                ╔══════════════════════════════════════════════════════════╗
-                ║                                                          ║
-                ║                    BELORELLA                             ║
-                ║              Premium Fashion & Lifestyle                 ║
-                ║                                                          ║
-                ╚══════════════════════════════════════════════════════════╝
-              </div>
-            </div>
-          </body>
-        </html>
-      `;
-      
-      const printWindow = window.open('', '_blank');
-      printWindow.document.write(thermalReceiptContent);
-      printWindow.document.close();
-      printWindow.print();
-      
+
+      // Single shared thermal template (58/80mm) — same as the POS screen
+      const width = Number(getStorage('posPaperWidth')) || 80;
+      const ok = printThermalReceipt(receipt, { width });
+      if (!ok) {
+        toast.error('Print window blocked - allow popups for this site');
+      }
     } catch (error) {
       console.error('Error printing receipt:', error);
       toast.error('Error printing receipt');
@@ -391,137 +182,134 @@ const AdminPOSOrders = () => {
       const [logoDataURI, signDataURI, sealDataURI] = await Promise.all([
         fetchImg('/logo.png'), fetchImg('/sign.png'), fetchImg('/seal.png')
       ]);
-      
-      const itemRows = order.items.map(item => `
-        <tr style="background:#fff;border-bottom:1px solid #eee">
+
+      const itemRows = order.items.map(item => {
+        const v = item.variantInfo || {};
+        const details = [formatMeasureLine(v), v.color, item.scannedBarcode ? `BC: ${item.scannedBarcode}` : '']
+          .filter(Boolean).join(' &bull; ');
+        return `
+        <tr>
           <td style="padding:10px 12px;font-weight:600;color:#1a1a1a">${item.productName || 'Product'}</td>
-          <td style="padding:10px 12px;color:#666;font-size:12px">${item.variantInfo?.size || ''} ${item.variantInfo?.color || ''} ${item.scannedBarcode ? '• BC: ' + item.scannedBarcode : ''}</td>
-          <td style="padding:10px 12px;text-align:right">৳${item.unitPrice.toFixed(2)}</td>
+          <td style="padding:10px 12px;color:#666;font-size:12px">${details}</td>
+          <td style="padding:10px 12px;text-align:right">${formatBDT(item.unitPrice)}</td>
           <td style="padding:10px 12px;text-align:center">${item.quantity}</td>
-          <td style="padding:10px 12px;text-align:right;font-weight:600">৳${item.totalPrice.toFixed(2)}</td>
-        </tr>
-      `).join('');
+          <td style="padding:10px 12px;text-align:right;font-weight:600">${formatBDT(item.totalPrice)}</td>
+        </tr>`;
+      }).join('');
 
-      const generatedDate = new Date().toLocaleDateString('en-BD', { year:'numeric',month:'long',day:'numeric' });
+      const generatedDate = new Date().toLocaleDateString('en-BD', { year: 'numeric', month: 'long', day: 'numeric' });
 
-      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>POS Invoice #${order.orderNumber}</title>
-        <style>
-          *{margin:0;padding:0;box-sizing:border-box}
-          body{font-family:'Segoe UI',Arial,sans-serif;color:#1a1a1a;background:white}
-          html,body{height:100%}
-          @page{size:A4 portrait;margin:0}
-          @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-          .page{display:flex;flex-direction:column;min-height:100vh}
-          .header{background:linear-gradient(135deg,#DC143C 0%,#9F123C 100%);padding:28px 40px 24px;text-align:center}
-          .header .brand{font-size:30px;font-weight:800;letter-spacing:10px;color:white;text-transform:uppercase;margin:8px 0 2px}
-          .header .sub{font-size:11px;letter-spacing:4px;color:rgba(255,255,255,0.75);text-transform:uppercase}
-          .titlebar{background:#FFF1F2;padding:14px 40px;border-bottom:2px solid #FECDD3;display:flex;justify-content:space-between;align-items:center}
-          .content{flex:1;padding:24px 40px}
-          table{width:100%;border-collapse:collapse;font-size:12px}
-          th{text-align:left;padding:10px 12px;border-bottom:2px solid #FECDD3;color:#DC143C;font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;background:#FFF1F2}
-          th:last-child,td:last-child{text-align:right}
-          .auth-section{padding:16px 40px;display:flex;justify-content:space-between;align-items:flex-end;border-top:1px solid #FECDD3}
-          .auth-box{text-align:center}
-          .auth-box img{max-height:80px;object-fit:contain}
-          .auth-box .label{font-size:9px;color:#888;margin-top:4px;text-transform:uppercase;letter-spacing:0.5px}
-          .auth-box .line{width:140px;border-bottom:1px solid #ccc;margin:0 auto 6px}
-          .footer{background:#1a1a1a;padding:14px 40px;text-align:center;margin-top:auto}
-        </style></head><body>
-        <div class="page">
-          <div class="header">
-            ${logoDataURI ? `<img src="${logoDataURI}" alt="Belorella" style="height:60px;object-fit:contain" />` : `<div style="font-size:36px;font-weight:900;color:white;letter-spacing:8px">B</div>`}
-            <div class="brand">BELORELLA</div>
-            <div class="sub">Premium Fashion &amp; Lifestyle</div>
+      const invoiceHeader = `
+        <div class="inv-header">
+          ${logoDataURI ? `<img src="${logoDataURI}" alt="${BRAND.NAME}" style="height:56px;object-fit:contain" />` : ''}
+          <div class="brand">${BRAND.NAME}</div>
+          <div class="sub">${BRAND.TAGLINE}</div>
+        </div>`;
+
+      const bodyHtml = `
+        <div class="titlebar">
+          <div>
+            <div class="inv-title">POS INVOICE &mdash; #${order.orderNumber}</div>
+            <div style="font-size:12px;color:#666">In-Store Purchase</div>
           </div>
-          <div class="titlebar">
-            <div>
-              <div style="font-size:18px;font-weight:700;color:#DC143C">POS INVOICE — #${order.orderNumber}</div>
-              <div style="font-size:12px;color:#666">In-Store Purchase</div>
-            </div>
-            <div style="text-align:right">
-              <div style="font-size:10px;color:#999;text-transform:uppercase;letter-spacing:1px">Generated</div>
-              <div style="font-size:12px;color:#333">${generatedDate}</div>
-            </div>
+          <div style="text-align:right">
+            <div style="font-size:10px;color:#999;text-transform:uppercase;letter-spacing:1px">Generated</div>
+            <div style="font-size:12px;color:#333">${generatedDate}</div>
           </div>
-          <div class="content">
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:24px">
-              <div style="background:#FFF8FA;border:1px solid #FECDD3;border-radius:8px;padding:14px">
-                <div style="font-size:9px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Customer</div>
-                <div style="font-size:13px;font-weight:600;color:#1a1a1a">${order.customer?.name || 'Walk-in'}</div>
-                <div style="font-size:12px;color:#666">${order.customer?.phone || ''}</div>
-                <div style="font-size:11px;color:#888">${order.customer?.email || ''}</div>
-                <div style="font-size:11px;color:#888">${order.customer?.address || ''}</div>
-              </div>
-              <div style="background:#FFF8FA;border:1px solid #FECDD3;border-radius:8px;padding:14px">
-                <div style="font-size:9px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Order Info</div>
-                <div style="font-size:12px;color:#333"><strong>Order:</strong> #${order.orderNumber}</div>
-                <div style="font-size:12px;color:#333"><strong>Date:</strong> ${new Date(order.createdAt).toLocaleString('en-BD')}</div>
-                <div style="font-size:12px;color:#333"><strong>Outlet:</strong> ${order.outlet || 'Main Outlet'}</div>
-                <div style="font-size:12px;color:#333"><strong>Cashier:</strong> ${order.cashier ? (order.cashier.firstName || '') + ' ' + (order.cashier.lastName || '') : 'N/A'}</div>
-              </div>
-              <div style="background:#FFF8FA;border:1px solid #FECDD3;border-radius:8px;padding:14px">
-                <div style="font-size:9px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Payment</div>
-                <div style="font-size:12px;color:#333"><strong>Method:</strong> ${(order.paymentMethod || 'N/A').toUpperCase()}</div>
-                <div style="font-size:12px;color:#333"><strong>Status:</strong> <span style="color:#16A34A;font-weight:600">PAID</span></div>
-                <div style="font-size:12px;color:#333"><strong>Order Status:</strong> ${(order.orderStatus || 'completed').toUpperCase()}</div>
-                ${order.notes ? `<div style="font-size:11px;color:#666;margin-top:4px"><strong>Notes:</strong> ${order.notes}</div>` : ''}
-              </div>
-            </div>
+        </div>
 
-            <div style="margin-bottom:24px">
-              <table>
-                <thead>
-                  <tr><th>Product</th><th>Details</th><th style="text-align:right">Price</th><th style="text-align:center">Qty</th><th style="text-align:right">Total</th></tr>
-                </thead>
-                <tbody>${itemRows}</tbody>
-              </table>
-            </div>
-
-            <div style="display:flex;justify-content:flex-end">
-              <div style="width:300px">
-                <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee;font-size:13px;color:#666">
-                  <span>Subtotal</span><span>৳${order.subtotal.toFixed(2)}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee;font-size:13px;color:#666">
-                  <span>Tax</span><span>৳${order.tax.toFixed(2)}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee;font-size:13px;color:#666">
-                  <span>Discount</span><span>${order.discount > 0 ? '-৳' + order.discount.toFixed(2) : '৳0.00'}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;padding:12px 0;font-size:18px;font-weight:800;color:#DC143C;border-top:2px solid #DC143C;margin-top:4px">
-                  <span>TOTAL</span><span>৳${order.total.toFixed(2)}</span>
-                </div>
-                <div style="text-align:right;font-size:12px;color:#666">Paid via ${(order.paymentMethod || '').toUpperCase()}</div>
-              </div>
-            </div>
+        <div class="info-grid">
+          <div class="info-card">
+            <div class="info-label">Customer</div>
+            <div style="font-size:13px;font-weight:600;color:#1a1a1a">${order.customer?.name || 'Walk-in'}</div>
+            <div style="font-size:12px;color:#666">${order.customer?.phone || ''}</div>
+            <div style="font-size:11px;color:#888">${order.customer?.email || ''}</div>
+            <div style="font-size:11px;color:#888">${order.customer?.address || ''}</div>
           </div>
-          <div class="auth-section">
-            <div class="auth-box">
-              ${signDataURI ? `<img src="${signDataURI}" alt="Signature" style="max-height:80px" />` : `<div style="height:80px"></div>`}
+          <div class="info-card">
+            <div class="info-label">Order Info</div>
+            <div style="font-size:12px;color:#333"><strong>Order:</strong> #${order.orderNumber}</div>
+            <div style="font-size:12px;color:#333"><strong>Date:</strong> ${new Date(order.createdAt).toLocaleString('en-BD')}</div>
+            <div style="font-size:12px;color:#333"><strong>Outlet:</strong> ${order.outlet || 'Main Outlet'}</div>
+            <div style="font-size:12px;color:#333"><strong>Cashier:</strong> ${order.cashier ? (order.cashier.firstName || '') + ' ' + (order.cashier.lastName || '') : 'N/A'}</div>
+          </div>
+          <div class="info-card">
+            <div class="info-label">Payment</div>
+            <div style="font-size:12px;color:#333"><strong>Method:</strong> ${(order.paymentMethod || 'N/A').toUpperCase()}</div>
+            <div style="font-size:12px;color:#333"><strong>Status:</strong> <span style="color:#16A34A;font-weight:600">PAID</span></div>
+            <div style="font-size:12px;color:#333"><strong>Order Status:</strong> ${(order.orderStatus || 'completed').toUpperCase()}</div>
+            ${order.notes ? `<div style="font-size:11px;color:#666;margin-top:4px"><strong>Notes:</strong> ${order.notes}</div>` : ''}
+          </div>
+        </div>
+
+        <table class="inv-table">
+          <thead>
+            <tr><th>Product</th><th>Details</th><th style="text-align:right">Price</th><th style="text-align:center">Qty</th><th style="text-align:right">Total</th></tr>
+          </thead>
+          <tbody>${itemRows}</tbody>
+        </table>
+
+        <div class="totals-wrap">
+          <div class="totals-inner">
+            <div class="totals-line"><span>Subtotal</span><span>${formatBDT(order.subtotal)}</span></div>
+            <div class="totals-line"><span>Tax</span><span>${formatBDT(order.tax)}</span></div>
+            <div class="totals-line"><span>Discount</span><span>${order.discount > 0 ? '-' + formatBDT(order.discount) : formatBDT(0)}</span></div>
+            <div class="totals-grand"><span>TOTAL</span><span>${formatBDT(order.total)}</span></div>
+            <div style="text-align:right;font-size:12px;color:#666">Paid via ${(order.paymentMethod || '').toUpperCase()}</div>
+          </div>
+        </div>
+
+        <div class="auth-section">
+          <div class="auth-box">
+            ${signDataURI ? `<img src="${signDataURI}" alt="Signature" />` : `<div style="height:80px"></div>`}
+            <div class="line"></div>
+            <div class="label">Authorized Signature</div>
+          </div>
+          <div class="auth-box">
+            ${sealDataURI ? `<img src="${sealDataURI}" alt="Seal" style="max-height:90px" />` : `<div style="height:90px"></div>`}
+            <div class="label">Company Seal</div>
+          </div>
+          <div class="auth-box">
+            <div style="padding-top:30px">
               <div class="line"></div>
-              <div class="label">Authorized Signature</div>
-            </div>
-            <div class="auth-box">
-              ${sealDataURI ? `<img src="${sealDataURI}" alt="Seal" style="max-height:90px" />` : `<div style="height:90px"></div>`}
-              <div class="label">Company Seal</div>
-            </div>
-            <div class="auth-box">
-              <div style="padding-top:30px">
-                <div class="line"></div>
-                <div class="label">Date: ${generatedDate}</div>
-              </div>
+              <div class="label">Date: ${generatedDate}</div>
             </div>
           </div>
-          <div class="footer">
-            <div style="font-size:10px;color:rgba(255,255,255,0.5);letter-spacing:1px">BELORELLA &copy; ${new Date().getFullYear()} &mdash; POS Invoice</div>
-          </div>
-        </div></body></html>`;
+        </div>`;
 
-      const printWindow = window.open('', '_blank', 'width=794,height=1123');
-      if (printWindow) {
-        printWindow.document.write(html);
-        printWindow.document.close();
-        printWindow.onload = () => { setTimeout(() => printWindow.print(), 300); };
+      const html = buildA4Document({
+        title: `POS Invoice #${order.orderNumber}`,
+        header: invoiceHeader,
+        bodyHtml,
+        pageHeader: `${BRAND.NAME} - POS Invoice #${order.orderNumber}`,
+        pageFooter: BRAND.NAME,
+        extraCss: `
+          .inv-header { background: linear-gradient(135deg,#DC143C 0%,#9F123C 100%); padding: 16px 24px; border-radius: 6px; text-align: center; }
+          .inv-header .brand { font-size: 26px; font-weight: 800; letter-spacing: 8px; color: white; text-transform: uppercase; margin: 6px 0 2px; }
+          .inv-header .sub { font-size: 10px; letter-spacing: 3px; color: rgba(255,255,255,0.8); text-transform: uppercase; }
+          .titlebar { background: #FFF1F2; padding: 12px 16px; border-bottom: 2px solid #FECDD3; display: flex; justify-content: space-between; align-items: center; margin-bottom: 6mm; }
+          .inv-title { font-size: 17px; font-weight: 700; color: #DC143C; }
+          .info-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 6mm; }
+          .info-card { background: #FFF8FA; border: 1px solid #FECDD3; border-radius: 8px; padding: 14px; break-inside: avoid; }
+          .info-label { font-size: 9px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+          table.inv-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 6mm; }
+          table.inv-table th, table.inv-table td { border-bottom: 1px solid #eee; }
+          table.inv-table th { text-align: left; padding: 10px 12px; border-bottom: 2px solid #FECDD3; color: #DC143C; font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; background: #FFF1F2; }
+          table.inv-table tr { break-inside: avoid; }
+          .totals-wrap { display: flex; justify-content: flex-end; margin-bottom: 4mm; }
+          .totals-inner { width: 300px; }
+          .totals-line { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; font-size: 13px; color: #666; }
+          .totals-grand { display: flex; justify-content: space-between; padding: 12px 0; font-size: 18px; font-weight: 800; color: #DC143C; border-top: 2px solid #DC143C; margin-top: 4px; }
+          .auth-section { padding-top: 6mm; border-top: 1px solid #FECDD3; display: flex; justify-content: space-between; align-items: flex-end; break-inside: avoid; }
+          .auth-box { text-align: center; }
+          .auth-box img { max-height: 80px; object-fit: contain; }
+          .auth-box .label { font-size: 9px; color: #888; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+          .auth-box .line { width: 140px; border-bottom: 1px solid #ccc; margin: 0 auto 6px; }
+        `
+      });
+
+      if (!printDocument(html)) {
+        toast.error('Print window blocked - allow popups for this site');
       }
     } catch (error) {
       console.error('Error printing invoice:', error);
@@ -664,7 +452,7 @@ const AdminPOSOrders = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-[#4A4A4A]">Today's Sales</p>
-                <p className="text-2xl font-bold text-green-600">৳{stats.todaySales?.toFixed(2) || '0.00'}</p>
+                <p className="text-2xl font-bold text-green-600">{formatBDT(stats.todaySales || 0)}</p>
               </div>
               <div className="w-12 h-12 bg-green-100 flex items-center justify-center">
                 <FaMoneyBillWave className="text-green-600 text-xl" />
@@ -834,7 +622,7 @@ const AdminPOSOrders = () => {
                         <p className="text-sm text-[#1B1B1B]">{order.items.length} items</p>
                       </td>
                       <td className="py-3 px-4">
-                        <p className="text-sm font-medium text-[#1B1B1B]">৳{order.total.toFixed(2)}</p>
+                        <p className="text-sm font-medium text-[#1B1B1B]">{formatBDT(order.total)}</p>
                       </td>
                       <td className="py-3 px-4">
                         <div className="flex items-center">
@@ -922,7 +710,7 @@ const AdminPOSOrders = () => {
                   </div>
                   <div className="text-sm text-[#4A4A4A] mb-2">
                     <div>{order.customer.name} • {order.customer.phone}</div>
-                    <div>{order.items.length} items • ৳{order.total.toFixed(2)}</div>
+                    <div>{order.items.length} items • {formatBDT(order.total)}</div>
                     <div className="flex items-center mt-1">
                       {getPaymentMethodIcon(order.paymentMethod)}
                       <span className="ml-2">{order.paymentMethod.replace('_', ' ').toUpperCase()}</span>
@@ -1079,10 +867,10 @@ const AdminPOSOrders = () => {
                       <div>
                         <p className="font-medium text-[#1B1B1B]">{item.productName}</p>
                         <p className="text-sm text-[#4A4A4A]">
-                          {item.variantInfo.size} • {item.variantInfo.color} • Qty: {item.quantity}
+                          {[formatMeasureLine(item.variantInfo), item.variantInfo.color, `Qty: ${item.quantity}`].filter(Boolean).join(' • ')}
                         </p>
                       </div>
-                      <p className="font-medium text-[#1B1B1B]">৳{item.totalPrice.toFixed(2)}</p>
+                      <p className="font-medium text-[#1B1B1B]">{formatBDT(item.totalPrice)}</p>
                     </div>
                   ))}
                 </div>
@@ -1091,19 +879,19 @@ const AdminPOSOrders = () => {
               <div className="border-t border-[#BDBDBD] pt-4">
                 <div className="flex justify-between text-[#4A4A4A]">
                   <span>Subtotal:</span>
-                  <span>৳{selectedOrder.subtotal.toFixed(2)}</span>
+                  <span>{formatBDT(selectedOrder.subtotal)}</span>
                 </div>
                 <div className="flex justify-between text-[#4A4A4A]">
                   <span>Tax:</span>
-                  <span>৳{selectedOrder.tax.toFixed(2)}</span>
+                  <span>{formatBDT(selectedOrder.tax)}</span>
                 </div>
                 <div className="flex justify-between text-[#4A4A4A]">
                   <span>Discount:</span>
-                  <span>৳{selectedOrder.discount.toFixed(2)}</span>
+                  <span>{formatBDT(selectedOrder.discount)}</span>
                 </div>
                 <div className="flex justify-between font-semibold text-lg border-t border-[#BDBDBD] pt-2 text-[#1B1B1B]">
                   <span>Total:</span>
-                  <span>৳{selectedOrder.total.toFixed(2)}</span>
+                  <span>{formatBDT(selectedOrder.total)}</span>
                 </div>
               </div>
 

@@ -1,9 +1,9 @@
 'use client'
 import { Helmet } from "react-helmet-async";
 
-const SITE_NAME = "Belorella";
+const SITE_NAME = "BELORELLA";
 const DEFAULT_DESCRIPTION = "Shop the latest trends with unbeatable prices. Quality products delivered to your doorstep in Bangladesh.";
-const DEFAULT_KEYWORDS = "Belorella, online shopping, Bangladesh, ecommerce, fashion, beauty, makeup, luxury";
+const DEFAULT_KEYWORDS = "BELORELLA, online shopping, Bangladesh, ecommerce, fashion, beauty, makeup, luxury";
 const DEFAULT_IMAGE = "/logo.png";
 const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://belorella.com";
 

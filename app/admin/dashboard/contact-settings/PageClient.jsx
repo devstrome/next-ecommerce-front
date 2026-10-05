@@ -4,7 +4,7 @@ import { getStorage } from '../../../../src/lib/storage';
 import { FiSave, FiMapPin, FiPhone, FiMail, FiGlobe, FiClock } from 'react-icons/fi';
 
 const defaultSettings = {
-  businessName: 'Belorella',
+  businessName: 'BELORELLA',
   email: 'info.belorella@gmail.com',
   phone: '01601-886367',
   address: '200/1 North Ibrahimpur, Mushibari Road, Dhaka-1206',
@@ -15,8 +15,8 @@ const defaultSettings = {
     youtube: 'https://youtube.com',
     twitter: 'https://twitter.com'
   },
-  seoTitle: 'Contact Us - Belorella',
-  seoDescription: 'Get in touch with Belorella. Reach out for inquiries, feedback, or support.',
+  seoTitle: 'Contact Us - BELORELLA',
+  seoDescription: 'Get in touch with BELORELLA. Reach out for inquiries, feedback, or support.',
   businessHours: {
     sunThu: '10:00 AM - 8:00 PM',
     friday: '3:00 PM - 8:00 PM',

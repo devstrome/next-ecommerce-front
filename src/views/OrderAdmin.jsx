@@ -10,6 +10,9 @@ import QRScanner from '../components/QRScanner';
 import { QRCodeSVG } from 'qrcode.react';
 import QRCode from 'qrcode';
 import { toast } from 'react-toastify';
+import { printDocument } from '../lib/print';
+import { formatMeasureLine } from '../lib/measure';
+import { formatBDT } from '../config/brand';
 import { 
   FaFilter, 
   FaPrint, 
@@ -62,10 +65,7 @@ const formatDate = (dateString) => {
 };
 
 const formatCurrency = (amount) => {
-  return new Intl.NumberFormat('bn-BD', {
-    style: 'currency',
-    currency: 'BDT'
-  }).format(amount).replace('BDT', 'BDT');
+  return formatBDT(amount);
 };
 
 const AdminOrdersPage = () => {
@@ -189,7 +189,6 @@ useEffect(() => {
   });
 
   socketRef.current.on('stockUpdate', (stockData) => {
-    console.log('Stock update received:', stockData);
     showNotification(`Stock updated for product: ${stockData.action === 'decrease' ? 'Decreased' : 'Increased'} stock for size ${stockData.size}`);
   });
 
@@ -210,7 +209,6 @@ useEffect(() => {
         }
       });
     }
-    console.log('Notification:', message);
   };
 
   const fetchOrders = async (page = 1) => {
@@ -325,7 +323,7 @@ useEffect(() => {
   };
 
   const handleSendToCourier = async (orderId, service) => {
-    if (!window.confirm(`Send this order via ${service.toUpperCase()} courier?`)) return;
+    if (!window.confirm(`Queue this order for ${service.toUpperCase()}? It will be dispatched to the courier API from the Courier page.`)) return;
     setCourierLoading(true);
     try {
       const token = localStorage.getItem('adminAccessToken');
@@ -339,12 +337,14 @@ useEffect(() => {
       });
       const data = await res.json();
       if (data.success) {
-        toast.success(`Shipment booked via ${service}! Tracking: ${data.courier.trackingNumber || data.courier.consignmentId}`);
+        toast.success(`Queued for ${service}. Dispatch it from the Courier page.`);
+        setEditingOrder((prev) => (prev && prev._id === orderId ? { ...prev, courier: data.courier } : prev));
+        fetchOrders(currentPage);
       } else {
-        toast.error(data.message || 'Failed to book courier');
+        toast.error(data.message || 'Failed to queue courier');
       }
     } catch (err) {
-      toast.error('Failed to book courier');
+      toast.error('Failed to queue courier');
     } finally {
       setCourierLoading(false);
     }
@@ -690,10 +690,8 @@ useEffect(() => {
             orderId: orderId,
             timestamp: new Date()
           };
-          console.log('📡 Emitting inventoryRemoved event:', eventData);
           socketRef.current.emit('inventoryRemoved', eventData);
         } else {
-          console.log('❌ socketRef.current is not available for inventory removal');
         }
         
         // Refresh the order data
@@ -859,14 +857,13 @@ useEffect(() => {
   const printOrder = () => {
     if (!selectedOrderForPrint) return;
 
-    const printWindow = window.open('', '_blank');
     const order = selectedOrderForPrint;
 
-    printWindow.document.write(`
+    const html = `
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Order #${order.orderId} - Belorella</title>
+          <title>Order #${order.orderId} - BELORELLA</title>
           <style>
             @media print {
               * {
@@ -875,7 +872,10 @@ useEffect(() => {
               }
               @page {
                 size: A4;
-                margin: 1.5cm 2cm;
+                margin: 1.5cm 2cm 2cm;
+                @top-center { content: "BELORELLA — Order #${order.orderId}"; font-family: 'Segoe UI', Arial, sans-serif; font-size: 8pt; color: #888; }
+                @bottom-center { content: "Page " counter(page) " of " counter(pages); font-family: 'Segoe UI', Arial, sans-serif; font-size: 8pt; color: #888; }
+                @bottom-left { content: "BELORELLA"; font-family: 'Segoe UI', Arial, sans-serif; font-size: 7.5pt; color: #999; }
               }
               body { 
                 margin: 0; 
@@ -884,6 +884,9 @@ useEffect(() => {
               }
               .no-print { display: none; }
             }
+            thead { display: table-header-group; }
+            tr, .info-section, .total-row { break-inside: avoid; page-break-inside: avoid; }
+            h3, h4 { break-after: avoid; page-break-after: avoid; }
             body { 
               font-family: 'Segoe UI', Arial, sans-serif; 
               margin: 0; 
@@ -1138,9 +1141,9 @@ useEffect(() => {
 
           <div class="header">
             ${printSettings.showLogo ? `
-              <img src="/logo.png" alt="Belorella" class="logo">
+              <img src="/logo.png" alt="BELORELLA" class="logo">
             ` : ''}
-                         <div class="company-name">Belorella</div>
+                         <div class="company-name">BELORELLA</div>
              <p>Premium Fashion & Lifestyle</p>
              <p>Order Invoice & Certificate</p>
           </div>
@@ -1262,7 +1265,7 @@ useEffect(() => {
                   </td>
                   <td>
                     <div>
-                      ${item.measureType ? `<p><strong>${item.measureType}:</strong> ${item.size} </p>` : ''}
+                      ${item.size ? `<p><strong>${formatMeasureLine(item)}</strong></p>` : ''}
                       ${item.color ? `<p><strong>Color:</strong> ${item.color}</p>` : ''}
                     </div>
                   </td>
@@ -1322,6 +1325,12 @@ useEffect(() => {
               <span>Shipping:</span>
               <span>${formatCurrency(order.shippingCost || 0)}</span>
             </div>
+            ${order.extraFeeTotal > 0 ? `
+              <div class="total-row">
+                <span>Extra Fees:</span>
+                <span>${formatCurrency(order.extraFeeTotal)}</span>
+              </div>
+            ` : ''}
             <div class="total-row total-final">
               <span>Total Amount:</span>
               <span>${formatCurrency(order.grandTotal)}</span>
@@ -1331,11 +1340,11 @@ useEffect(() => {
                        <div class="footer">
                ${printSettings.includeSignature ? `
                  <div class="signature-section">
-                    <img src="/seal.png" alt="Belorella Seal" class="seal" style="display:block; margin:0 auto 8px;">
+                    <img src="/seal.png" alt="BELORELLA Seal" class="seal" style="display:block; margin:0 auto 8px;">
                     <div class="signature-label">Authorized Signature</div>
                     <div class="signature-line"></div>
                     <img src="/sign.png" alt="Authorized Signature" class="sign" style="display:block; margin:0 auto 4px;">
-                    <div class="signature-name">Belorella Management</div>
+                    <div class="signature-name">BELORELLA Management</div>
                     <div class="signature-name">Date: ${new Date().toLocaleDateString()}</div>
                  </div>
                ` : ''}
@@ -1347,21 +1356,22 @@ useEffect(() => {
                  <p>• 7-day return policy applies</p>
                  <p>• Customer satisfaction guaranteed</p>
                              <p style="margin-top: 15px; font-weight: 600;">
-                  Thank you for choosing Belorella!
+                  Thank you for choosing BELORELLA!
                 </p>
                </div>
              </div>
 
              <div class="copyright-section">
-               <p>© ${new Date().getFullYear()} Belorella. All rights reserved. | Premium Fashion &amp; Lifestyle</p>
+               <p>© ${new Date().getFullYear()} BELORELLA. All rights reserved. | Premium Fashion &amp; Lifestyle</p>
                <p>This document is computer generated and does not require a physical signature.</p>
              </div>
         </body>
       </html>
-    `);
+    `;
 
-    printWindow.document.close();
-    printWindow.focus();
+    if (!printDocument(html)) {
+      toast.error('Print window blocked - allow popups for this site');
+    }
   };
 
   const startEditing = (order) => {
@@ -2391,7 +2401,7 @@ useEffect(() => {
               <h3 className="text-sm font-semibold text-[#1B1B1B] mb-3">Ship with Courier</h3>
               {editingOrder?.courier?.service ? (
                 <div className="space-y-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-xs font-medium text-[#4A4A4A]">Service:</span>
                     <span className="text-xs font-bold text-[#1B1B1B] uppercase">{editingOrder.courier.service}</span>
                     {editingOrder.courier.trackingNumber && (
@@ -2403,9 +2413,19 @@ useEffect(() => {
                     <span className={`text-xs font-bold px-2 py-0.5 rounded ${
                       editingOrder.courier.status === 'delivered' ? 'bg-green-100 text-green-800' :
                       editingOrder.courier.status === 'in_transit' ? 'bg-blue-100 text-blue-800' :
+                      editingOrder.courier.status === 'failed' ? 'bg-red-100 text-red-800' :
                       'bg-yellow-100 text-yellow-800'
                     }`}>{editingOrder.courier.status}</span>
                   </div>
+                  {editingOrder.courier.status === 'queued' && (
+                    <p className="text-xs text-[#4A4A4A]">
+                      Queued — dispatch it to {editingOrder.courier.service} from the{' '}
+                      <a href="/admin/dashboard/courier" className="underline text-[#B1123B]">Courier page</a>.
+                    </p>
+                  )}
+                  {editingOrder.courier.status === 'failed' && editingOrder.courier.lastError && (
+                    <p className="text-xs text-red-600">{editingOrder.courier.lastError}</p>
+                  )}
                 </div>
               ) : (
                 <div className="flex flex-col sm:flex-row gap-2">
@@ -2415,7 +2435,7 @@ useEffect(() => {
                     className="px-3 py-2 border border-[#BDBDBD] rounded text-sm bg-white"
                   >
                     <option value="pathao">Pathao Courier</option>
-                    <option value="redex">RedEx</option>
+                    <option value="steadfast">Steadfast Courier</option>
                     <option value="manual">Manual (no API)</option>
                   </select>
                   <button
@@ -2423,7 +2443,7 @@ useEffect(() => {
                     disabled={courierLoading}
                     className="px-4 py-2 bg-[#B1123B] text-white rounded text-sm hover:bg-[#1B1B1B] disabled:opacity-50 min-h-[44px]"
                   >
-                    {courierLoading ? 'Booking...' : 'Send to Courier'}
+                    {courierLoading ? 'Queueing...' : 'Send to Courier'}
                   </button>
                 </div>
               )}
@@ -2482,7 +2502,7 @@ useEffect(() => {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-900">
-                            {item.size && <span>{item.measureType}: {item.size}</span>}
+                            {item.size && <span>{formatMeasureLine(item)}</span>}
                             {item.color && <span className="ml-2">Color: {item.color}</span>}
                           </div>
                           
@@ -3449,11 +3469,11 @@ useEffect(() => {
                           </div>
                           <div className="flex justify-between">
                             <span className="text-gray-600">Size:</span>
-                            <span className="text-gray-800">{inventory.size}</span>
+                            <span className="text-gray-800">{formatMeasureLine(inventory) || inventory.size || '—'}</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-gray-600">Price:</span>
-                            <span className="text-gray-800">${inventory.price}</span>
+                            <span className="text-gray-800">{formatBDT(inventory.price)}</span>
                           </div>
                         </div>
                       </div>
@@ -3602,7 +3622,7 @@ useEffect(() => {
                       className="rounded border-gray-300 text-maybelline-pink focus:ring-maybelline-pink"
                     />
                     <label htmlFor="showLogo" className="ml-2 text-sm font-medium text-gray-700">
-                      Include Belorella Logo
+                      Include BELORELLA Logo
                     </label>
                   </div>
 
@@ -3680,7 +3700,7 @@ useEffect(() => {
               <div className="bg-maybelline-light p-4 rounded-lg">
                 <h4 className="text-lg font-medium text-maybelline-magenta mb-2">Print Features</h4>
                 <ul className="text-sm text-maybelline-magenta space-y-1">
-                  <li>• Professional A4 layout with Belorella branding</li>
+                  <li>• Professional A4 layout with BELORELLA branding</li>
                   <li>• Complete order details and customer information</li>
                   <li>• Product images, prices, and specifications</li>
                   <li>• Individual barcodes and QR codes for each inventory item</li>

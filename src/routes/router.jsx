@@ -55,7 +55,6 @@ import AdminWishlists from "../views/AdminWishlists";
 import CourierTracking from "../views/CourierTracking";
 
 import { POSProvider } from "../context/POSContext";
-import QRScannerTest from "../components/QRScannerTest";
 import ForgotPassword from "../components/ForgotPassword";
 
 export const router = createBrowserRouter([
@@ -73,7 +72,6 @@ export const router = createBrowserRouter([
       { path: "/forgot-password", element: <ForgotPassword /> },
       { path: "/cart", element: <CartPage /> },
       { path: "/checkout", element: <CheckoutPage /> },
-      { path: "/qr-test", element: <QRScannerTest /> },
       { path: "/wishlist", element: <WishlistPage /> },
       {
         path: "/profile",
@@ -128,7 +126,6 @@ export const router = createBrowserRouter([
               { path: "inventory", element: <AdminInventory /> },
               { path: "pos", element: <POSProvider><AdminPOS /></POSProvider> },
               { path: "pos-orders", element: <AdminPOSOrders /> },
-              { path: "qr-test", element: <QRScannerTest /> },
               { path: "wishlists", element: <AdminWishlists /> },
             ],
           },

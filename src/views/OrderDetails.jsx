@@ -5,6 +5,8 @@ import Link from "next/link"
 import { useRouter, useParams } from "next/navigation";
 import { UserContext } from '../context/UserContext';
 import RefundStatusTracker from '../components/RefundStatusTracker';
+import { formatMeasureLine } from '../lib/measure';
+import { formatBDT } from '../config/brand';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import io from 'socket.io-client';
@@ -51,16 +53,7 @@ function OrderDetails() {
   const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URI || API_BASE;
 
   const formatCurrency = (amount, currency = 'BDT', locale = 'en-BD') => {
-    if (typeof amount !== 'number') return 'BDT0.00';
-    try {
-      return new Intl.NumberFormat(locale, {
-        style: 'currency',
-        currency,
-        maximumFractionDigits: 2,
-      }).format(amount);
-    } catch {
-      return `BDT${amount.toFixed(2)}`;
-    }
+    return formatBDT(amount);
   };
 
   const formatDate = (dateString) => {
@@ -664,7 +657,7 @@ function OrderDetails() {
                         {item.color && <p>Color: {item.color}</p>}
                         {item.size && (
                           <p>
-                            {item.measureType}: {item.size}
+                            {formatMeasureLine(item)}
                           </p>
                         )}
                         <p>Quantity: {item.quantity}</p>

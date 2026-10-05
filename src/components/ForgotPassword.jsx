@@ -1,12 +1,14 @@
 'use client'
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import Link from "next/link";
 import { faEye, faEyeSlash, faArrowLeft } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { api } from '../config/api';
+import { UserContext } from '../context/UserContext';
 
-function ForgotPassword() {
-  const [email, setEmail] = useState('');
+function ForgotPassword({ embedded = false }) {
+  const { user } = useContext(UserContext);
+  const [email, setEmail] = useState(user?.email || '');
   const [otp, setOtp] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -168,11 +170,13 @@ function ForgotPassword() {
   };
 
   return (
-    <section className="bg-[#FAF8F6]">
-      <div className="flex flex-col items-center justify-center px-6 py-8 mx-auto md:h-screen lg:py-0">
-        <a href="#" className="flex items-center mb-6 text-2xl font-semibold text-[#1B1B1B]" style={{ fontFamily: "'Inter', serif" }}>
-          Belorella
-        </a>
+    <section className={embedded ? 'py-2' : 'bg-[#FAF8F6]'}>
+      <div className={`flex flex-col items-center justify-center px-6 ${embedded ? 'py-4' : 'py-8 md:h-screen lg:py-0'} mx-auto`}>
+        {!embedded && (
+          <a href="#" className="flex items-center mb-6 text-2xl font-semibold text-[#1B1B1B]" style={{ fontFamily: "'Inter', serif" }}>
+            BELORELLA
+          </a>
+        )}
         <div className="w-full bg-white rounded-lg shadow sm:max-w-md xl:p-0">
           <div className="p-6 space-y-4 md:space-y-6 sm:p-8">
             <div className="flex items-center">

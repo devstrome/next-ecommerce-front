@@ -2,7 +2,7 @@
 import React from 'react';
 import { FaEdit, FaTrash, FaUserShield, FaUserCog, FaEye, FaBan } from 'react-icons/fa';
 
-const AdminList = ({ admins, onEdit, onDelete, currentAdminId }) => {
+const AdminList = ({ admins, onEdit, onDelete, onBan, currentAdminId }) => {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm text-left text-gray-500">

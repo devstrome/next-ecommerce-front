@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { FaPlus, FaEdit, FaTrash, FaArrowLeft, FaSearch, FaStar } from 'react-icons/fa';
 import { useRouter } from "next/navigation";
+import { formatBDT } from '../config/brand';
 
 const TopRatedSlidesManagement = () => {
   const [slides, setSlides] = useState([]);
@@ -181,9 +182,9 @@ const TopRatedSlidesManagement = () => {
                 filteredSlides.map((slide) => (
                   <tr key={slide._id} className="hover:bg-[#F4F4F4] border-b border-[#BDBDBD]">
                     <td className="py-3 px-4 font-medium text-[#1B1B1B]">{slide.name}</td>
-                    <td className="py-3 px-4 text-[#4A4A4A]">BDT{slide.price}</td>
+                    <td className="py-3 px-4 text-[#4A4A4A]">{formatBDT(slide.price)}</td>
                     <td className="py-3 px-4 text-[#4A4A4A]">
-                      {slide.discountPrice ? `BDT${slide.discountPrice}` : 'N/A'}
+                      {slide.discountPrice ? `${formatBDT(slide.discountPrice)}` : 'N/A'}
                     </td>
                     <td className="py-3 px-4 text-[#4A4A4A]">
                       <div className="flex items-center">
@@ -231,8 +232,8 @@ const TopRatedSlidesManagement = () => {
                 <div className="mb-3">
                   <div className="font-medium text-[#1B1B1B]">{slide.name}</div>
                   <div className="text-sm text-[#4A4A4A]">
-                    BDT{slide.price}
-                    {slide.discountPrice && <span className="ml-2">→ BDT{slide.discountPrice}</span>}
+                    {formatBDT(slide.price)}
+                    {slide.discountPrice && <span className="ml-2">→ {formatBDT(slide.discountPrice)}</span>}
                   </div>
                   <div className="flex items-center text-sm text-[#4A4A4A] mt-1">
                     <FaStar className="text-[#B1123B] mr-1" />

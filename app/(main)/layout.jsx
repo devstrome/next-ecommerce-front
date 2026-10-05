@@ -12,6 +12,7 @@ import Breadcrumb from '../../src/components/Breadcrumb'
 import MobileTabBar from '../../src/components/TabBar'
 import ChatDrawer from '../../src/components/ChatDrawer'
 import LivePurchaseToast from '../../src/components/LivePurchaseToast'
+import SetPasswordPrompt from '../../src/components/SetPasswordPrompt'
 import ModernShell from '../../src/components/ModernShell'
 
 export default function MainLayout({ children }) {
@@ -34,6 +35,7 @@ export default function MainLayout({ children }) {
             <ScrollToTop />
             <ChatDrawer />
             <LivePurchaseToast />
+            <SetPasswordPrompt />
           </CartProvider>
         </UserChatProvider>
       </UserProvider>

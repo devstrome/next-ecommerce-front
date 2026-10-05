@@ -45,6 +45,12 @@ const CheckoutRulesAdmin = () => {
 
   useEffect(() => { load(); }, []);
 
+  useEffect(() => {
+    const onStore = () => load();
+    window.addEventListener('storeChanged', onStore);
+    return () => window.removeEventListener('storeChanged', onStore);
+  }, []);
+
   const submit = async (e) => {
     e.preventDefault();
     try {

@@ -37,6 +37,8 @@ module.exports = {
         marquee: 'marquee 38s linear infinite',
         'hero-zoom': 'heroZoom 8s ease-out forwards',
         'hero-progress': 'heroProgress 6s linear forwards',
+        'pop-in': 'popIn 0.45s cubic-bezier(0.34, 1.56, 0.64, 1)',
+        'shine': 'shine 3s ease-in-out infinite',
       },
       keyframes: {
         fadeIn: { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
@@ -46,6 +48,14 @@ module.exports = {
         marquee: { '0%': { transform: 'translateX(0)' }, '100%': { transform: 'translateX(-50%)' } },
         heroZoom: { '0%': { transform: 'scale(1.08)' }, '100%': { transform: 'scale(1)' } },
         heroProgress: { '0%': { width: '0%' }, '100%': { width: '100%' } },
+        popIn: {
+          '0%': { opacity: '0', transform: 'scale(0.85) translateY(28px)' },
+          '100%': { opacity: '1', transform: 'scale(1) translateY(0)' },
+        },
+        shine: {
+          '0%, 100%': { backgroundPosition: '0% 50%' },
+          '50%': { backgroundPosition: '100% 50%' },
+        },
       },
       spacing: {
         '18': '4.5rem',

@@ -42,7 +42,7 @@ const Navbar = ({ toggleSidebar }) => {
             </button>
             <a href="#" className="flex ms-2 md:me-24">
               <span className="self-center text-xl font-heading tracking-widest uppercase sm:text-2xl whitespace-nowrap text-black">
-                Belorella
+                BELORELLA
               </span>
             </a>
           </div>

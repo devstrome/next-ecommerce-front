@@ -120,7 +120,7 @@ export default function HelpPageClient({ slug }) {
   return (
     <div className="min-h-screen bg-pure-white">
       <SEOHead
-        title={page.seo?.metaTitle || `${page.title} | Belorella`}
+        title={page.seo?.metaTitle || `${page.title} | BELORELLA`}
         description={page.seo?.metaDescription || ''}
         keywords={page.seo?.metaKeywords}
       />

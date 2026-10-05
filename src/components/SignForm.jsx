@@ -5,6 +5,8 @@ import { UserContext } from '../context/UserContext';
 import { faEye, faEyeSlash, faEnvelope, faCheck } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { api } from '../config/api';
+import { withDevice } from '../lib/device';
+import GoogleAuthButton from './GoogleAuthButton';
 
 function SignForm() {
   const { register } = useContext(UserContext);
@@ -23,6 +25,12 @@ function SignForm() {
   const [isOtpVerified, setIsOtpVerified] = useState(false);
   const [otpCountdown, setOtpCountdown] = useState(0);
   const [canResendOtp, setCanResendOtp] = useState(true);
+
+  const getRegistrationError = (err, fallback) => {
+    const response = err?.response?.data;
+    if (response?.banned) return response.message || 'Sign-up is blocked for this account or device.';
+    return response?.message || fallback;
+  };
 
   useEffect(() => {
     let timer;
@@ -47,14 +55,13 @@ function SignForm() {
 
     try {
       setIsSubmitting(true);
-      const response = await api.post('/api/send-registration-otp', { email: trimmedEmail });
+      const response = await api.post('/api/send-registration-otp', withDevice({ email: trimmedEmail }));
       setSuccess(response.data.message);
       setIsOtpSent(true);
       setOtpCountdown(60);
       setCanResendOtp(false);
     } catch (err) {
-      const message = err?.response?.data?.message || 'Failed to send OTP. Please try again.';
-      setError(message);
+      setError(getRegistrationError(err, 'Failed to send OTP. Please try again.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -144,7 +151,7 @@ function SignForm() {
 
     try {
       setIsSubmitting(true);
-      const response = await api.post('/api/verify-otp-and-register', formData);
+      const response = await api.post('/api/verify-otp-and-register', withDevice(formData));
       
       if (response.data.accessToken && response.data.refreshToken) {
         await register({
@@ -158,11 +165,7 @@ function SignForm() {
       
       setSuccess('Registration successful! Redirecting...');
     } catch (err) {
-      const message =
-        err?.response?.data?.message ||
-        err?.message ||
-        'Registration failed. Please try again.';
-      setError(message);
+      setError(getRegistrationError(err, err?.message || 'Registration failed. Please try again.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -172,7 +175,7 @@ function SignForm() {
     <section className="bg-pure-white min-h-screen flex items-center justify-center py-8">
       <div className="flex flex-col items-center justify-center px-6 py-8 mx-auto w-full">
         <a href="#" className="flex items-center mb-8 text-3xl font-heading text-black">
-          Belorella
+          BELORELLA
         </a>
         <div className="w-full bg-pure-white border border-cool-gray sm:max-w-md">
           <div className="p-8 space-y-6">
@@ -342,6 +345,7 @@ function SignForm() {
                 </Link>
               </p>
             </form>
+            <GoogleAuthButton onError={setError} />
           </div>
         </div>
       </div>

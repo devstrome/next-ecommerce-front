@@ -90,34 +90,30 @@ const UserForm = ({ onSubmit, currentUser, onCancel }) => {
 
   const validateForm = () => {
     const newErrors = {};
+    // When editing an existing user, every field is optional — the admin can
+    // change just one or all of them. On create, keep basic requirements.
+    const editing = !!currentUser;
 
-    if (!user.firstName.trim()) {
-      newErrors.firstName = 'First name is required';
-    }
+    if (!editing && !user.firstName.trim()) newErrors.firstName = 'First name is required';
+    if (!editing && !user.lastName.trim()) newErrors.lastName = 'Last name is required';
 
-    if (!user.lastName.trim()) {
-      newErrors.lastName = 'Last name is required';
-    }
-
-    if (!user.email.trim()) {
+    if (!editing && !user.email.trim()) {
       newErrors.email = 'Email is required';
-    } else if (!/\S+@\S+\.\S+/.test(user.email)) {
+    } else if (user.email.trim() && !/\S+@\S+\.\S+/.test(user.email)) {
       newErrors.email = 'Please enter a valid email address';
     }
 
-    if (!user.userName.trim()) {
-      newErrors.userName = 'Username is required';
-    }
+    if (!editing && !user.userName.trim()) newErrors.userName = 'Username is required';
 
-    if (!currentUser && !user.password) {
+    if (!editing && !user.password) {
       newErrors.password = 'Password is required';
     } else if (user.password && user.password.length < 6) {
       newErrors.password = 'Password must be at least 6 characters';
     }
 
-    if (!user.phoneNumber.trim()) {
+    if (!editing && !user.phoneNumber.trim()) {
       newErrors.phoneNumber = 'Phone number is required';
-    } else {
+    } else if (user.phoneNumber.trim()) {
       const phoneRegex = /^(\+880|880|0)?1[3-9]\d{8}$/;
       if (!phoneRegex.test(user.phoneNumber.trim())) {
         newErrors.phoneNumber = 'Please enter a valid Bangladeshi phone number';

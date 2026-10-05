@@ -5,6 +5,8 @@ import 'react-toastify/dist/ReactToastify.css';
 import { CartContext } from '../context/CartContext';
 import { UserContext } from '../context/UserContext';
 import { useRouter } from "next/navigation";
+import { formatMeasureLine } from '../lib/measure';
+import { formatBDT } from '../config/brand';
 import { FaTrash, FaMinus, FaPlus, FaArrowLeft, FaShoppingBag, FaTag, FaCreditCard } from 'react-icons/fa';
 
 function CartPage() {
@@ -31,8 +33,6 @@ function CartPage() {
   const [couponError, setCouponError] = useState(null);
 
   useEffect(() => {
-    console.log("Discount value:", discount);
-    console.log("Coupon object:", coupon);
   }, [discount, coupon]);
 
   useEffect(() => {
@@ -92,7 +92,6 @@ function CartPage() {
     } else {
       setCouponError(result.message);
       if (result.details) {
-        console.log("Coupon validation details:", result.details);
       }
     }
 
@@ -209,7 +208,7 @@ function CartPage() {
                                   <div className="flex flex-wrap gap-1 sm:gap-2 mb-2 sm:mb-3">
                                     {item.size && (
                                       <span className="inline-flex items-center px-2 sm:px-3 py-0.5 sm:py-1 text-xs font-medium bg-cool-gray text-dark-gray">
-                                        {item.measureType}: {item.size} 
+                                        {formatMeasureLine(item)}
                                       </span>
                                     )}
                                     {item.color && (
@@ -222,11 +221,11 @@ function CartPage() {
                                   {/* Price Display */}
                                   <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
                                     <span className="text-lg sm:text-xl md:text-2xl font-bold text-maybelline-pink">
-                                      BDT{item.price.toFixed(2)}
+                                      {formatBDT(item.price.toFixed(2))}
                                     </span>
                                     {item.discountApplied > 0 && (
                                       <span className="text-xs sm:text-sm text-dark-gray bg-cool-gray px-1.5 sm:px-2 py-0.5 sm:py-1 font-medium">
-                                        -BDT{item.discountApplied.toFixed(2)} ({discountPercentage}% off)
+                                        -{formatBDT(item.discountApplied.toFixed(2))} ({discountPercentage}% off)
                                       </span>
                                     )}
                                   </div>
@@ -297,7 +296,7 @@ function CartPage() {
                           <div>
                             <p className="text-black font-semibold">{coupon.code}</p>
                             <p className="text-sm text-dark-gray">
-                              {coupon.discount > 0 && `-BDT${coupon.discount.toFixed(2)} discount applied`}
+                              {coupon.discount > 0 && `-${formatBDT(coupon.discount)} discount applied`}
                             </p>
                           </div>
                         </div>
@@ -348,17 +347,17 @@ function CartPage() {
                 <div className="space-y-4 mb-6">
                   <div className="flex justify-between items-center py-2">
                     <span className="text-dark-gray font-sans">Subtotal:</span>
-                    <span className="font-semibold text-black">BDT{formattedSubtotal}</span>
+                    <span className="font-semibold text-black">{formatBDT(formattedSubtotal)}</span>
                   </div>
                   {discount > 0 && (
                     <div className="flex justify-between items-center py-2 text-dark-gray">
                       <span>Discount:</span>
-                      <span className="font-semibold">-BDT{discount.toFixed(2)}</span>
+                      <span className="font-semibold">-{formatBDT(discount.toFixed(2))}</span>
                     </div>
                   )}
                   <div className="border-t border-cool-gray pt-4 flex justify-between items-center">
                     <span className="text-lg font-bold text-black">Total:</span>
-                    <span className="text-2xl font-bold text-maybelline-pink">BDT{formattedTotal}</span>
+                    <span className="text-2xl font-bold text-maybelline-pink">{formatBDT(formattedTotal)}</span>
                   </div>
                 </div>
 

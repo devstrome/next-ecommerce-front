@@ -3,6 +3,7 @@ import { getStorage, setStorage, removeStorage } from "../lib/storage"
 const API_BASE = process.env.NEXT_PUBLIC_API_URI || "http://localhost:3000";
 import React, { useState, useContext, useEffect, useMemo } from 'react';
 import { UserContext } from '../context/UserContext';
+import ForgotPassword from '../components/ForgotPassword';
 import {
   FaEdit,
   FaSave,
@@ -69,6 +70,7 @@ const UserProfile = () => {
   const [successMessage, setSuccessMessage] = useState('');
 
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
   const [passwordData, setPasswordData] = useState({
     currentPassword: '',
     newPassword: '',
@@ -254,6 +256,36 @@ const UserProfile = () => {
       return 'Password must contain at least one number';
     }
     return null;
+  };
+
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const handleAvatarUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setUploadingImage(true);
+      const fd = new FormData();
+      fd.append('image', file);
+      const res = await fetch(`${API_BASE}/api/profile/image`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${getStorage('accessToken')}` },
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Upload failed');
+      setFormData((prev) => ({ ...prev, imageUrl: data.user.imageUrl }));
+      setSuccessMessage('Profile photo updated!');
+      setTimeout(() => setSuccessMessage(''), 3000);
+      // Refresh the user object everywhere (context refetch on next nav)
+      if (data.user) {
+        setStorage('user', JSON.stringify(data.user));
+      }
+    } catch (err) {
+      setErrors({ avatar: err.message });
+    } finally {
+      setUploadingImage(false);
+      e.target.value = '';
+    }
   };
 
   const updatePassword = async () => {
@@ -769,6 +801,30 @@ const UserProfile = () => {
           </div>
 
           <div className="p-6">
+            {/* Avatar */}
+            <div className="flex items-center gap-6 mb-6 pb-6 border-b border-cool-gray">
+              <div className="relative">
+                {formData.imageUrl ? (
+                  <img src={formData.imageUrl} alt="Profile" className="w-24 h-24 rounded-full object-cover border-2 border-maybelline-pink" />
+                ) : (
+                  <div className="w-24 h-24 rounded-full bg-maybelline-pink flex items-center justify-center text-white text-3xl">
+                    <FaUser />
+                  </div>
+                )}
+                {uploadingImage && (
+                  <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center text-xs text-white">Uploading…</div>
+                )}
+              </div>
+              <div className="flex flex-col gap-2">
+                <label className="btn-secondary cursor-pointer text-sm inline-flex items-center gap-2">
+                  <FaEdit />
+                  Change Photo
+                  <input type="file" className="hidden" accept="image/*" onChange={handleAvatarUpload} />
+                </label>
+                <p className="text-xs text-dark-gray">JPG, PNG or WEBP. Shows in your chats and admin views.</p>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {[
                 { field: 'firstName', icon: <FaUser className="text-maybelline-pink" /> },
@@ -809,6 +865,13 @@ const UserProfile = () => {
                 >
                   <FaEnvelope />
                   Update Email
+                </button>
+                <button
+                  onClick={() => setShowForgotPasswordModal(true)}
+                  className="btn-primary"
+                >
+                  <FaKey />
+                  Forgot Password
                 </button>
               </div>
             </div>
@@ -1189,6 +1252,20 @@ const UserProfile = () => {
           </div>
         </div>
       </div>
+
+      {showForgotPasswordModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="card rounded-xl max-w-lg w-full max-h-[90vh] overflow-y-auto relative">
+            <button
+              onClick={() => setShowForgotPasswordModal(false)}
+              className="absolute top-3 right-3 z-10 p-2 text-mid-gray hover:text-black rounded-lg hover:bg-cool-gray"
+            >
+              <FaTimes />
+            </button>
+            <ForgotPassword embedded />
+          </div>
+        </div>
+      )}
 
       {showPasswordModal && (
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">

@@ -1,8 +1,8 @@
 'use client'
 import React from 'react';
-import { FaEdit, FaTrash, FaEye, FaCircle, FaShoppingCart, FaEnvelope, FaPhone, FaUser } from 'react-icons/fa';
+import { FaEdit, FaTrash, FaEye, FaCircle, FaShoppingCart, FaEnvelope, FaPhone, FaUser, FaBan } from 'react-icons/fa';
 
-const UserList = ({ users, onEdit, onDelete, onViewDetails, onlineUsers }) => {
+const UserList = ({ users, onEdit, onDelete, onViewDetails, onBan, onUnban, onlineUsers }) => {
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -118,6 +118,11 @@ const UserList = ({ users, onEdit, onDelete, onViewDetails, onlineUsers }) => {
                         <span className="text-xs text-green-600">Verified</span>
                       </div>
                     )}
+                    {user.banned && (
+                      <div className="mt-1">
+                        <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">Banned</span>
+                      </div>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     {hasCart ? (
@@ -160,6 +165,26 @@ const UserList = ({ users, onEdit, onDelete, onViewDetails, onlineUsers }) => {
                         <FaEdit className="text-xs" />
                         <span>Edit</span>
                       </button>
+                      {user.banned ? (
+                        <button
+                          onClick={() => onUnban?.(user)}
+                          disabled={!onUnban}
+                          className="flex items-center space-x-1 px-3 py-1.5 text-sm font-medium text-green-700 bg-green-50 rounded-lg hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
+                          title="Lift this user's ban"
+                        >
+                          <FaBan className="text-xs" />
+                          <span>Unban</span>
+                        </button>
+                      ) : onBan && (
+                        <button
+                          onClick={() => onBan(user)}
+                          className="flex items-center space-x-1 px-3 py-1.5 text-sm font-medium text-orange-600 bg-orange-50 rounded-lg hover:bg-orange-100 transition-colors"
+                          title="Ban this user's device/IP"
+                        >
+                          <FaBan className="text-xs" />
+                          <span>Ban</span>
+                        </button>
+                      )}
                       <button
                         onClick={() => onDelete(user._id)}
                         className="flex items-center space-x-1 px-3 py-1.5 text-sm font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition-colors"

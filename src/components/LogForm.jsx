@@ -2,6 +2,7 @@
 import React, { useContext, useState } from 'react';
 import Link from "next/link";
 import { UserContext } from '../context/UserContext';
+import GoogleAuthButton from './GoogleAuthButton';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faEye, faEyeSlash } from '@fortawesome/free-solid-svg-icons';
 
@@ -17,7 +18,10 @@ function LogForm() {
     try {
       await login(emailOrPhone, password);
     } catch (err) {
-      setError('Invalid email, phone number, or password');
+      const response = err?.response?.data;
+      setError(response?.banned
+        ? response.message || 'This account or device has been banned.'
+        : 'Invalid email, phone number, or password');
     }
   };
 
@@ -25,7 +29,7 @@ function LogForm() {
     <section className="bg-pure-white min-h-screen flex items-center justify-center">
       <div className="flex flex-col items-center justify-center px-6 py-8 mx-auto w-full">
         <a href="#" className="flex items-center mb-8 text-3xl font-heading text-black">
-          Belorella
+          BELORELLA
         </a>
         <div className="w-full bg-pure-white border border-cool-gray sm:max-w-md">
           <div className="p-8 space-y-6">
@@ -91,6 +95,7 @@ function LogForm() {
                 </Link>
               </p>
             </form>
+            <GoogleAuthButton onError={setError} />
           </div>
         </div>
       </div>

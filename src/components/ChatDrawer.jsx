@@ -202,9 +202,18 @@ const ChatDrawer = () => {
             className={`p-3 rounded-t-lg ${isConnected ? "bg-maybelline-pink" : "bg-gray-500"} text-white`}
           >
             <div className="flex items-center justify-between mb-1">
-              <h3 className="font-semibold text-sm">
-                {assignedAdmin ? `${assignedAdmin.firstName || 'Admin'} ${assignedAdmin.lastName || ''}`.trim() : "Customer Support"}
-              </h3>
+              <div className="flex items-center gap-2">
+                {assignedAdmin?.imageUrl ? (
+                  <img src={assignedAdmin.imageUrl} alt={assignedAdmin.firstName || 'Admin'} className="w-7 h-7 rounded-full object-cover border border-white/40" />
+                ) : (
+                  <span className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center text-xs font-bold">
+                    {(assignedAdmin?.firstName || 'C')[0]}
+                  </span>
+                )}
+                <h3 className="font-semibold text-sm">
+                  {assignedAdmin ? `${assignedAdmin.firstName || 'Admin'} ${assignedAdmin.lastName || ''}`.trim() : "Customer Support"}
+                </h3>
+              </div>
               <div className="flex items-center gap-2">
                 <button onClick={closeChat} className="text-white hover:text-gray-200">✕</button>
               </div>

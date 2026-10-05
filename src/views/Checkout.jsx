@@ -5,6 +5,8 @@ import { CartContext } from "../context/CartContext";
 import { UserContext } from "../context/UserContext";
 import { ToastContainer, toast } from "react-toastify";
 import { useRouter } from "next/navigation";
+import { formatMeasureLine } from "../lib/measure";
+import { formatBDT } from "../config/brand";
 import "react-toastify/dist/ReactToastify.css";
 import { 
   FaMoneyBillAlt, 
@@ -70,6 +72,7 @@ function CheckoutPage() {
   const [selectedShipping, setSelectedShipping] = useState(null);
   const [deliveryPhone, setDeliveryPhone] = useState('');
   const [ruleEval, setRuleEval] = useState(null);
+  const [rulesTick, setRulesTick] = useState(0);
   const router = useRouter();
 
   useEffect(() => {
@@ -103,11 +106,14 @@ function CheckoutPage() {
   }, [defaultPaymentMethod]);
 
   useEffect(() => {
+    let cancelled = false;
     const loadShipping = async () => {
       try {
         if (!cartItems || cartItems.length === 0) {
-          setShippingOptions([]);
-          setSelectedShipping(null);
+          if (!cancelled) {
+            setShippingOptions([]);
+            setSelectedShipping(null);
+          }
           return;
         }
 
@@ -154,18 +160,41 @@ function CheckoutPage() {
           }
         } catch { /* keep variant-only options */ }
 
+        // A threshold-based free-delivery rule applies automatically to a paid
+        // delivery method. Don't expose a separate zero-cost option that would
+        // bypass the configured threshold.
+        try {
+          const rulesRes = await fetch(`${process.env.NEXT_PUBLIC_API_URI}/api/checkout-rules`);
+          const activeRules = rulesRes.ok ? await rulesRes.json() : [];
+          const hasFreeDeliveryRule = Array.isArray(activeRules) && activeRules.some(
+            rule => rule.type === 'free_delivery_above'
+          );
+          if (hasFreeDeliveryRule) {
+            uniqueOptions = uniqueOptions.filter(
+              option => !/\bfree\s*(?:shipping|delivery)\b/i.test(String(option.name || ''))
+            );
+          }
+        } catch { /* keep available shipping options if rules cannot be loaded */ }
+
         uniqueOptions.sort((a, b) => Number(a.charge || 0) - Number(b.charge || 0));
 
+        if (cancelled) return;
         setShippingOptions(uniqueOptions);
-        setSelectedShipping(uniqueOptions[0] || null);
+        setSelectedShipping((previous) =>
+          uniqueOptions.find(option =>
+            option.name === previous?.name && Number(option.charge || 0) === Number(previous?.charge || 0)
+          ) || uniqueOptions[0] || null
+        );
       } catch (e) {
+        if (cancelled) return;
         console.error('shipping load error', e);
         setShippingOptions([]);
         setSelectedShipping(null);
       }
     };
     loadShipping();
-  }, [cartItems]);
+    return () => { cancelled = true; };
+  }, [cartItems, discount, rulesTick]);
 
   // Delivery contact number (shown under shipping methods)
   useEffect(() => {
@@ -220,6 +249,13 @@ function CheckoutPage() {
     .join(',');
 
   // Evaluate admin checkout rules (delivery multipliers, fees, limits) on cart/shipping/payment changes
+  // Re-evaluate when admin coupons/rules/shipping/prices change over socket
+  useEffect(() => {
+    const onStoreChanged = () => setRulesTick((t) => t + 1);
+    window.addEventListener('storeChanged', onStoreChanged);
+    return () => window.removeEventListener('storeChanged', onStoreChanged);
+  }, []);
+
   useEffect(() => {
     if (!cartItems.length) {
       setRuleEval(null);
@@ -235,6 +271,7 @@ function CheckoutPage() {
             subtotal: mainTotal,
             discountAmount: discount,
             shippingCharge,
+            shippingMethodName: selectedShipping?.name || '',
             paymentMethod: paymentMethodKey,
             items: cartItems.map(i => ({ productId: i.productId, name: i.name, quantity: i.quantity })),
           }),
@@ -247,7 +284,7 @@ function CheckoutPage() {
       }
     }, 350);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [mainTotal, discount, shippingCharge, paymentMethodKey, cartSignature]);
+  }, [mainTotal, discount, shippingCharge, selectedShipping?.name, paymentMethodKey, cartSignature, rulesTick]);
 
 const handleCheckout = async () => {
   if (!validateShippingInfo()) return;
@@ -687,7 +724,7 @@ const handleCheckout = async () => {
                             <span className="font-semibold text-black">{opt.name}</span>
                             <p className="text-sm text-dark-gray">{opt.estimatedDays} days delivery</p>
                           </div>
-                          <span className="font-bold text-maybelline-pink">BDT{Number(opt.charge).toFixed(2)}</span>
+                          <span className="font-bold text-maybelline-pink">{formatBDT(Number(opt.charge).toFixed(2))}</span>
                         </div>
                       </label>
                     ))}
@@ -929,12 +966,12 @@ const handleCheckout = async () => {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-black line-clamp-2">{item.name}</p>
-                        {item.size && <p className="text-sm text-dark-gray">Size: {item.size}</p>}
+                        {item.size && <p className="text-sm text-dark-gray">{formatMeasureLine(item)}</p>}
                         {item.color && <p className="text-sm text-dark-gray">Color: {item.color}</p>}
                         <p className="text-sm text-dark-gray">Qty: {item.quantity}</p>
                       </div>
                       <div className="flex flex-col items-end">
-                        <span className="font-bold text-black">BDT{(item.price * item.quantity).toFixed(2)}</span>
+                        <span className="font-bold text-black">{formatBDT((item.price * item.quantity).toFixed(2))}</span>
                         <button 
                           onClick={() => removeItem(getItemIdentifier(item))}
                           className="text-maybelline-pink hover:text-rose mt-1 transition-colors duration-200"
@@ -956,14 +993,14 @@ const handleCheckout = async () => {
               <div className="space-y-3 border-t border-cool-gray pt-4">
                 <div className="flex justify-between items-center">
                   <span className="text-dark-gray">Subtotal</span>
-                  <span className="font-semibold text-black">BDT{mainTotal.toFixed(2)}</span>
+                  <span className="font-semibold text-black">{formatBDT(mainTotal.toFixed(2))}</span>
                 </div>
                 
                 {discount > 0 && (
                   <>
                     <div className="flex justify-between items-center text-dark-gray">
                       <span>Discount</span>
-                      <span className="font-semibold">- BDT{discount.toFixed(2)}</span>
+                      <span className="font-semibold">- {formatBDT(discount.toFixed(2))}</span>
                     </div>
                     <div className="flex justify-between items-center text-dark-gray">
                       <span>Discount Percentage</span>
@@ -984,16 +1021,16 @@ const handleCheckout = async () => {
                   <span className="font-semibold text-black text-right">
                     {ruleEval?.freeDelivery ? (
                       <>
-                        <span className="line-through text-mid-gray mr-2">BDT{shippingCharge.toFixed(2)}</span>
+                        <span className="line-through text-mid-gray mr-2">{formatBDT(shippingCharge.toFixed(2))}</span>
                         <span className="text-green-600">Free</span>
                       </>
                     ) : effectiveShipping !== shippingCharge ? (
                       <>
-                        <span className="line-through text-mid-gray mr-2">BDT{shippingCharge.toFixed(2)}</span>
-                        <span>BDT{effectiveShipping.toFixed(2)}</span>
+                        <span className="line-through text-mid-gray mr-2">{formatBDT(shippingCharge.toFixed(2))}</span>
+                        <span>{formatBDT(effectiveShipping.toFixed(2))}</span>
                       </>
                     ) : (
-                      <>BDT{shippingCharge.toFixed(2)}</>
+                      <>{formatBDT(shippingCharge.toFixed(2))}</>
                     )}
                   </span>
                 </div>
@@ -1009,13 +1046,13 @@ const handleCheckout = async () => {
                 {(ruleEval?.extraFees || []).map(f => (
                   <div key={f.ruleId || f.label} className="flex justify-between items-center">
                     <span className="text-dark-gray">{f.label}</span>
-                    <span className="font-semibold text-black">BDT{Number(f.amount).toFixed(2)}</span>
+                    <span className="font-semibold text-black">{formatBDT(Number(f.amount).toFixed(2))}</span>
                   </div>
                 ))}
 
                 <div className="flex justify-between items-center text-xl font-bold pt-3 border-t border-cool-gray">
                   <span>Total</span>
-                  <span className="text-maybelline-pink">BDT{grandTotal.toFixed(2)}</span>
+                  <span className="text-maybelline-pink">{formatBDT(grandTotal.toFixed(2))}</span>
                 </div>
               </div>
 

@@ -3,6 +3,8 @@ import React, { useEffect, useState } from 'react';
 import { useRouter, useParams } from "next/navigation";
 import axios from 'axios';
 import { FaBoxOpen, FaCreditCard, FaTruck, FaUser, FaHome, FaPhone, FaMapMarkerAlt, FaCheck } from 'react-icons/fa';
+import { formatMeasureLine } from '../lib/measure';
+import { formatBDT } from '../config/brand';
 import { FiClock } from 'react-icons/fi';
 
 export default function OrderConfirmationPage() {
@@ -96,14 +98,14 @@ export default function OrderConfirmationPage() {
                     <div className="ml-4 flex-1">
                       <div className="flex justify-between">
                         <h4 className="text-sm font-medium text-black">{item.name}</h4>
-                        <p className="ml-4 text-sm font-semibold text-black">BDT{(item.price * item.quantity).toFixed(2)}</p>
+                        <p className="ml-4 text-sm font-semibold text-black">{formatBDT((item.price * item.quantity).toFixed(2))}</p>
                       </div>
                       <div className="mt-1 text-sm text-dark-gray font-sans">
-                        {item.size && <span className="mr-3">Size: {item.size}</span>}
+                        {item.size && <span className="mr-3">{formatMeasureLine(item)}</span>}
                         {item.color && <span>Color: {item.color}</span>}
                       </div>
                       <div className="mt-1 text-sm text-dark-gray font-sans">
-                        Qty: {item.quantity} &times; BDT{item.price.toFixed(2)}
+                        Qty: {item.quantity} &times; {formatBDT(item.price.toFixed(2))}
                       </div>
                     </div>
                   </div>
@@ -154,7 +156,7 @@ export default function OrderConfirmationPage() {
                 )}
                 <div className="sm:col-span-1">
                   <dt className="text-sm font-medium text-dark-gray font-sans">Total Amount</dt>
-                  <dd className="mt-1 text-lg font-semibold text-black">BDT{order.totalAmount.toFixed(2)}</dd>
+                  <dd className="mt-1 text-lg font-semibold text-black">{formatBDT(order.totalAmount.toFixed(2))}</dd>
                 </div>
               </dl>
             </div>

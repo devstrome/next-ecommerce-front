@@ -188,6 +188,12 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
               </Link>
             </li>
             <li>
+              <Link href="/admin/dashboard/partnership" className={linkClass('/admin/dashboard/partnership')}>
+                <FiUsers className="w-5 h-5 flex-shrink-0" />
+                Partnership
+              </Link>
+            </li>
+            <li>
               <Link href="/admin/dashboard/viewers" className={linkClass('/admin/dashboard/viewers')}>
                 <FiMonitor className="w-5 h-5 flex-shrink-0" />
                 Live Viewers

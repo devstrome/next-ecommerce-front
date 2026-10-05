@@ -73,7 +73,7 @@ const Slider = () => {
   }
 
   return (
-    <div className="w-full mx-auto max-w-6xl">
+    <div className="w-full">
       <div className="relative">
         <Swiper
           autoplay={{
@@ -99,7 +99,7 @@ const Slider = () => {
           }}
         >
           {slides.map((slide) => (
-            <SwiperSlide key={slide._id} className="flex items-stretch p-1">
+            <SwiperSlide key={slide._id} className="flex items-stretch">
               <SliderImages ImageInfo={slide} />
             </SwiperSlide>
           ))}

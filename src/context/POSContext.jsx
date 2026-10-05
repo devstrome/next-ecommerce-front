@@ -5,6 +5,7 @@ import axios from 'axios';
 import { toast } from 'react-toastify';
 import { useRouter } from "next/navigation";
 import { useAdmin } from './AdminContext';
+import { printThermalReceipt } from '../lib/print/thermal';
 
 const POSContext = createContext();
 
@@ -126,7 +127,6 @@ export const POSProvider = ({ children }) => {
       
       if (response.data.success) {
         addToCart(response.data.inventory);
-        setScannedBarcode('');
         toast.success('Product added to cart');
       }
     } catch (error) {
@@ -134,11 +134,13 @@ export const POSProvider = ({ children }) => {
       toast.error(error.response?.data?.message || 'Product not found');
     } finally {
       setLoading(false);
+      // Physical scanners keep typing — always return to the barcode field
+      setScannedBarcode('');
+      barcodeInputRef.current?.focus();
     }
   };
 
   const handleQRScan = async (qrData) => {
-    console.log('QR Code scanned:', qrData);
     
     try {
       setLoading(true);
@@ -162,17 +164,19 @@ export const POSProvider = ({ children }) => {
   };
 
   const addToCart = (inventory) => {
-    // Check if item is already in cart
+    // Check if item is already in cart (same physical unit / barcode)
     const existingItem = cart.find(item => item.inventoryId === inventory._id);
     
     if (existingItem) {
-      toast.warning('Item already in cart');
+      toast.warning('This unit is already in the cart');
+      barcodeInputRef.current?.focus();
       return;
     }
 
     // Check if item is available
     if (inventory.availableQuantity <= 0) {
       toast.error('Item is out of stock');
+      barcodeInputRef.current?.focus();
       return;
     }
 
@@ -183,7 +187,9 @@ export const POSProvider = ({ children }) => {
       variantInfo: {
         size: inventory.size,
         color: inventory.color?.name,
-        barcode: inventory.barcode
+        barcode: inventory.barcode,
+        measureType: inventory.variantId?.measureType,
+        unitName: inventory.variantId?.unitName
       },
       quantity: 1, // Each inventory item represents 1 unit
       unitPrice: inventory.price,
@@ -192,6 +198,7 @@ export const POSProvider = ({ children }) => {
       scannedBarcode: inventory.barcode
     };
     setCart([...cart, newItem]);
+    barcodeInputRef.current?.focus();
   };
 
   const removeFromCart = (inventoryId) => {
@@ -274,262 +281,16 @@ export const POSProvider = ({ children }) => {
         url: `${process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000'}/api/pos/orders/${orderId}/receipt`
       });
       const receipt = response.data.receipt;
-      
-      // Create printable receipt content
-      const receiptContent = `
-        ========================================
-        BELORELLA - POS RECEIPT
-        ========================================
-        Order #: ${receipt.orderNumber}
-        Date: ${new Date(receipt.date).toLocaleString()}
-        Cashier: ${receipt.cashier.firstName} ${receipt.cashier.lastName}
-        
-        Customer: ${receipt.customer.name}
-        Phone: ${receipt.customer.phone || 'N/A'}
-        
-        ========================================
-        ITEMS:
-        ${receipt.items.map(item => `
-        ${item.productName} (${item.variantInfo.size})
-        ${item.quantity} x $${item.unitPrice} = $${item.totalPrice}
-        Barcode: ${item.variantInfo.barcode}
-        `).join('')}
-        ========================================
-        Subtotal: $${receipt.subtotal.toFixed(2)}
-        Tax: $${receipt.tax.toFixed(2)}
-        Discount: $${receipt.discount.toFixed(2)}
-        ========================================
-        TOTAL: $${receipt.total.toFixed(2)}
-        Payment: ${receipt.paymentMethod.toUpperCase()}
-        ========================================
-        Thank you for your purchase!
-        ========================================
-      `;
-      
-                    // Create thermal printer receipt with POS order barcode only
-        const thermalReceiptContent = `
-          <html>
-            <head>
-              <title>Receipt - ${receipt.orderNumber}</title>
-              <style>
-                @page {
-                  size: 80mm auto;
-                  margin: 0;
-                }
-                * {
-                  margin: 0;
-                  padding: 0;
-                  box-sizing: border-box;
-                }
-                                 body { 
-                   font-family: 'Courier New', monospace; 
-                   font-size: 9px; 
-                   margin: 0;
-                   padding: 2mm;
-                   width: 76mm;
-                   max-width: 76mm;
-                   background: white;
-                   line-height: 1.2;
-                   word-wrap: break-word;
-                 }
-                .logo {
-                  text-align: center;
-                  font-size: 10px;
-                  font-weight: bold;
-                  margin-bottom: 3mm;
-                  border-bottom: 1px dashed #000;
-                  padding-bottom: 2mm;
-                }
-                .receipt-header {
-                  text-align: center;
-                  margin-bottom: 3mm;
-                  font-size: 7px;
-                }
-                .customer-info {
-                  margin-bottom: 3mm;
-                  font-size: 7px;
-                }
-                .items-section {
-                  margin-bottom: 3mm;
-                }
-                .item {
-                  margin-bottom: 2mm;
-                  padding-bottom: 1mm;
-                  border-bottom: 1px dotted #ccc;
-                  font-size: 7px;
-                }
-                .item-details {
-                  margin: 0.5mm 0;
-                }
-                .order-barcode-section {
-                  text-align: center;
-                  margin: 3mm 0;
-                  padding: 2mm 0;
-                  border-top: 1px dashed #000;
-                  border-bottom: 1px dashed #000;
-                }
-                .barcode-container {
-                  text-align: center;
-                  margin: 1mm 0;
-                }
-                .barcode-image {
-                  max-width: 60mm;
-                  height: auto;
-                }
-                .totals {
-                  border-top: 1px dashed #000;
-                  padding-top: 2mm;
-                  margin-top: 3mm;
-                  font-size: 7px;
-                }
-                .total-row {
-                  display: flex;
-                  justify-content: space-between;
-                  margin: 0.5mm 0;
-                }
-                .final-total {
-                  font-weight: bold;
-                  font-size: 9px;
-                  border-top: 1px solid #000;
-                  padding-top: 1mm;
-                  margin-top: 1mm;
-                }
-                .footer {
-                  text-align: center;
-                  margin-top: 3mm;
-                  border-top: 1px dashed #000;
-                  padding-top: 2mm;
-                  font-size: 7px;
-                }
-                .divider {
-                  text-align: center;
-                  margin: 2mm 0;
-                  font-size: 6px;
-                }
-                @media print {
-                  body {
-                    width: 76mm;
-                    max-width: 76mm;
-                    margin: 0;
-                    padding: 2mm;
-                  }
-                  .barcode-image {
-                    max-width: 60mm;
-                  }
-                  * {
-                    -webkit-print-color-adjust: exact;
-                    color-adjust: exact;
-                  }
-                }
-              </style>
-            </head>
-            <body>
-              <div class="logo">
-                ╔══════════════════════════════════════════════════════════╗
-                ║                                                          ║
-                ║                    BELORELLA                             ║
-                ║              Premium Fashion & Lifestyle                 ║
-                ║                                                          ║
-                ╚══════════════════════════════════════════════════════════╝
-              </div>
-              
-              <div class="receipt-header">
-                <div>POS RECEIPT</div>
-                <div>Order #: ${receipt.orderNumber}</div>
-                <div>Date: ${new Date(receipt.date).toLocaleString()}</div>
-                <div>Cashier: ${receipt.cashier.firstName} ${receipt.cashier.lastName}</div>
-              </div>
-              
-              <div class="divider">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
-              
-              <div class="customer-info">
-                <div><strong>Customer:</strong> ${receipt.customer.name}</div>
-                <div><strong>Phone:</strong> ${receipt.customer.phone || 'N/A'}</div>
-              </div>
-              
-              <div class="divider">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
-              
-              <div class="items-section">
-                <div style="text-align: center; font-weight: bold; margin-bottom: 2mm;">ITEMS:</div>
-                                 ${receipt.items.map(item => `
-                   <div class="item">
-                     <div class="item-details">
-                       <div><strong>${item.productName}</strong></div>
-                       <div>Size: ${item.variantInfo.size}</div>
-                       <div>${item.quantity} x $${item.unitPrice}</div>
-                       ${item.discountPrice && item.discountPrice < item.unitPrice ? 
-                         `<div style="color: #666; font-size: 6px;">Original: $${item.unitPrice} | Discounted: $${item.discountPrice}</div>` : 
-                         ''
-                       }
-                       <div><strong>Total: $${item.totalPrice}</strong></div>
-                     </div>
-                   </div>
-                 `).join('')}
-              </div>
-              
-                             <div class="order-barcode-section">
-                 <div style="font-weight: bold; margin-bottom: 1mm;">ORDER BARCODE:</div>
-                 <div class="barcode-container">
-                   <img 
-                     src="https://barcodeapi.org/api/auto/${receipt.orderNumber}" 
-                     alt="Order Barcode ${receipt.orderNumber}"
-                     class="barcode-image"
-                     onerror="this.style.display='none'"
-                     onload="this.style.display='block'"
-                   />
-                 </div>
-                 <div style="font-size: 6px; margin-top: 1mm; font-family: monospace;">${receipt.orderNumber}</div>
-               </div>
-              
-              <div class="totals">
-                <div class="total-row">
-                  <span>Subtotal:</span>
-                  <span>$${receipt.subtotal.toFixed(2)}</span>
-                </div>
-                <div class="total-row">
-                  <span>Tax:</span>
-                  <span>$${receipt.tax.toFixed(2)}</span>
-                </div>
-                <div class="total-row">
-                  <span>Discount:</span>
-                  <span>$${receipt.discount.toFixed(2)}</span>
-                </div>
-                <div class="total-row final-total">
-                  <span>TOTAL:</span>
-                  <span>$${receipt.total.toFixed(2)}</span>
-                </div>
-                <div class="total-row">
-                  <span>Payment:</span>
-                  <span>${receipt.paymentMethod.toUpperCase()}</span>
-                </div>
-              </div>
-              
-              <div class="divider">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
-              
-              <div class="footer">
-                <div>Thank you for your purchase!</div>
-                <div style="margin-top: 1mm;">Please come again</div>
-                <div style="margin-top: 3mm; font-size: 6px;">
-                  ╔══════════════════════════════════════════════════════════╗
-                  ║                                                          ║
-                  ║                    BELORELLA                             ║
-                  ║              Premium Fashion & Lifestyle                 ║
-                  ║                                                          ║
-                  ╚══════════════════════════════════════════════════════════╝
-                </div>
-              </div>
-            </body>
-          </html>
-        `;
-      
-             // Open print dialog with thermal receipt
-       const printWindow = window.open('', '_blank');
-       printWindow.document.write(thermalReceiptContent);
-       printWindow.document.close();
-       printWindow.print();
-      
+
+      // Single shared thermal template (58/80mm) — prints after images decode
+      const width = Number(getStorage('posPaperWidth')) || 80;
+      const ok = printThermalReceipt(receipt, { width });
+      if (!ok) {
+        toast.error('Print window blocked - allow popups for this site');
+      }
     } catch (error) {
       console.error('Error printing receipt:', error);
+      toast.error('Failed to load receipt for printing');
     }
   };
 

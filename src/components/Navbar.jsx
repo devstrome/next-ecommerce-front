@@ -5,6 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { FiSearch, FiUser, FiHeart, FiShoppingBag, FiMenu, FiX, FiChevronDown, FiGrid, FiLogOut } from "react-icons/fi";
 import { UserContext } from '../context/UserContext';
 import { CartContext } from '../context/CartContext';
+import MiniCart from './MiniCart';
 
 const API_URI = process.env.NEXT_PUBLIC_API_URI || "http://localhost:3000";
 
@@ -26,6 +27,7 @@ const Navbar = () => {
   const [mobileCatSelected, setMobileCatSelected] = useState(null);
   const [catSheetOpen, setCatSheetOpen] = useState(false);
   const [sheetCatSelected, setSheetCatSelected] = useState(null);
+  const [miniCartOpen, setMiniCartOpen] = useState(false);
   const catDropdownRef = useRef(null);
   const pathname = usePathname();
   const router = useRouter();
@@ -260,7 +262,7 @@ const Navbar = () => {
           <Link href="/"
             className="font-heading text-xl sm:text-2xl tracking-[0.25em] uppercase font-bold text-black"
           >
-            Belorella
+            BELORELLA
           </Link>
 
           {/* Right Icons */}
@@ -279,6 +281,12 @@ const Navbar = () => {
               <FiHeart size={20} />
             </Link>
             <Link href="/cart"
+              onClick={(e) => {
+                if (typeof window !== 'undefined' && window.innerWidth < 640) {
+                  e.preventDefault();
+                  setMiniCartOpen(true);
+                }
+              }}
               className="touch-target flex items-center justify-center relative text-black hover:text-maybelline-pink transition-colors"
               aria-label="Cart"
             >
@@ -515,7 +523,7 @@ const Navbar = () => {
                     <FiHeart size={18} />
                     <span className="text-[10px]">Wishlist</span>
                   </Link>
-                  <Link href="/cart" onClick={() => setMobileMenuOpen(false)} className="flex flex-col items-center gap-1 text-black hover:text-maybelline-pink transition-colors relative">
+                  <button onClick={() => { setMobileMenuOpen(false); setMiniCartOpen(true); }} className="flex flex-col items-center gap-1 text-black hover:text-maybelline-pink transition-colors relative">
                     <FiShoppingBag size={18} />
                     {cartItems.length > 0 && (
                       <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-maybelline-pink text-pure-white text-[8px] font-medium flex items-center justify-center rounded-full">
@@ -523,7 +531,7 @@ const Navbar = () => {
                       </span>
                     )}
                     <span className="text-[10px]">Cart</span>
-                  </Link>
+                  </button>
                   {isLoggedIn ? (
                     <Link href="/profile" onClick={() => setMobileMenuOpen(false)} className="flex flex-col items-center gap-1 text-black hover:text-maybelline-pink transition-colors">
                       <FiUser size={18} />
@@ -633,6 +641,9 @@ const Navbar = () => {
           </>
         )}
       </header>
+
+      {/* Mobile Mini Cart */}
+      <MiniCart open={miniCartOpen} onClose={() => setMiniCartOpen(false)} />
 
       {/* Spacer for non-home pages */}
       {!isHome && <div className="h-20" />}

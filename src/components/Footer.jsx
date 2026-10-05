@@ -17,7 +17,7 @@ export default function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10">
           {/* Brand */}
           <div>
-            <h3 className="font-heading text-xl tracking-[0.2em] uppercase font-bold mb-4 text-maybelline-pink">Belorella</h3>
+            <h3 className="font-heading text-xl tracking-[0.2em] uppercase font-bold mb-4 text-maybelline-pink">BELORELLA</h3>
             <p className="text-sm text-gray-400 leading-relaxed mb-6">
               Your trusted destination for premium fashion and lifestyle products in Bangladesh.
             </p>
@@ -106,7 +106,7 @@ export default function Footer() {
       <div className="border-t border-gray-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-col sm:flex-row items-center justify-between gap-3">
           <p className="text-xs text-gray-500">
-            &copy; {new Date().getFullYear()} Belorella. All rights reserved.
+            &copy; {new Date().getFullYear()} BELORELLA. All rights reserved.
           </p>
           <div className="flex items-center gap-4">
             {socialLinks.map((s) => (

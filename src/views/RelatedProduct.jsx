@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { FaPlus, FaEdit, FaTrash, FaArrowLeft, FaSearch, FaLink } from 'react-icons/fa';
 import { useRouter } from "next/navigation";
+import { formatBDT } from '../config/brand';
 
 const RelatedProductsManagement = () => {
   const [relatedProducts, setRelatedProducts] = useState([]);
@@ -49,6 +50,7 @@ const RelatedProductsManagement = () => {
       relatedProducts: selectedProductData.map(product => ({
         productId: product._id,
         name: product.name,
+        brand: product.brand || '',
         mainPrice: product.mainPrice,
         discountPrice: product.discountPrice,
         mainBadgeName: product.mainBadgeName,
@@ -76,6 +78,7 @@ const RelatedProductsManagement = () => {
       relatedProducts: selectedProductData.map(product => ({
         productId: product._id,
         name: product.name,
+        brand: product.brand || '',
         mainPrice: product.mainPrice,
         discountPrice: product.discountPrice,
         mainBadgeName: product.mainBadgeName,
@@ -203,7 +206,7 @@ const RelatedProductsManagement = () => {
                 ) : (
                   filteredProducts.map(product => (
                     <option key={product._id} value={product._id}>
-                      {product.name} - BDT{product.mainPrice}
+                      {product.name} - {formatBDT(product.mainPrice)}
                     </option>
                   ))
                 )}
@@ -224,7 +227,7 @@ const RelatedProductsManagement = () => {
                     return product ? (
                       <div key={productId} className="flex justify-between items-center py-1">
                         <span className="text-sm text-[#1B1B1B]">{product.name}</span>
-                        <span className="text-sm text-[#4A4A4A]">BDT{product.mainPrice}</span>
+                        <span className="text-sm text-[#4A4A4A]">{formatBDT(product.mainPrice)}</span>
                       </div>
                     ) : null;
                   })}

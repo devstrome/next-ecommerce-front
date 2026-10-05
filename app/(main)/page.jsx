@@ -1,13 +1,13 @@
 export const dynamic = 'force-dynamic'
 import HomePageClient from './HomePageClient'
 
-const SITE_NAME = 'Belorella';
+const SITE_NAME = 'BELORELLA';
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://belorella.com';
 
 export const metadata = {
   title: `${SITE_NAME} - Premium Fashion & Lifestyle Bangladesh`,
   description: 'Shop the latest fashion, beauty, and lifestyle trends with unbeatable prices. Quality products delivered to your doorstep in Bangladesh.',
-  keywords: 'Belorella, online shopping Bangladesh, fashion, beauty, makeup, skincare, haircare, luxury, ecommerce Bangladesh',
+  keywords: 'BELORELLA, online shopping Bangladesh, fashion, beauty, makeup, skincare, haircare, luxury, ecommerce Bangladesh',
   openGraph: {
     title: `${SITE_NAME} - Premium Fashion & Lifestyle`,
     description: 'Shop the latest fashion, beauty, and lifestyle trends with unbeatable prices.',

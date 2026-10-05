@@ -5,6 +5,7 @@ import axios from "axios";
 import { FaHeart, FaTrash, FaStar, FaSearch, FaEnvelope, FaPaperPlane } from "react-icons/fa";
 import Link from "next/link";
 import { toast } from "react-toastify";
+import { formatBDT } from '../config/brand';
 
 const API = process.env.NEXT_PUBLIC_API_URI;
 
@@ -67,10 +68,10 @@ const AdminWishlists = () => {
           `Hi ${name},\n\n` +
           `Great news! ${itemsText} from your wishlist ${
             items.length === 1 ? "is" : "are"
-          } now available at Belorella.\n\n` +
+          } now available at BELORELLA.\n\n` +
           `Order now before it sells out!\n\n` +
           `Best regards,\n` +
-          `Belorella Support`,
+          `BELORELLA Support`,
       };
     }
     if (template === "coming") {
@@ -87,10 +88,10 @@ const AdminWishlists = () => {
           }.\n\n` +
           `Stay tuned — order as soon as it arrives!\n\n` +
           `Best regards,\n` +
-          `Belorella Support`,
+          `BELORELLA Support`,
       };
     }
-    return { subject: "A message from Belorella", message: "" };
+    return { subject: "A message from BELORELLA", message: "" };
   };
 
   const openEmailModal = (user) => {
@@ -251,7 +252,7 @@ const AdminWishlists = () => {
                             </Link>
                             <div className="flex items-center gap-3 text-sm text-[#4A4A4A] mt-1">
                               <span className="font-semibold text-[#1B1B1B]">
-                                BDT{product.discountPrice || product.mainPrice}
+                                {formatBDT(product.discountPrice || product.mainPrice)}
                               </span>
                               {product.brand && (
                                 <span className="text-[#4A4A4A]">{product.brand}</span>
@@ -355,7 +356,7 @@ const AdminWishlists = () => {
               </div>
 
               <p className="text-xs text-[#888888]">
-                Sent through Belorella's server email account.
+                Sent through BELORELLA's server email account.
               </p>
             </div>
 

@@ -3,6 +3,7 @@ import React, { useContext, useEffect, useState } from 'react';
 import Link from "next/link";
 import { FaHeart, FaArrowLeft } from 'react-icons/fa';
 import { UserContext } from '../context/UserContext';
+import { formatBDT } from '../config/brand';
 
 const WishlistPage = () => {
   const { wishlist, fetchWishlist, toggleWishlist } = useContext(UserContext);
@@ -42,7 +43,7 @@ const WishlistPage = () => {
                       <img src={item.mainImage || '/placeholder.png'} alt={item.name} className="w-full h-full object-cover" onError={(e) => { e.target.style.display = 'none'; }} />
                     </div>
                     <h3 className="font-semibold text-black truncate font-heading">{item.name}</h3>
-                    <p className="text-sm text-dark-gray mt-1 font-sans">BDT{item.discountPrice || item.mainPrice}</p>
+                    <p className="text-sm text-dark-gray mt-1 font-sans">{formatBDT(item.discountPrice || item.mainPrice)}</p>
                   </Link>
                   <button
                     onClick={async () => await toggleWishlist(item._id)}

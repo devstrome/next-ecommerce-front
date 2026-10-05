@@ -138,12 +138,24 @@ const UserCrudPage = () => {
       }
 
       console.log('👥 Making API request to:', `${API_URI}/api/users`);
-      const response = await axios.get(`${API_URI}/api/users`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const headers = { Authorization: `Bearer ${token}` };
+      const [response, bansResponse] = await Promise.all([
+        axios.get(`${API_URI}/api/users`, { headers }),
+        axios.get(`${API_URI}/api/bans`, { headers }),
+      ]);
 
       console.log('👥 Users fetched successfully:', response.data.length, 'users');
-      setUsers(response.data);
+      const activeBanByUserId = new Map();
+      for (const ban of bansResponse.data) {
+        if (ban.active && ban.targetType === 'user' && ban.targetId) {
+          const userId = String(ban.targetId);
+          if (!activeBanByUserId.has(userId)) activeBanByUserId.set(userId, ban._id);
+        }
+      }
+      setUsers(response.data.map((user) => ({
+        ...user,
+        activeBanId: activeBanByUserId.get(String(user._id)) || null,
+      })));
       setLastUpdate(new Date());
     } catch (error) {
       console.error('❌ Error fetching users:', error);
@@ -212,21 +224,21 @@ const UserCrudPage = () => {
         return;
       }
 
-      const payload = {
-        firstName: updatedUser.firstName,
-        lastName: updatedUser.lastName,
-        email: updatedUser.email,
-        userName: updatedUser.userName,
-        phoneNumber: updatedUser.phoneNumber,
-      };
-      if (updatedUser.password) {
-        payload.password = updatedUser.password;
-      }
+      // Send multipart (for image) with only the fields that are set, so the
+      // admin can change one field or everything at once.
+      const formData = new FormData();
+      ['firstName', 'lastName', 'email', 'userName', 'phoneNumber'].forEach((k) => {
+        if (updatedUser[k] !== undefined && updatedUser[k] !== null && String(updatedUser[k]).trim() !== '') {
+          formData.append(k, updatedUser[k]);
+        }
+      });
+      if (updatedUser.password) formData.append('password', updatedUser.password);
+      if (updatedUser.image) formData.append('image', updatedUser.image);
 
-      const response = await axios.put(`${API_URI}/api/users/${updatedUser._id}`, payload, {
+      const response = await axios.put(`${API_URI}/api/users/${updatedUser._id}`, formData, {
         headers: { 
           Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'multipart/form-data'
         }
       });
 
@@ -266,6 +278,55 @@ const UserCrudPage = () => {
       console.error('Error deleting user:', error);
       const errorMessage = error.response?.data?.message || 'Failed to delete user';
       toast.error(errorMessage);
+    }
+  };
+
+  // Ban a user by their stored device/IP
+  const banUser = async (user) => {
+    if (!window.confirm(`Ban ${user.firstName} ${user.lastName}? Their device/IP/network will be blocked from creating new accounts.`)) {
+      return;
+    }
+    try {
+      const token = getAdminToken();
+      if (!token) {
+        toast.error('Authentication required');
+        return;
+      }
+      const reason = window.prompt('Reason for ban (optional):', '') || '';
+      const { data } = await axios.post(`${API_URI}/api/bans/user`, { userId: user._id, reason }, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      toast.success('User banned');
+      // Remove their active session / refresh token server-side and reflect it
+      setUsers((prev) => prev.map((u) => (u._id === user._id
+        ? { ...u, banned: true, activeBanId: data.ban?._id || null }
+        : u)));
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to ban user');
+    }
+  };
+
+  const unbanUser = async (user) => {
+    if (!user.activeBanId) {
+      toast.error('Could not find this user’s active ban. Refresh and try again.');
+      return;
+    }
+    if (!window.confirm(`Lift the ban for ${user.firstName} ${user.lastName}?`)) return;
+    try {
+      const token = getAdminToken();
+      if (!token) {
+        toast.error('Authentication required');
+        return;
+      }
+      await axios.delete(`${API_URI}/api/bans/${user.activeBanId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setUsers((prev) => prev.map((u) => (u._id === user._id
+        ? { ...u, banned: false, activeBanId: null }
+        : u)));
+      toast.success('User ban lifted');
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to lift user ban');
     }
   };
 
@@ -471,6 +532,8 @@ const UserCrudPage = () => {
               onEdit={editUser} 
               onDelete={deleteUser}
               onViewDetails={viewUserDetails}
+              onBan={banUser}
+              onUnban={unbanUser}
               onlineUsers={onlineUsers}
             />
           </div>

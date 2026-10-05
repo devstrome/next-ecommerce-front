@@ -1,5 +1,5 @@
 'use client'
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { 
   FaBarcode, 
   FaSearch, 
@@ -9,7 +9,6 @@ import {
   FaMobileAlt,
   FaUniversity,
   FaCalculator,
-  FaCamera,
   FaBox,
   FaUser,
   FaReceipt,
@@ -20,7 +19,9 @@ import {
 } from 'react-icons/fa';
 import { useRouter } from "next/navigation";
 import { usePOS } from '../context/POSContext';
-import QRScanner from '../components/QRScanner';
+import { formatBDT } from '../config/brand';
+import { formatMeasureLine, formatMeasure } from '../lib/measure';
+import { getStorage, setStorage } from '../lib/storage';
 
 const AdminPOS = () => {
   const router = useRouter();
@@ -31,7 +32,6 @@ const AdminPOS = () => {
     scannedBarcode,
     searchResults,
     loading,
-    showScanner,
     stats,
     paymentMethod,
     taxRate,
@@ -44,7 +44,6 @@ const AdminPOS = () => {
     setCustomer,
     setSearchQuery,
     setScannedBarcode,
-    setShowScanner,
     setPaymentMethod,
     setTaxRate,
     setDiscount,
@@ -53,7 +52,6 @@ const AdminPOS = () => {
     
     searchProducts,
     scanBarcode,
-    handleQRScan,
     addToCart,
     removeFromCart,
     clearCart,
@@ -62,6 +60,51 @@ const AdminPOS = () => {
   } = usePOS();
 
   const { subtotal, taxAmount, discountAmount, total } = calculateTotals();
+
+  // Mirror of the barcode field for the global (non-input) key handler
+  const barcodeValueRef = useRef(scannedBarcode);
+  useEffect(() => { barcodeValueRef.current = scannedBarcode; }, [scannedBarcode]);
+
+  // Physical (HID) scanner support:
+  // 1. Barcode field is focused on mount and after every scan (context refocuses).
+  // 2. Keystrokes typed while focus is NOT in an editable element are captured
+  //    and redirected into the barcode field — so scanning works no matter
+  //    where the cashier last clicked. Enter submits (scanner suffix).
+  useEffect(() => {
+    barcodeInputRef.current?.focus();
+
+    const isEditable = (el) =>
+      !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+
+    const onKeyDown = (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (isEditable(document.activeElement)) return;
+      const el = barcodeInputRef.current;
+      if (!el) return;
+
+      if (e.key === 'Enter') {
+        if (barcodeValueRef.current.trim()) {
+          e.preventDefault();
+          scanBarcode(barcodeValueRef.current);
+        }
+        return;
+      }
+      if (e.key.length === 1) {
+        e.preventDefault();
+        el.focus();
+        const next = barcodeValueRef.current + e.key;
+        barcodeValueRef.current = next;
+        setScannedBarcode(next);
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanBarcode]);
+
+  const resultMeasure = (item) =>
+    formatMeasure({ measureType: item.variantId?.measureType, unitName: item.variantId?.unitName, size: item.size });
 
   return (
     <div className="flex flex-col items-center justify-start min-h-screen bg-[#FAF8F6] p-4 sm:p-6">
@@ -96,7 +139,7 @@ const AdminPOS = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs sm:text-sm font-medium text-[#4A4A4A]">Sales</p>
-                <p className="text-lg sm:text-2xl font-bold text-green-600">${stats.todaySales?.toFixed(2) || '0.00'}</p>
+                <p className="text-lg sm:text-2xl font-bold text-green-600">{formatBDT(stats.todaySales || 0)}</p>
               </div>
               <div className="w-8 h-8 sm:w-12 sm:h-12 bg-green-100 flex items-center justify-center">
                 <FaMoneyBillWave className="text-green-600 text-sm sm:text-xl" />
@@ -181,9 +224,12 @@ const AdminPOS = () => {
                   </div>
                 </div>
 
-                {/* Barcode Scanner */}
+                {/* Barcode Scanner (physical HID scanner input) */}
                 <div className="w-full">
-                  <label className="block text-sm font-medium text-[#4A4A4A] mb-2">Barcode Scanner</label>
+                  <label className="block text-sm font-medium text-[#4A4A4A] mb-2">
+                    Barcode Scanner
+                    <span className="ml-2 text-xs font-normal text-[#777]">Scan or type a code, then press Enter</span>
+                  </label>
                   <div className="flex space-x-2">
                     <input
                       ref={barcodeInputRef}
@@ -191,21 +237,22 @@ const AdminPOS = () => {
                       placeholder="Scan barcode..."
                       value={scannedBarcode}
                       onChange={(e) => setScannedBarcode(e.target.value)}
-                      onKeyPress={(e) => e.key === 'Enter' && scanBarcode(scannedBarcode)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          scanBarcode(scannedBarcode);
+                        }
+                      }}
+                      autoComplete="off"
                       className="flex-1 px-4 py-3 border border-[#BDBDBD] focus:outline-none focus:ring-2 focus:ring-[#B1123B] bg-white text-[#1B1B1B] text-base min-h-[48px]"
                     />
                     <button
                       onClick={() => scanBarcode(scannedBarcode)}
                       disabled={loading}
+                      aria-label="Look up barcode"
                       className="px-4 py-3 bg-[#1B1B1B] text-white hover:bg-[#4A4A4A] disabled:opacity-50 min-h-[48px] min-w-[48px] flex items-center justify-center"
                     >
                       <FaBarcode size={20} />
-                    </button>
-                    <button
-                      onClick={() => setShowScanner(true)}
-                      className="px-4 py-3 bg-green-600 text-white hover:bg-green-700 min-h-[48px] min-w-[48px] flex items-center justify-center"
-                    >
-                      <FaCamera size={20} />
                     </button>
                   </div>
                 </div>
@@ -224,12 +271,12 @@ const AdminPOS = () => {
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-[#1B1B1B] truncate">{item.productId.name}</p>
                           <p className="text-sm text-[#4A4A4A]">
-                            {item.size} • {item.color?.name} • ${item.price}
+                            {[resultMeasure(item), item.color?.name].filter(Boolean).join(' • ')} • {formatBDT(item.price)}
                           </p>
                           <p className="text-xs text-[#4A4A4A]">Available: {item.availableQuantity}</p>
                         </div>
                         <div className="text-right flex-shrink-0 ml-2">
-                          <p className="text-sm font-medium text-[#1B1B1B]">${item.discountPrice || item.price}</p>
+                          <p className="text-sm font-medium text-[#1B1B1B]">{formatBDT(item.discountPrice || item.price)}</p>
                         </div>
                       </div>
                     </div>
@@ -270,13 +317,13 @@ const AdminPOS = () => {
                     {cart.map((item) => (
                       <div key={item.inventoryId} className="bg-[#FAF8F6] border border-[#BDBDBD] p-3 sm:p-4">
                         <div className="flex items-center justify-between">
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-[#1B1B1B] truncate">{item.productName}</p>
-                            <p className="text-sm text-[#4A4A4A]">
-                              {item.variantInfo.size} • {item.variantInfo.color}
-                            </p>
-                            <p className="text-xs text-[#4A4A4A] font-medium mt-1">${item.totalPrice.toFixed(2)}</p>
-                          </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-[#1B1B1B] truncate">{item.productName}</p>
+                          <p className="text-sm text-[#4A4A4A]">
+                            {[formatMeasureLine(item.variantInfo), item.variantInfo.color].filter(Boolean).join(' • ')}
+                          </p>
+                          <p className="text-xs text-[#4A4A4A] font-medium mt-1">{formatBDT(item.totalPrice)}</p>
+                        </div>
                           <button
                             onClick={() => removeFromCart(item.inventoryId)}
                             className="p-2 text-red-600 hover:text-red-800 min-w-[44px] min-h-[44px] flex items-center justify-center flex-shrink-0"
@@ -382,7 +429,7 @@ const AdminPOS = () => {
               <div className="space-y-3">
                 <div className="flex justify-between text-[#1B1B1B]">
                   <span>Subtotal:</span>
-                  <span>${subtotal.toFixed(2)}</span>
+                  <span>{formatBDT(subtotal)}</span>
                 </div>
                 <div className="flex items-center space-x-2 text-[#4A4A4A]">
                   <span>Tax (%):</span>
@@ -392,7 +439,7 @@ const AdminPOS = () => {
                     onChange={(e) => setTaxRate(parseFloat(e.target.value) || 0)}
                     className="w-16 px-2 py-1 border border-[#BDBDBD] text-sm bg-white text-[#1B1B1B] min-h-[36px]"
                   />
-                  <span>${taxAmount.toFixed(2)}</span>
+                  <span>{formatBDT(taxAmount)}</span>
                 </div>
                 <div className="flex items-center space-x-2 text-[#4A4A4A]">
                   <span>Discount (%):</span>
@@ -402,14 +449,26 @@ const AdminPOS = () => {
                     onChange={(e) => setDiscount(parseFloat(e.target.value) || 0)}
                     className="w-16 px-2 py-1 border border-[#BDBDBD] text-sm bg-white text-[#1B1B1B] min-h-[36px]"
                   />
-                  <span>${discountAmount.toFixed(2)}</span>
+                  <span>{formatBDT(discountAmount)}</span>
                 </div>
                 <div className="border-t border-[#BDBDBD] pt-2">
                   <div className="flex justify-between font-semibold text-lg text-[#1B1B1B]">
                     <span>Total:</span>
-                    <span>${total.toFixed(2)}</span>
+                    <span>{formatBDT(total)}</span>
                   </div>
                 </div>
+              </div>
+
+              <div className="mt-4 flex items-center justify-between gap-3">
+                <label className="block text-sm font-medium text-[#4A4A4A]">Receipt Paper</label>
+                <select
+                  value={Number(getStorage('posPaperWidth')) || 80}
+                  onChange={(e) => setStorage('posPaperWidth', e.target.value)}
+                  className="px-3 py-2 border border-[#BDBDBD] text-sm bg-white text-[#1B1B1B] min-h-[40px]"
+                >
+                  <option value={80}>80mm</option>
+                  <option value={58}>58mm</option>
+                </select>
               </div>
 
               <div className="mt-4">
@@ -439,7 +498,7 @@ const AdminPOS = () => {
                 ) : (
                   <>
                     <FaCashRegister className="mr-2" />
-                    Complete Sale - ${total.toFixed(2)}
+                    Complete Sale - {formatBDT(total)}
                   </>
                 )}
               </button>
@@ -447,13 +506,6 @@ const AdminPOS = () => {
           </div>
         </div>
       </div>
-
-      {/* QR Scanner Modal */}
-      <QRScanner
-        isOpen={showScanner}
-        onScan={handleQRScan}
-        onClose={() => setShowScanner(false)}
-      />
     </div>
   );
 };

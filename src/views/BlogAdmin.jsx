@@ -19,7 +19,7 @@ const BlogAdmin = () => {
 
   const [form, setForm] = useState({
     title: '', content: '', excerpt: '', coverImage: '',
-    author: 'Belorella', tags: '', category: 'General', status: 'draft',
+    author: 'BELORELLA', tags: '', category: 'General', status: 'draft',
     seo: { metaTitle: '', metaDescription: '', metaKeywords: '', ogImage: '' },
   });
 
@@ -81,7 +81,7 @@ const BlogAdmin = () => {
   const handleEdit = (blog) => {
     setForm({
       title: blog.title, content: blog.content, excerpt: blog.excerpt || '',
-      coverImage: blog.coverImage || '', author: blog.author || 'Belorella',
+      coverImage: blog.coverImage || '', author: blog.author || 'BELORELLA',
       tags: Array.isArray(blog.tags) ? blog.tags.join(', ') : blog.tags || '',
       category: blog.category || 'General', status: blog.status || 'draft',
       seo: { metaTitle: blog.seo?.metaTitle || '', metaDescription: blog.seo?.metaDescription || '', metaKeywords: blog.seo?.metaKeywords || '', ogImage: blog.seo?.ogImage || '' },
@@ -93,7 +93,7 @@ const BlogAdmin = () => {
   const resetForm = () => {
     setForm({
       title: '', content: '', excerpt: '', coverImage: '',
-      author: 'Belorella', tags: '', category: 'General', status: 'draft',
+      author: 'BELORELLA', tags: '', category: 'General', status: 'draft',
       seo: { metaTitle: '', metaDescription: '', metaKeywords: '', ogImage: '' },
     });
   };

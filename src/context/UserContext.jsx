@@ -4,6 +4,7 @@ import React, { createContext, useState, useEffect } from 'react';
 import { useRouter } from "next/navigation";
 import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
+import { withDevice } from '../lib/device';
 
 export const UserContext = createContext();
 
@@ -22,6 +23,8 @@ export const UserProvider = ({ children }) => {
   const [errorMessage, setErrorMessage] = useState('');
   const [wishlist, setWishlist] = useState([]);
   const [userHydrated, setUserHydrated] = useState(false);
+  // Google sign-ups have no real password yet -> force the user to choose one
+  const [mustSetPassword, setMustSetPassword] = useState(false);
 
   const pickDefaultPaymentMethod = (methods = []) =>
     methods.find((m) => m.isDefault) || methods[0] || null;
@@ -33,6 +36,26 @@ export const UserProvider = ({ children }) => {
     } catch {
       return true;
     }
+  };
+
+  const clearLocalSession = () => {
+    setUser(null);
+    setIsLoggedIn(false);
+    setAddress(null);
+    setPaymentMethods([]);
+    setDefaultPaymentMethod(null);
+    setWishlist([]);
+    setMustSetPassword(false);
+    removeStorage('user');
+    removeStorage('accessToken');
+    removeStorage('refreshToken');
+    delete axios.defaults.headers.common.Authorization;
+  };
+
+  const invalidateSession = (message = 'Your account is not allowed to sign in') => {
+    clearLocalSession();
+    setErrorMessage(message);
+    setRedirectPath('/login');
   };
 
   const refreshAccessToken = async () => {
@@ -48,6 +71,10 @@ export const UserProvider = ({ children }) => {
 
       return newAccessToken;
     } catch (error) {
+      if (error.response?.data?.banned) {
+        invalidateSession(error.response.data.message);
+        throw error;
+      }
       console.error('Error refreshing token:', error);
       logout();
       throw error;
@@ -84,6 +111,10 @@ export const UserProvider = ({ children }) => {
       });
       return res.data;
     } catch (error) {
+      if (error.response?.data?.banned) {
+        invalidateSession(error.response.data.message);
+        throw error;
+      }
       if (error.response?.status === 401) {
         try {
           accessToken = await refreshAccessToken();
@@ -131,7 +162,11 @@ export const UserProvider = ({ children }) => {
       fetchWishlist();
       setStorage('user', JSON.stringify(freshUser));
     } catch (error) {
-      console.error('Failed to fetch user data:', error);
+      if (error.response?.data?.banned) {
+        invalidateSession(error.response.data.message);
+      } else {
+        console.error('Failed to fetch user data:', error);
+      }
       // Stay in guest mode instead of forcing redirect to login for public pages
       setUser(null);
       setIsLoggedIn(false);
@@ -155,8 +190,7 @@ export const UserProvider = ({ children }) => {
 
     const token = getStorage('accessToken');
     if (token) axios.defaults.headers.common.Authorization = `Bearer ${token}`;
-    fetchUser();
-    setUserHydrated(true);
+    fetchUser().finally(() => setUserHydrated(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -183,31 +217,70 @@ export const UserProvider = ({ children }) => {
     return () => clearInterval(interval);
   }, []);
 
+  const applySession = (loggedInUser, accessToken, refreshToken) => {
+    setUser(loggedInUser);
+    setIsLoggedIn(true);
+
+    const addr = loggedInUser.address || null;
+    const methods = loggedInUser.paymentMethods || [];
+
+    setAddress(addr);
+    setPaymentMethods(methods);
+    setDefaultPaymentMethod(pickDefaultPaymentMethod(methods));
+
+    setStorage('user', JSON.stringify(loggedInUser));
+    setStorage('accessToken', accessToken);
+    setStorage('refreshToken', refreshToken);
+
+    axios.defaults.headers.common.Authorization = `Bearer ${accessToken}`;
+    fetchWishlist();
+    // Hold the redirect while the user still has to pick a password
+    if (!loggedInUser.mustSetPassword) setRedirectPath('/');
+    setMustSetPassword(Boolean(loggedInUser.mustSetPassword));
+  };
+
+  // After a Google sign-up: choose a real password (email stays verified)
+  const setPassword = async (password, extras = {}) => {
+    try {
+      const { data } = await axios.put(`${API}/api/auth/set-password`, { password, ...extras });
+      const updatedUser = { ...(user || {}), ...(data.user || {}), mustSetPassword: false };
+      setUser(updatedUser);
+      setAddress(updatedUser.address || null);
+      setStorage('user', JSON.stringify(updatedUser));
+      setMustSetPassword(false);
+      setRedirectPath('/');
+      return data;
+    } catch (error) {
+      setErrorMessage(error.response?.data?.message || 'Failed to set password');
+      throw error;
+    }
+  };
+
   const login = async (emailOrPhone, password) => {
     try {
-      const response = await axios.post(`${API}/api/login`, { emailOrPhone, password });
+      const response = await axios.post(`${API}/api/login`, withDevice({ emailOrPhone, password }));
       const { user: loggedInUser, accessToken, refreshToken } = response.data;
 
-      setUser(loggedInUser);
-      setIsLoggedIn(true);
-
-      const addr = loggedInUser.address || null;
-      const methods = loggedInUser.paymentMethods || [];
-
-      setAddress(addr);
-      setPaymentMethods(methods);
-      setDefaultPaymentMethod(pickDefaultPaymentMethod(methods));
-
-      setStorage('user', JSON.stringify(loggedInUser));
-      setStorage('accessToken', accessToken);
-      setStorage('refreshToken', refreshToken);
-
-      axios.defaults.headers.common.Authorization = `Bearer ${accessToken}`;
-      fetchWishlist();
-      setRedirectPath('/');
+      applySession(loggedInUser, accessToken, refreshToken);
     } catch (error) {
-      console.error('Login error:', error);
+      if (!error.response?.data?.banned) console.error('Login error:', error);
       setErrorMessage(error.response?.data?.message || 'Login failed');
+      throw error;
+    }
+  };
+
+  // Google Sign-In / Sign-Up: sends the Google ID token to the backend,
+  // which verifies it, finds-or-creates the user and returns a session
+  const loginWithGoogle = async (credential) => {
+    try {
+      const response = await axios.post(`${API}/api/auth/google`, withDevice({ credential }));
+      const { user: loggedInUser, accessToken, refreshToken } = response.data;
+
+      applySession(loggedInUser, accessToken, refreshToken);
+      return loggedInUser;
+    } catch (error) {
+      console.error('Google login error:', error);
+      setErrorMessage(error.response?.data?.message || 'Google sign-in failed');
       throw error;
     }
   };
@@ -251,20 +324,12 @@ export const UserProvider = ({ children }) => {
         });
       }
     } catch (error) {
-      console.warn('Logout API failed:', error);
+      if (!error.response?.data?.banned) {
+        console.warn('Logout API failed:', error);
+      }
     }
 
-    setUser(null);
-    setIsLoggedIn(false);
-    setAddress(null);
-    setPaymentMethods([]);
-    setDefaultPaymentMethod(null);
-
-    removeStorage('user');
-    removeStorage('accessToken');
-    removeStorage('refreshToken');
-
-    delete axios.defaults.headers.common.Authorization;
+    clearLocalSession();
     setRedirectPath('/login');
   };
 
@@ -323,12 +388,17 @@ export const UserProvider = ({ children }) => {
       value={{
         user,
         isLoggedIn,
+        userHydrated,
         address,
         paymentMethods,
         defaultPaymentMethod,
         errorMessage,
         login,
+        loginWithGoogle,
+        setPassword,
+        mustSetPassword,
         logout,
+        invalidateSession,
         register,
         authRequest,
         updateProfile,

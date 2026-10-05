@@ -99,7 +99,12 @@ const ProductEdit = () => {
         stockBySize: Array.isArray(v.stockBySize) ? v.stockBySize : [],
         description: v.description || '',
         images: Array.isArray(v.images) ? v.images : [],
-        shippingIds: Array.isArray(v.shippingOptions) ? v.shippingOptions.map(o => o._id || o.shippingId).filter(Boolean) : [],
+        // shippingOptions subdoc _ids are NOT Shipping collection ids (that bug
+        // left the multi-select empty on every edit) — the API now returns real
+        // shippingIds, healed server-side for legacy products.
+        shippingIds: Array.isArray(v.shippingIds)
+          ? v.shippingIds.map(oid => String(oid._id || oid))
+          : [],
         specifications: Array.isArray(v.specifications) ? v.specifications : [],
         measureType: v.measureType || prod.measureType || '',
         unitName: v.unitName || prod.unitName || '',
@@ -157,6 +162,16 @@ const ProductEdit = () => {
       console.error('Error fetching product:', error);
     }
   };
+
+  // Keep unitName in sync with the catalog entry for the selected measure type
+  // (legacy products may have a measureType but no/older unitName on file).
+  useEffect(() => {
+    if (!product.measureType || !measureTypes?.length) return;
+    const opt = measureTypes.find(m => m.measureType === product.measureType);
+    if (opt?.unitName && opt.unitName !== product.unitName) {
+      setProduct(prev => (prev.unitName === opt.unitName ? prev : { ...prev, unitName: opt.unitName }));
+    }
+  }, [measureTypes, product.measureType, product.unitName]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -495,13 +510,8 @@ const ProductEdit = () => {
       });
       setSuccessMessage('Product updated successfully!');
       
-      if (socketRef.current) {
-        socketRef.current.emit('productUpdated', {
-          productId: id,
-          updateType: 'product_updated',
-          timestamp: new Date()
-        });
-      }
+      // Note: the backend emits the socket 'productUpdate' event itself on save —
+      // emitting here as well delivered the event twice (duplicate live updates).
       
       loadProduct();
       setNewVariantImages({});
@@ -870,7 +880,7 @@ const ProductEdit = () => {
                               className="w-full px-3 py-2 border border-cool-gray bg-white text-black focus:outline-none focus:ring-2 focus:ring-charcoal min-h-[80px]"
                             >
                               {shippingTypes.map(s => (
-                                <option key={s._id} value={s._id}>{s.name} (${Number(s.charge).toFixed(2)}, {s.estimatedDays}d)</option>
+                                <option key={s._id} value={s._id}>{s.name} (BDT {Number(s.charge).toFixed(2)}, {s.estimatedDays}d)</option>
                               ))}
                             </select>
                             <button type="button" className="text-xs text-maybelline-pink underline self-start" onClick={()=>{

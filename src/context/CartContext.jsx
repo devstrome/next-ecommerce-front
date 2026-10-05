@@ -3,11 +3,26 @@ import { getStorage, setStorage, removeStorage } from "../lib/storage"
 import React, { createContext, useState, useMemo, useEffect, useContext, useCallback, useRef } from 'react';
 import { UserContext } from './UserContext';
 import axios from 'axios';
+import { io } from 'socket.io-client';
 
 export const CartContext = createContext();
 
+const normalizeCartCoupon = (coupon, discountAmount) => {
+  if (!coupon) return null;
+  const couponData = typeof coupon === 'object'
+    ? coupon
+    : { _id: String(coupon) };
+  return {
+    ...couponData,
+    discount: Number(discountAmount) || 0,
+  };
+};
+
+const getCouponId = (coupon) =>
+  typeof coupon === 'object' ? coupon?._id || null : coupon || null;
+
 export const CartProvider = ({ children }) => {
-  const { user, isLoggedIn } = useContext(UserContext);
+  const { user, isLoggedIn, userHydrated, invalidateSession } = useContext(UserContext);
   // Cart starts empty on both server and client first render (hydration-safe),
   // then is restored from storage / server in the sync effect below.
   const [cartItems, setCartItems] = useState([]);
@@ -35,7 +50,7 @@ export const CartProvider = ({ children }) => {
 }, []);
 
   const fetchCart = useCallback(async () => {
-    if (!user?._id) return;
+    if (!isLoggedIn || !user?._id) return;
     try {
       const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/cart/${user._id}`, {
         headers: {
@@ -44,16 +59,20 @@ export const CartProvider = ({ children }) => {
       });
       const formattedItems = res.data.items.map(formatCartItem);
       setCartItems(formattedItems);
-      setCoupon(res.data.couponId);
+      setCoupon(normalizeCartCoupon(res.data.couponId, res.data.discountAmount));
       setDiscount(res.data.discountAmount || 0);
     } catch (error) {
-      console.error('Failed to fetch cart:', error);
+      if (error.response?.data?.banned) {
+        invalidateSession(error.response.data.message);
+      } else {
+        console.error('Failed to fetch cart:', error);
+      }
     }
-  }, [user?._id, formatCartItem]);
+  }, [isLoggedIn, user?._id, formatCartItem, invalidateSession]);
   
 
 const syncCart = useCallback(async (localCartItems = []) => {
-  if (!user?._id) {
+  if (!isLoggedIn || !user?._id) {
     console.warn("Sync skipped: user ID missing");
     return false;
   }
@@ -98,14 +117,18 @@ const syncCart = useCallback(async (localCartItems = []) => {
     const items = cartLike.items || [];
 
     setCartItems(items.map(formatCartItem));
-    setCoupon(cartLike.couponId ?? null);
+    setCoupon(normalizeCartCoupon(cartLike.couponId, cartLike.discountAmount));
     setDiscount(cartLike.discountAmount ?? 0);
     return true;
   } catch (error) {
-    console.error("Sync error:", error.response?.data || error.message);
+    if (error.response?.data?.banned) {
+      invalidateSession(error.response.data.message);
+    } else {
+      console.error("Sync error:", error.response?.data || error.message);
+    }
     return false;
   }
-}, [user?._id, formatCartItem]);
+}, [isLoggedIn, user?._id, formatCartItem, invalidateSession]);
 
 
   const updateQuantity = useCallback(async (itemIdentifier, newQuantity) => {
@@ -128,13 +151,13 @@ const syncCart = useCallback(async (localCartItems = []) => {
       {
         userId: user._id,
         quantity: numericQuantity,
-        couponId: coupon,
+        couponId: getCouponId(coupon),
       }
     );
 
     setCartItems(data.cart.items.map(formatCartItem));
     setDiscount(data.totals?.totalDiscount ?? data.cart.discountAmount ?? 0);
-    setCoupon(data.cart.couponId || null);
+    setCoupon(normalizeCartCoupon(data.cart.couponId, data.cart.discountAmount));
   } catch (error) {
     console.error("Update error:", error.response?.data || error.message);
   }
@@ -144,10 +167,36 @@ const syncCart = useCallback(async (localCartItems = []) => {
   const fetchCartRef = useRef(fetchCart);
   useEffect(() => { syncCartRef.current = syncCart; }, [syncCart]);
   useEffect(() => { fetchCartRef.current = fetchCart; }, [fetchCart]);
+
+  // Live store sync: when an admin changes coupons / checkout rules / shipping /
+  // product prices, the server revalidates carts and pushes events here.
+  const userIdRef = useRef(user?._id);
+  useEffect(() => { userIdRef.current = user?._id; }, [user?._id]);
+  useEffect(() => {
+    const API_URI = process.env.NEXT_PUBLIC_API_URI;
+    if (!API_URI || !userHydrated || !isLoggedIn || !user?._id) return;
+    let disposed = false;
+    const socket = io(API_URI, { auth: { token: getStorage('accessToken') }, transports: ['websocket', 'polling'] });
+    socket.on('connect', () => socket.emit('joinUserRoom', user._id));
+    socket.on('cart:updated', (data) => {
+      if (disposed) return;
+      if (data?.userId && data.userId !== String(userIdRef.current)) return;
+      fetchCartRef.current();
+    });
+    socket.on('storeChanged', () => {
+      if (disposed) return;
+      // New price/coupon/shipping rule may already be reflected server-side
+      fetchCartRef.current();
+      window.dispatchEvent(new CustomEvent('storeChanged'));
+    });
+    return () => { disposed = true; socket.disconnect(); };
+  }, [userHydrated, isLoggedIn, user?._id]);
+
   const hasSyncedRef = useRef(false);
 
   useEffect(() => {
     const handleCartSync = async () => {
+      if (!userHydrated) return;
       if (isLoggedIn && user?._id) {
         if (hasSyncedRef.current) { setCartHydrated(true); return; }
         hasSyncedRef.current = true;
@@ -176,7 +225,7 @@ const syncCart = useCallback(async (localCartItems = []) => {
     };
 
     handleCartSync();
-  }, [isLoggedIn, user?._id, formatCartItem]);
+  }, [userHydrated, isLoggedIn, user?._id, formatCartItem]);
 
   useEffect(() => {
     if (!cartHydrated) return;
@@ -211,7 +260,6 @@ const syncCart = useCallback(async (localCartItems = []) => {
       { couponCode }
     );
 
-    console.log('Coupon apply response:', res.data);
 
     if (!res.data.success) {
       return { 
@@ -230,7 +278,6 @@ const syncCart = useCallback(async (localCartItems = []) => {
       }
     );
 
-    console.log('Cart fetch after coupon:', cartRes.data);
 
     const getProductId = (p) => typeof p === 'string' ? p : p._id || p;
 
@@ -241,7 +288,7 @@ const syncCart = useCallback(async (localCartItems = []) => {
 
     setCartItems(() => [...freshItems]);
     setDiscount(cartRes.data.discountAmount || 0);
-    setCoupon({ code: couponCode, discount: cartRes.data.discountAmount || 0 });
+    setCoupon(normalizeCartCoupon(cartRes.data.couponId, cartRes.data.discountAmount));
 
     return { success: true, message: "Coupon applied successfully!" };
 
@@ -329,7 +376,7 @@ const addToCart = useCallback(async (product) => {
     const { cart, totals } = data;
     setCartItems(cart.items.map(formatCartItem));
     setDiscount(totals?.totalDiscount ?? cart.discountAmount ?? 0);
-    setCoupon(cart.couponId || null);
+    setCoupon(normalizeCartCoupon(cart.couponId, totals?.totalDiscount ?? cart.discountAmount));
   } catch (error) {
     console.error("Error adding item to cart:", error);
     setCartItems(snapshot); // rollback
@@ -366,13 +413,13 @@ const addToCart = useCallback(async (product) => {
       `${process.env.NEXT_PUBLIC_API_URI}/api/cart/items/${itemIdentifier}/increase`,
       {
         userId: user._id,
-        couponId: coupon ?? undefined, // optional
+        couponId: getCouponId(coupon) ?? undefined, // optional
       }
     );
 
     setCartItems(data.cart.items.map(formatCartItem));
     setDiscount(data.totals?.totalDiscount ?? data.cart.discountAmount ?? 0);
-    setCoupon(data.cart.couponId || null);
+    setCoupon(normalizeCartCoupon(data.cart.couponId, data.cart.discountAmount));
   } catch (error) {
     console.error("Failed to increase quantity:", error);
     setCartItems(snapshot); // rollback
@@ -412,13 +459,13 @@ const decreaseQuantity = useCallback(async (itemIdentifier) => {
       `${process.env.NEXT_PUBLIC_API_URI}/api/cart/items/${itemIdentifier}/decrease`,
       {
         userId: user._id,
-        couponId: coupon ?? undefined,
+        couponId: getCouponId(coupon) ?? undefined,
       }
     );
 
     setCartItems(data.cart.items.map(formatCartItem));
     setDiscount(data.totals?.totalDiscount ?? data.cart.discountAmount ?? 0);
-    setCoupon(data.cart.couponId || null);
+    setCoupon(normalizeCartCoupon(data.cart.couponId, data.cart.discountAmount));
   } catch (error) {
     console.error("Failed to decrease quantity:", error);
     setCartItems(snapshot); // rollback
@@ -439,7 +486,7 @@ const decreaseQuantity = useCallback(async (itemIdentifier) => {
 
     setCartItems(data.cart.items.map(formatCartItem));
     setDiscount(data.totals?.totalDiscount ?? data.cart.discountAmount ?? 0);
-    setCoupon(data.cart.couponId || null);
+    setCoupon(normalizeCartCoupon(data.cart.couponId, data.cart.discountAmount));
   } catch (error) {
     console.error("Error removing item from cart:", error.response?.data || error.message);
   }
