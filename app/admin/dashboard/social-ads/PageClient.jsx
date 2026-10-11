@@ -1,6 +1,6 @@
 'use client'
 import { getStorage } from '../../../../src/lib/storage'
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import axios from 'axios'
 import { toast } from 'react-toastify'
 import {
@@ -9,6 +9,11 @@ import {
   FiX, FiCheckCircle, FiHash
 } from 'react-icons/fi'
 import { FaFacebookF, FaInstagram, FaYoutube, FaTwitter } from 'react-icons/fa'
+
+const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000'
+const authHeaders = () => ({
+  headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` }
+})
 
 const PLATFORM_COLORS = {
   facebook: '#1877F2',
@@ -47,14 +52,10 @@ export default function PageClient() {
   const [filterPlatform, setFilterPlatform] = useState('all')
   const [form, setForm] = useState(emptyForm)
 
-  const authHeaders = () => ({
-    headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` }
-  })
-
-  const fetchAds = async () => {
+  const fetchAds = useCallback(async () => {
     try {
       setLoading(true)
-      const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/admin/social-ads`, authHeaders())
+      const res = await axios.get(`${API_URI}/api/admin/social-ads`, authHeaders())
       setAds(res.data.ads || res.data || [])
     } catch (err) {
       toast.error('Failed to fetch ads')
@@ -62,21 +63,21 @@ export default function PageClient() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
-      const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/admin/social-ads/stats`, authHeaders())
+      const res = await axios.get(`${API_URI}/api/admin/social-ads/stats`, authHeaders())
       setStats(res.data.stats || res.data || {})
     } catch (err) {
       console.error(err)
     }
-  }
+  }, [])
 
   useEffect(() => {
     fetchAds()
     fetchStats()
-  }, [])
+  }, [fetchAds, fetchStats])
 
   const filteredAds = filterPlatform === 'all'
     ? ads

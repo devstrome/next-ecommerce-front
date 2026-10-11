@@ -19,6 +19,7 @@ import OrdersUser from "../views/OrdersUser";
 import OrderDetails from "../views/OrderDetails";
 import OrderConfirmationPage from "../views/OrderConfirmation";
 import WishlistPage from "../views/WishlistPage";
+import UserLoyalty from "../views/UserLoyalty";
 
 import AdminLogin from "../views/AdminLogin";
 import AdminDashBoard from "../views/AdminDashBoard";
@@ -52,6 +53,7 @@ import AdminInventory from "../views/AdminInventory";
 import AdminPOS from "../views/AdminPOS";
 import AdminPOSOrders from "../views/AdminPOSOrders";
 import AdminWishlists from "../views/AdminWishlists";
+import AdminLoyalty from "../views/AdminLoyalty";
 import CourierTracking from "../views/CourierTracking";
 
 import { POSProvider } from "../context/POSContext";
@@ -79,6 +81,7 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <UserProfile /> },
           { path: "orders", element: <OrdersUser /> },
+          { path: "loyalty", element: <UserLoyalty /> },
           { path: "orders/:orderId", element: <OrderDetails /> },
           { path: "orders/order-confirmation/:orderId", element: <OrderConfirmationPage /> },
         ],
@@ -127,6 +130,7 @@ export const router = createBrowserRouter([
               { path: "pos", element: <POSProvider><AdminPOS /></POSProvider> },
               { path: "pos-orders", element: <AdminPOSOrders /> },
               { path: "wishlists", element: <AdminWishlists /> },
+              { path: "loyalty", element: <AdminLoyalty /> },
             ],
           },
         ],

@@ -13,6 +13,7 @@ const ProductCRUDPage = () => {
   const [expandedProducts, setExpandedProducts] = useState(new Set());
   const [stockFilter, setStockFilter] = useState('all');
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [generatingSkuIds, setGeneratingSkuIds] = useState(new Set());
   const router = useRouter();
 
   const authHeaders = () => ({ headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` } });
@@ -71,7 +72,7 @@ const ProductCRUDPage = () => {
     });
   };
 
-  const missingSkuCount = products.filter(p => !p.sku).length;
+  const missingSkuCount = products.filter(p => !String(p.sku || '').trim()).length;
 
   const handleGenerateSKUs = async () => {
     if (!window.confirm(`Generate SKUs for ${missingSkuCount} product(s) without one?`)) return;
@@ -88,6 +89,31 @@ const ProductCRUDPage = () => {
     } catch (error) {
       console.error('Error generating SKUs:', error);
       alert(error.response?.data?.message || 'Failed to generate SKUs');
+    }
+  };
+
+  const handleGenerateProductSKU = async (productId) => {
+    setGeneratingSkuIds((current) => new Set(current).add(productId));
+    try {
+      const response = await axios.post(
+        `${process.env.NEXT_PUBLIC_API_URI}/api/products/${productId}/generate-sku`,
+        {},
+        authHeaders()
+      );
+      const sku = response.data?.sku;
+      if (!sku) throw new Error('The server did not return a SKU');
+      setProducts((current) => current.map((product) =>
+        product._id === productId ? { ...product, sku } : product
+      ));
+    } catch (error) {
+      console.error('Error generating product SKU:', error);
+      alert(error.response?.data?.message || error.message || 'Failed to generate SKU');
+    } finally {
+      setGeneratingSkuIds((current) => {
+        const next = new Set(current);
+        next.delete(productId);
+        return next;
+      });
     }
   };
 
@@ -429,7 +455,17 @@ const ProductCRUDPage = () => {
                       </td>
                       <td className="py-3 px-4 text-dark-gray">{product._shippingLabel}</td>
                       <td className="py-3 px-4">
-                        <div className="flex space-x-2">
+                        <div className="flex flex-wrap gap-2">
+                          {!String(product.sku || '').trim() && (
+                            <button
+                              className="flex items-center bg-amber-500 text-white px-3 py-2 text-sm hover:bg-amber-600 transition min-h-[44px] min-w-[44px] justify-center disabled:opacity-60"
+                              onClick={() => handleGenerateProductSKU(product._id)}
+                              disabled={generatingSkuIds.has(product._id)}
+                              title="Generate a SKU for this product"
+                            >
+                              <FaBarcode className="mr-1" /> {generatingSkuIds.has(product._id) ? 'Generating…' : 'Generate SKU'}
+                            </button>
+                          )}
                           <button
                             className="flex items-center bg-black text-white px-3 py-2 text-sm hover:bg-maybelline-pink transition min-h-[44px] min-w-[44px] justify-center"
                             onClick={() => router.push(`./${product._id}`)}
@@ -504,6 +540,15 @@ const ProductCRUDPage = () => {
                         )}
                       </div>
                     </div>
+                    {!String(product.sku || '').trim() && (
+                      <button
+                        className="w-full flex items-center justify-center bg-amber-500 text-white px-4 py-3 mt-3 text-sm font-medium hover:bg-amber-600 transition min-h-[44px] disabled:opacity-60"
+                        onClick={() => handleGenerateProductSKU(product._id)}
+                        disabled={generatingSkuIds.has(product._id)}
+                      >
+                        <FaBarcode className="mr-2" /> {generatingSkuIds.has(product._id) ? 'Generating SKU…' : 'Generate SKU'}
+                      </button>
+                    )}
                     <div className="flex gap-3 mt-3">
                       <button
                         className="flex-1 flex items-center justify-center bg-black text-white px-4 py-3 text-sm font-medium hover:bg-maybelline-pink transition min-h-[44px]"

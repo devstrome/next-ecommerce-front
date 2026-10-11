@@ -1,5 +1,5 @@
 'use client'
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import Link from 'next/link';
 import { getStorage } from '../../../../src/lib/storage';
@@ -22,7 +22,7 @@ export default function HelpPagesList() {
 
   const authHeaders = () => ({ headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` } });
 
-  const fetchPages = async () => {
+  const fetchPages = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -35,9 +35,9 @@ export default function HelpPagesList() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { fetchPages(); }, []);
+  useEffect(() => { fetchPages(); }, [fetchPages]);
 
   return (
     <div className="p-6 max-w-5xl mx-auto">

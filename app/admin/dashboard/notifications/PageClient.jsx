@@ -1,5 +1,5 @@
 'use client'
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { getStorage } from '../../../../src/lib/storage';
 import { FiMail, FiSend, FiTrash2, FiPlus, FiEye, FiEyeOff, FiRefreshCw, FiUsers, FiUserPlus, FiSearch, FiChevronDown, FiChevronRight, FiAlertCircle } from 'react-icons/fi';
@@ -24,9 +24,9 @@ export default function NotificationsPageClient() {
   const [showSubscribers, setShowSubscribers] = useState(false);
   const [error, setError] = useState('');
 
-  const authHeaders = () => ({ headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` } });
+  const authHeaders = useCallback(() => ({ headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` } }), []);
 
-  const fetchNewsletters = async () => {
+  const fetchNewsletters = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -38,21 +38,22 @@ export default function NotificationsPageClient() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [authHeaders]);
 
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       const res = await axios.get(`${API_URI}/api/admin/subscribers/stats`, authHeaders());
       setStats(res.data);
     } catch (err) {
       console.error('Failed to fetch stats:', err);
     }
-  };
+  }, [authHeaders]);
 
-  const fetchSubscribers = async (page = 1) => {
+  const fetchSubscribers = useCallback(async (page = 1, searchTerm = '') => {
     setSubLoading(true);
     try {
-      const res = await axios.get(`${API_URI}/api/admin/subscribers?page=${page}&limit=20&search=${subSearch}`, authHeaders());
+      const params = new URLSearchParams({ page: String(page), limit: '20', search: searchTerm });
+      const res = await axios.get(`${API_URI}/api/admin/subscribers?${params}`, authHeaders());
       setSubscribers(res.data.subscribers);
       setSubPagination(res.data.pagination);
     } catch (err) {
@@ -60,27 +61,27 @@ export default function NotificationsPageClient() {
     } finally {
       setSubLoading(false);
     }
-  };
+  }, [authHeaders]);
 
   useEffect(() => {
     fetchNewsletters();
     fetchStats();
-  }, []);
+  }, [fetchNewsletters, fetchStats]);
 
   useEffect(() => {
-    if (showSubscribers) fetchSubscribers(1);
-  }, [showSubscribers]);
+    if (showSubscribers) fetchSubscribers(1, '');
+  }, [showSubscribers, fetchSubscribers]);
 
   const handleSubSearch = (e) => {
     e.preventDefault();
-    fetchSubscribers(1);
+    fetchSubscribers(1, subSearch.trim());
   };
 
   const handleDeleteSubscriber = async (id) => {
     if (!confirm('Delete this subscriber?')) return;
     try {
       await axios.delete(`${API_URI}/api/admin/subscribers/${id}`, authHeaders());
-      fetchSubscribers(subPagination.page);
+      fetchSubscribers(subPagination.page, subSearch.trim());
       fetchStats();
     } catch (err) {
       alert('Failed to delete subscriber');
@@ -264,9 +265,11 @@ export default function NotificationsPageClient() {
               </button>
             </div>
             {preview ? (
-              <div
-                className="w-full border border-cool-gray rounded-lg p-4 text-sm min-h-[200px] prose prose-sm max-w-none"
-                dangerouslySetInnerHTML={{ __html: form.htmlContent }}
+              <iframe
+                title="Newsletter preview"
+                sandbox=""
+                srcDoc={form.htmlContent}
+                className="w-full border border-cool-gray rounded-lg min-h-[240px] bg-white"
               />
             ) : (
               <textarea
@@ -445,14 +448,14 @@ export default function NotificationsPageClient() {
                 </span>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => fetchSubscribers(subPagination.page - 1)}
+                    onClick={() => fetchSubscribers(subPagination.page - 1, subSearch.trim())}
                     disabled={subPagination.page <= 1}
                     className="px-3 py-1 border border-cool-gray rounded text-sm disabled:opacity-50 hover:bg-gray-50"
                   >
                     Prev
                   </button>
                   <button
-                    onClick={() => fetchSubscribers(subPagination.page + 1)}
+                    onClick={() => fetchSubscribers(subPagination.page + 1, subSearch.trim())}
                     disabled={subPagination.page >= subPagination.pages}
                     className="px-3 py-1 border border-cool-gray rounded text-sm disabled:opacity-50 hover:bg-gray-50"
                   >

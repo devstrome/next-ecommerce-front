@@ -1,6 +1,6 @@
 'use client'
 import { getStorage, setStorage, removeStorage } from "../lib/storage"
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { toast } from 'react-toastify';
 import { 
   FaUsers, FaPlus, FaEdit, FaTrash, FaEye, FaEyeSlash, 
@@ -26,9 +26,7 @@ const AdminCrudPage = () => {
 
   const getAdminToken = () => {
     return getStorage("adminAccessToken") || 
-           getStorage("adminToken") || 
-           getStorage("adminRefreshToken") || 
-           getStorage("accessToken");
+           getStorage("adminToken");
   };
 
   const formatDate = (date) => {
@@ -46,7 +44,7 @@ const AdminCrudPage = () => {
     });
   };
 
-  const fetchAdmins = async () => {
+  const fetchAdmins = useCallback(async () => {
     try {
       const token = getAdminToken();
       if (!token) {
@@ -70,7 +68,7 @@ const AdminCrudPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [API_URI]);
 
   const addAdmin = async (adminData) => {
     try {
@@ -87,6 +85,9 @@ const AdminCrudPage = () => {
       formData.append('userName', adminData.userName);
       formData.append('password', adminData.password);
       formData.append('superAdmin', adminData.superAdmin || false);
+      formData.append('role', adminData.role || (adminData.superAdmin ? 'super_admin' : 'custom'));
+      formData.append('roleName', adminData.roleName || '');
+      formData.append('permissions', JSON.stringify(adminData.permissions || []));
       
       if (adminData.image) {
         formData.append('image', adminData.image);
@@ -127,6 +128,9 @@ const AdminCrudPage = () => {
         formData.append('password', updatedAdmin.password);
       }
       formData.append('superAdmin', updatedAdmin.superAdmin || false);
+      formData.append('role', updatedAdmin.role || (updatedAdmin.superAdmin ? 'super_admin' : 'custom'));
+      formData.append('roleName', updatedAdmin.roleName || '');
+      formData.append('permissions', JSON.stringify(updatedAdmin.permissions || []));
       
       if (updatedAdmin.image) {
         formData.append('image', updatedAdmin.image);
@@ -204,7 +208,7 @@ const AdminCrudPage = () => {
     if (isSuperAdmin) {
       fetchAdmins();
     }
-  }, [isSuperAdmin]);
+  }, [isSuperAdmin, fetchAdmins]);
 
   if (authLoading) {
     return (

@@ -48,7 +48,7 @@ const AdminProfile = () => {
               />
             ) : (
               <div className="bg-white shadow-md rounded-lg p-6">
-                <p className="text-[#4A4A4A]">Click "Edit Profile" to update your information.</p>
+                <p className="text-[#4A4A4A]">Click &quot;Edit Profile&quot; to update your information.</p>
               </div>
             )}
           </div>

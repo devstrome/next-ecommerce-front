@@ -3,19 +3,22 @@ import React, { useState, useEffect } from 'react';
 import { FaTimes, FaArrowRight } from 'react-icons/fa';
 import axios from 'axios';
 
+const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
+
 const PopupAd = () => {
   const [ad, setAd] = useState(null);
 
   useEffect(() => {
-    if (sessionStorage.getItem('popupAdShown')) return;
     let timer;
     let cancelled = false;
-    axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/popup-ads/active`)
+    axios.get(`${API_URI}/api/popup-ads/active`)
       .then((res) => {
         const active = res.data;
         if (!cancelled && Array.isArray(active) && active.length > 0) {
-          const pick = active[Math.floor(Math.random() * active.length)];
-          timer = setTimeout(() => setAd(pick), 2000);
+          const urgent = active.filter((item) => item.isUrgent);
+          const candidates = urgent.length ? urgent : active;
+          const pick = candidates[Math.floor(Math.random() * candidates.length)];
+          timer = setTimeout(() => setAd(pick), pick.isUrgent ? 250 : 2000);
         }
       })
       .catch(() => {});
@@ -24,7 +27,6 @@ const PopupAd = () => {
 
   const handleClose = () => {
     setAd(null);
-    sessionStorage.setItem('popupAdShown', '1');
   };
 
   useEffect(() => {

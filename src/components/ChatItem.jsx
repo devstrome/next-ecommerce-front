@@ -2,7 +2,7 @@
 import React from "react";
 import { BiCheck, BiCheckDouble, BiX } from "react-icons/bi";
 
-const ChatItem = ({ customer, lastMessage, isActive, onClick, unreadCount = 0, isGuest = false, isClosed = false, assignedAdmin = null }) => {
+const ChatItem = ({ customer, lastMessage, isOnline = false, onClick, unreadCount = 0, isGuest = false, isClosed = false, assignedAdmin = null }) => {
   const formatTime = (date) => {
     const now = new Date();
     const messageDate = new Date(date);
@@ -30,7 +30,7 @@ const ChatItem = ({ customer, lastMessage, isActive, onClick, unreadCount = 0, i
               : customer.email || 'Customer'}
             className="w-12 h-12 rounded-full object-cover"
           />
-          {isActive && !isClosed && (
+          {isOnline && !isClosed && (
             <span className="absolute bottom-0 right-0 block h-3 w-3 bg-green-400 rounded-full ring-2 ring-white"></span>
           )}
           {isClosed && (

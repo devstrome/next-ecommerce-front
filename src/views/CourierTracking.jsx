@@ -1,5 +1,5 @@
 'use client'
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import { FaTruck, FaSearch, FaSync, FaExternalLinkAlt, FaBox, FaCheckCircle, FaClock, FaTimesCircle } from 'react-icons/fa';
@@ -65,19 +65,21 @@ export default function CourierTrackingPage() {
       if (!silent) setLoading(false);
     }
   };
+  const fetchShipmentsRef = useRef(fetchShipments);
+  fetchShipmentsRef.current = fetchShipments;
 
-  useEffect(() => { fetchShipments(); }, [filterService, filterStatus]);
+  useEffect(() => { fetchShipmentsRef.current(); }, [filterService, filterStatus]);
 
   // Server-side search: debounce so we don't hit the API on every keystroke.
   useEffect(() => {
-    const t = setTimeout(() => fetchShipments(1), 400);
+    const t = setTimeout(() => fetchShipmentsRef.current(1), 400);
     return () => clearTimeout(t);
   }, [search]);
 
   // Auto-refresh: poll the list + listen for webhook-pushed status updates so
   // statuses change on screen without a manual refresh.
   useEffect(() => {
-    const interval = setInterval(() => fetchShipments(pagination.page, { silent: true }), 20000);
+    const interval = setInterval(() => fetchShipmentsRef.current(pagination.page, { silent: true }), 20000);
     return () => clearInterval(interval);
   }, [pagination.page, filterService, filterStatus, search]);
 
@@ -90,7 +92,7 @@ export default function CourierTrackingPage() {
       transports: ['polling', 'websocket'],
       reconnectionAttempts: 3,
     });
-    const onUpdate = () => fetchShipments(pagination.page, { silent: true });
+    const onUpdate = () => fetchShipmentsRef.current(pagination.page, { silent: true });
     socket.on('connect', () => socket.emit('joinAdminRoom'));
     socket.on('courierStatusUpdate', onUpdate);
     socket.on('admin:updateOrder', onUpdate);

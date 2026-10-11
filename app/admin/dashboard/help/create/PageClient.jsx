@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import { useRouter } from 'next/navigation';
 import { getStorage } from '../../../../../src/lib/storage';
+import { BRAND } from '../../../../../src/config/brand';
 import { FiSave, FiArrowLeft } from 'react-icons/fi';
 import Link from 'next/link';
 
@@ -10,7 +11,7 @@ const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
 
 export default function HelpPageCreate() {
   const router = useRouter();
-  const [form, setForm] = useState({ title: '', content: '', icon: '', order: 0, active: true, seo: { metaTitle: '', metaDescription: '', metaKeywords: '' } });
+  const [form, setForm] = useState({ title: '', content: '', icon: '', order: 0, active: true, seo: { metaTitle: '', metaDescription: '', metaKeywords: '', ogImage: BRAND.EMAIL_LOGO_URL } });
   const [saving, setSaving] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -76,6 +77,11 @@ export default function HelpPageCreate() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Meta Keywords</label>
             <input type="text" value={form.seo.metaKeywords} onChange={(e) => setForm({ ...form, seo: { ...form.seo, metaKeywords: e.target.value } })} className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-maybelline-pink focus:border-transparent" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Search / social image URL</label>
+            <input type="url" value={form.seo.ogImage} onChange={(e) => setForm({ ...form, seo: { ...form.seo, ogImage: e.target.value } })} className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-maybelline-pink focus:border-transparent" />
+            <p className="mt-1 text-xs text-gray-500">Used for Google and social previews. Defaults to the BELORELLA email logo.</p>
           </div>
         </div>
 

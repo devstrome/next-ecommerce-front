@@ -4,6 +4,12 @@ import axios from "axios";
 import { FaPlus, FaEdit, FaTrash, FaArrowLeft, FaSearch, FaTicketAlt } from "react-icons/fa";
 import { useRouter } from "next/navigation";
 
+const idOf = (value) => String(value?._id || value || '');
+const variantSizes = (variant) => [...new Set([
+  ...(Array.isArray(variant?.sizes) ? variant.sizes : []),
+  ...(Array.isArray(variant?.options) ? variant.options.map((option) => option.size) : []),
+].map((size) => String(size || '').trim()).filter(Boolean))];
+
 const CouponManagement = () => {
   const [coupons, setCoupons] = useState([]);
   const [products, setProducts] = useState([]);
@@ -17,8 +23,8 @@ const CouponManagement = () => {
   const [selectedProducts, setSelectedProducts] = useState([]);
   const [selectedVariants, setSelectedVariants] = useState({});
   const [editingCoupon, setEditingCoupon] = useState(null);
-  const [minAmount, setMinAmount] = useState("");
-  const [maxAmount, setMaxAmount] = useState("");
+  const [minCartValue, setMinCartValue] = useState("");
+  const [maxDiscountAmount, setMaxDiscountAmount] = useState("");
   const router = useRouter();
 
   useEffect(() => {
@@ -39,23 +45,31 @@ const CouponManagement = () => {
       setDiscount(editingCoupon.discount);
       setExpirationDate(editingCoupon.expirationDate.split('T')[0]);
       setIsActive(editingCoupon.isActive);
-      setMinAmount(editingCoupon.minAmount || "");
-      setMaxAmount(editingCoupon.maxAmount || "");
+      setMinCartValue(editingCoupon.minCartValue ?? editingCoupon.minAmount ?? "");
+      setMaxDiscountAmount(editingCoupon.maxDiscountAmount ?? editingCoupon.maxAmount ?? "");
       
-      const productIds = editingCoupon.applicableProducts?.map(ap => ap.product) || [];
+      const productIds = editingCoupon.applicableProducts?.map(ap => idOf(ap.product)) || [];
       setSelectedProducts(productIds);
       
       const variantsMap = {};
       editingCoupon.applicableProducts?.forEach(ap => {
-        variantsMap[ap.product] = ap.variants?.map(v => ({
-          variantId: v.variantId,
-          color: v.color,
-          size: v.size
-        })) || [];
+        const productId = idOf(ap.product);
+        const product = products.find((entry) => idOf(entry._id) === productId);
+        variantsMap[productId] = (ap.variants || []).flatMap((variant) => {
+          const productVariant = product?.variants?.find((entry) => idOf(entry._id) === idOf(variant.variantId));
+          const regionRef = variant.regionId || productVariant?.regionId || product?.regionId;
+          return (variant.sizes || []).map((size) => ({
+            variantId: idOf(variant.variantId),
+            color: variant.color,
+            size,
+            regionId: idOf(regionRef),
+            regionName: variant.regionName || regionRef?.name || productVariant?.regionName || '',
+          }));
+        });
       });
       setSelectedVariants(variantsMap);
     }
-  }, [editingCoupon]);
+  }, [editingCoupon, products]);
 
   const fetchCoupons = async () => {
     setLoading(true);
@@ -88,11 +102,12 @@ const CouponManagement = () => {
       const applicableProducts = selectedProducts.map(productId => {
         const variants = selectedVariants[productId] || [];
         
-        const variantGroups = variants.reduce((acc, { variantId, color, size }) => {
-          if (!acc[variantId]) {
-            acc[variantId] = { variantId, color, sizes: [] };
+        const variantGroups = variants.reduce((acc, { variantId, color, size, regionId, regionName }) => {
+          const groupKey = `${variantId}:${regionId || ''}`;
+          if (!acc[groupKey]) {
+            acc[groupKey] = { variantId, color, regionId: regionId || null, regionName, sizes: [] };
           }
-          acc[variantId].sizes.push(size);
+          if (!acc[groupKey].sizes.includes(size)) acc[groupKey].sizes.push(size);
           return acc;
         }, {});
 
@@ -101,7 +116,9 @@ const CouponManagement = () => {
           variants: Object.values(variantGroups).map(v => ({
             variantId: v.variantId,
             color: v.color,
-            sizes: v.sizes
+            regionId: v.regionId,
+            regionName: v.regionName,
+            sizes: v.sizes,
           }))
         };
       });
@@ -109,8 +126,8 @@ const CouponManagement = () => {
       const newCoupon = {
         code,
         discount: Number(discount),
-        minAmount: Number(minAmount) || 0,
-        maxAmount: Number(maxAmount) || 0,
+        minCartValue: Number(minCartValue) || 0,
+        maxDiscountAmount: Number(maxDiscountAmount) > 0 ? Number(maxDiscountAmount) : null,
         expirationDate,
         isActive,
         applicableProducts
@@ -135,8 +152,8 @@ const CouponManagement = () => {
     setDiscount("");
     setExpirationDate("");
     setIsActive(true);
-    setMinAmount("");
-    setMaxAmount("");
+    setMinCartValue("");
+    setMaxDiscountAmount("");
     setSelectedProducts([]);
     setSelectedVariants({});
     setEditingCoupon(null);
@@ -157,11 +174,11 @@ const CouponManagement = () => {
     });
   };
 
-  const handleVariantSelection = (productId, variantId, color, size) => {
+  const handleVariantSelection = (productId, variantId, color, size, regionId, regionName) => {
     setSelectedVariants(prev => {
       const productVariants = prev[productId] || [];
       const existingIndex = productVariants.findIndex(v => 
-        v.variantId === variantId && v.size === size
+        v.variantId === variantId && v.size === size && idOf(v.regionId) === idOf(regionId)
       );
       
       if (existingIndex >= 0) {
@@ -176,21 +193,21 @@ const CouponManagement = () => {
           ...prev,
           [productId]: [
             ...productVariants,
-            { variantId, color, size }
+            { variantId, color, size, regionId: regionId || '', regionName: regionName || '' }
           ]
         };
       }
     });
   };
 
-  const isVariantSelected = (productId, variantId, size) => {
+  const isVariantSelected = (productId, variantId, size, regionId) => {
     return selectedVariants[productId]?.some(
-      v => v.variantId === variantId && v.size === size
+      v => v.variantId === variantId && v.size === size && idOf(v.regionId) === idOf(regionId)
     );
   };
 
   const getProductById = (productId) => {
-    return products.find(product => product._id === productId);
+    return products.find(product => product._id === idOf(productId));
   };
 
   const renderCouponDetails = (coupon) => {
@@ -207,11 +224,11 @@ const CouponManagement = () => {
             <p className="text-dark-gray">
               Expires on: {new Date(coupon.expirationDate).toLocaleDateString()}
             </p>
-            {(coupon.minAmount > 0 || coupon.maxAmount > 0) && (
+            {(Number(coupon.minCartValue ?? coupon.minAmount) > 0 || Number(coupon.maxDiscountAmount ?? coupon.maxAmount) > 0) && (
               <p className="text-sm text-dark-gray mt-1">
-                {coupon.minAmount > 0 && <span>Min: BDT {coupon.minAmount.toLocaleString()}</span>}
-                {coupon.minAmount > 0 && coupon.maxAmount > 0 && <span> · </span>}
-                {coupon.maxAmount > 0 && <span>Max: BDT {coupon.maxAmount.toLocaleString()}</span>}
+                {Number(coupon.minCartValue ?? coupon.minAmount) > 0 && <span>Minimum cart: BDT {Number(coupon.minCartValue ?? coupon.minAmount).toLocaleString()}</span>}
+                {Number(coupon.minCartValue ?? coupon.minAmount) > 0 && Number(coupon.maxDiscountAmount ?? coupon.maxAmount) > 0 && <span> · </span>}
+                {Number(coupon.maxDiscountAmount ?? coupon.maxAmount) > 0 && <span>Maximum discount: BDT {Number(coupon.maxDiscountAmount ?? coupon.maxAmount).toLocaleString()}</span>}
               </p>
             )}
           </div>
@@ -243,7 +260,7 @@ const CouponManagement = () => {
                     <div className="ml-2 mt-1">
                       {item.variants.map((variant, idx) => (
                         <div key={idx} className="text-sm text-dark-gray">
-                          • {variant.color} - Size: {variant.sizes?.join(', ') || 'N/A'}
+                          • {variant.color} · Region: {variant.regionName || product?.variants?.find((entry) => idOf(entry._id) === idOf(variant.variantId))?.regionId?.name || 'Unassigned'} · Size: {variant.sizes?.join(', ') || 'N/A'}
                         </div>
                       ))}
                     </div>
@@ -346,24 +363,24 @@ const CouponManagement = () => {
             </div>
 
             <div>
-              <label className="block text-sm text-dark-gray mb-1">Min Amount (BDT)</label>
+              <label className="block text-sm text-dark-gray mb-1">Minimum Cart Value (BDT)</label>
               <input
                 type="number"
                 placeholder="e.g. 500"
-                value={minAmount}
-                onChange={(e) => setMinAmount(e.target.value)}
+                value={minCartValue}
+                onChange={(e) => setMinCartValue(e.target.value)}
                 min="0"
                 className="w-full px-4 py-2 border border-cool-gray bg-white text-black focus:outline-none focus:ring-2 focus:ring-charcoal"
               />
             </div>
 
             <div>
-              <label className="block text-sm text-dark-gray mb-1">Max Amount (BDT)</label>
+              <label className="block text-sm text-dark-gray mb-1">Maximum Discount Deduction (BDT)</label>
               <input
                 type="number"
-                placeholder="e.g. 5000"
-                value={maxAmount}
-                onChange={(e) => setMaxAmount(e.target.value)}
+                placeholder="e.g. 500 (leave blank for no cap)"
+                value={maxDiscountAmount}
+                onChange={(e) => setMaxDiscountAmount(e.target.value)}
                 min="0"
                 className="w-full px-4 py-2 border border-cool-gray bg-white text-black focus:outline-none focus:ring-2 focus:ring-charcoal"
               />
@@ -423,11 +440,19 @@ const CouponManagement = () => {
                 <h3 className="font-medium text-black mb-2">{product.name}</h3>
                 
                 {product.variants?.length > 0 ? (
-                  product.variants.map((variant) => (
+                  product.variants.map((variant) => {
+                    const regionRef = variant.regionId || product.regionId;
+                    const regionId = idOf(regionRef);
+                    const regionName = regionRef?.name || variant.regionName || 'Unassigned region';
+                    const sizes = variantSizes(variant);
+                    return (
                     <div key={variant._id} className="mb-3 ml-2 p-2 border border-cool-gray bg-white">
-                      <h4 className="font-medium text-black mb-1">{variant.colorName}</h4>
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <h4 className="font-medium text-black">{variant.colorName || 'Default color'}</h4>
+                        <span className="rounded-full bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700">Region: {regionName}</span>
+                      </div>
                       <div className="flex flex-wrap gap-2">
-                        {variant.sizes?.map((size) => (
+                        {sizes.map((size) => (
                           <button
                             key={`${variant._id}-${size}`}
                             type="button"
@@ -435,10 +460,12 @@ const CouponManagement = () => {
                               productId, 
                               variant._id, 
                               variant.colorName, 
-                              size
+                              size,
+                              regionId,
+                              regionName
                             )}
                             className={`px-3 py-1 border text-sm ${
-                              isVariantSelected(productId, variant._id, size)
+                              isVariantSelected(productId, variant._id, size, regionId)
                                 ? "bg-black text-white border-black"
                                 : "bg-white text-dark-gray border-cool-gray hover:bg-pure-white"
                             }`}
@@ -446,9 +473,11 @@ const CouponManagement = () => {
                             {size}
                           </button>
                         ))}
+                        {!sizes.length && <span className="text-xs text-mid-gray">No coupon-compatible sizes are configured.</span>}
                       </div>
                     </div>
-                  ))
+                    );
+                  })
                 ) : (
                   <div className="text-sm text-mid-gray">No variants available for this product</div>
                 )}

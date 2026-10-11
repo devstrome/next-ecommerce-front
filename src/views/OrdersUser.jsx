@@ -1,6 +1,7 @@
 'use client'
 import { getStorage, setStorage, removeStorage } from "../lib/storage"
 import React, { useEffect, useState, useContext, useMemo } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
 import { UserContext } from '../context/UserContext';
 import { formatMeasureLine } from '../lib/measure';
 import { formatBDT } from '../config/brand';
@@ -8,6 +9,7 @@ import axios from 'axios';
 import Link from "next/link";
 import io from 'socket.io-client';
 import { toast } from 'react-toastify';
+import { fetchOrders as fetchOrdersThunk, orderActions } from '../store/slices/orderSlice';
 import {
   FaBox,
   FaSearch,
@@ -30,7 +32,8 @@ import {
 
 function OrdersListPage() {
   const { user } = useContext(UserContext);
-  const [orders, setOrders] = useState([]);
+  const dispatch = useDispatch();
+  const orders = useSelector((state) => state.orders.items);
   const [filteredOrders, setFilteredOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -53,21 +56,6 @@ function OrdersListPage() {
 
   const API_BASE = process.env.NEXT_PUBLIC_API_URI;
   const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URI || API_BASE;
-
-  const showNotification = (message) => {
-    try {
-      if (typeof Notification === 'undefined') return;
-      if (Notification.permission === 'granted') {
-        new Notification('Order Update', { body: message });
-      } else if (Notification.permission !== 'denied') {
-        Notification.requestPermission().then(permission => {
-          if (permission === 'granted') new Notification('Order Update', { body: message });
-        });
-      }
-    } catch (e) {
-      toast.info(message);
-    }
-  };
 
   const formatCurrency = (amount, currency = 'BDT', locale = 'en-BD') => {
     return formatBDT(amount);
@@ -155,8 +143,7 @@ function OrdersListPage() {
       switch (eventType || updateType) {
         case 'create':
         case 'order_created':
-          setOrders(prevOrders => [order, ...prevOrders]);
-          showNotification(`New order placed: #${order.orderId}`);
+          dispatch(orderActions.orderUpserted(order));
           toast.success(`Order #${order.orderId} placed successfully!`);
           break;
         case 'update':
@@ -166,21 +153,18 @@ function OrdersListPage() {
         case 'product_removed':
         case 'quantity_updated':
         case 'discount_updated':
-          setOrders(prevOrders => prevOrders.map(o => o._id === order._id ? order : o));
+          dispatch(orderActions.orderUpserted(order));
           toast.info(`Order #${order.orderId} updated`);
-          showNotification(`Order #${order.orderId} updated`);
           break;
         case 'cancel':
         case 'order_cancelled':
-          setOrders(prevOrders => prevOrders.map(o => o._id === order._id ? order : o));
+          dispatch(orderActions.orderUpserted(order));
           toast.warn(`Order #${order.orderId} cancelled`);
-          showNotification(`Order #${order.orderId} cancelled`);
           break;
         case 'delivered':
         case 'order_delivered':
-          setOrders(prevOrders => prevOrders.map(o => o._id === order._id ? order : o));
+          dispatch(orderActions.orderUpserted(order));
           toast.success(`Order #${order.orderId} delivered!`);
-          showNotification(`Order #${order.orderId} delivered!`);
           break;
         default:
           console.warn('Unknown order update type:', eventType || updateType);
@@ -194,10 +178,11 @@ function OrdersListPage() {
       socket.off(`user:orderUpdate:${user._id}`, handleOrderUpdate);
       socket.off(`orderUpdated`, handleOrderUpdate);
     };
-  }, [socket, user?._id]);
+  }, [socket, user?._id, dispatch]);
 
   useEffect(() => {
-    if (!user) {
+    const userId = user?._id;
+    if (!userId) {
       setError('You must be logged in to view your orders.');
       setLoading(false);
       return;
@@ -210,48 +195,35 @@ function OrdersListPage() {
 
     let isMounted = true;
 
-    const fetchOrders = async () => {
+    const loadUserOrders = async () => {
       try {
         setLoading(true);
-        const res = await axios.get(`${API_BASE}/api/orders`, {
-          params: { userId: user._id },
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
+        const list = await dispatch(fetchOrdersThunk({ userId })).unwrap();
 
         if (isMounted) {
-          const list = Array.isArray(res.data) ? res.data : [];
-          list.sort((a, b) => {
+          const sortedOrders = [...list].sort((a, b) => {
             const ta = new Date(a?.createdAt || 0).getTime();
             const tb = new Date(b?.createdAt || 0).getTime();
             return tb - ta;
           });
-          setOrders(list);
-          setFilteredOrders(list);
+          setFilteredOrders(sortedOrders);
           setError('');
         }
       } catch (err) {
         if (isMounted) {
-          setError(err.response?.data?.message || 'Failed to load orders');
-          if (socket) {
-            socket.emit('error', {
-              userId: user._id,
-              error: err.message,
-              component: 'OrdersListPage'
-            });
-          }
+          setError(err?.response?.data?.message || err?.message || 'Failed to load orders');
+          console.error('Failed to load customer orders:', err);
         }
       } finally {
         if (isMounted) setLoading(false);
       }
     };
 
-    fetchOrders();
+    loadUserOrders();
     return () => {
       isMounted = false;
     };
-  }, [user, API_BASE, socket]);
+  }, [user?._id, API_BASE, dispatch]);
 
   useEffect(() => {
     let result = [...orders];
@@ -336,13 +308,7 @@ function OrdersListPage() {
         theme: "colored",
       });
 
-      setOrders(prevOrders =>
-        prevOrders.map(order =>
-          order._id === orderId
-            ? { ...order, orderStatus: 'canceled' }
-            : order
-        )
-      );
+      dispatch(orderActions.orderPatched({ id: orderId, patch: { orderStatus: 'cancelled' } }));
 
     } catch (err) {
       const errorMessage = err.response?.data?.message ||
@@ -454,7 +420,7 @@ function OrdersListPage() {
         }
       );
       const updated = res.data.order;
-      setOrders(prev => prev.map(o => (o.orderId === refundModalOrder.orderId ? updated : o)));
+      dispatch(orderActions.orderUpserted(updated));
       toast.success(res.data.message || 'Refund request submitted');
       setRefundModalOrder(null);
       setRefundReason('');
@@ -577,7 +543,7 @@ function OrdersListPage() {
             <FaBox className="text-mid-gray text-2xl" />
           </div>
           <h2 className="text-xl font-semibold text-black mb-2 font-heading">No Orders Yet</h2>
-          <p className="text-dark-gray mb-6 font-sans">You haven't placed any orders yet.</p>
+          <p className="text-dark-gray mb-6 font-sans">You haven&apos;t placed any orders yet.</p>
           <Link href="/"
             className="btn-primary inline-flex"
           >
@@ -888,8 +854,26 @@ function OrdersListPage() {
                             <span className="text-black font-medium">{formatCurrency(fee.amount || 0, currency)}</span>
                           </p>
                         ))}
+                        {Number(order.loyaltyAmountUsed) > 0 && (
+                          <>
+                            <p className="text-sm font-sans text-green-700">
+                              <span className="font-medium">Loyalty balance applied:</span>{' '}
+                              <span>-{formatCurrency(order.loyaltyAmountUsed, currency)}</span>
+                            </p>
+                            <p className="text-sm font-sans">
+                              <span className="font-medium">Amount due:</span>{' '}
+                              <span className="text-black font-medium">{formatCurrency(order.amountDue, currency)}</span>
+                            </p>
+                          </>
+                        )}
+                        {Number(order.loyaltyRewardEarned) > 0 && (
+                          <p className="text-sm font-sans text-maybelline-pink">
+                            <span className="font-medium">Loyalty earned:</span>{' '}
+                            <span>{formatCurrency(order.loyaltyRewardEarned, currency)}</span>
+                          </p>
+                        )}
                         <p className="text-sm font-sans">
-                          <span className="font-medium">Total:</span>{' '}
+                          <span className="font-medium">{Number(order.loyaltyAmountUsed) > 0 ? 'Order total:' : 'Total:'}</span>{' '}
                           <span className="text-lg font-bold text-maybelline-pink">{formatCurrency(order.grandTotal, currency)}</span>
                         </p>
                         <p className="text-sm font-sans">
@@ -940,8 +924,10 @@ function OrdersListPage() {
                             <div className="flex-1">
                               <p className="font-semibold text-black font-heading">{item.name}</p>
                               <div className="text-sm text-dark-gray space-y-1 mt-1 font-sans">
+                                {item.isPreOrder && <p className="font-semibold text-maybelline-pink">Pre-order{item.preOrderEstimatedDate ? ` · Est. ${new Date(item.preOrderEstimatedDate).toLocaleDateString()}` : ' · ETA to be confirmed'}</p>}
                                 {item.color && <p>Color: {item.color}</p>}
-                                {item.size && (
+                                {(item.regionName || item.regionId?.name || item.configuration?.regionName) && <p>Region: {item.regionName || item.regionId?.name || item.configuration?.regionName}</p>}
+                                {formatMeasureLine(item) && (
                                   <p>
                                     {formatMeasureLine(item)}
                                   </p>

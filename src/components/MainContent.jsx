@@ -1,6 +1,6 @@
 'use client'
 import { getStorage, setStorage, removeStorage } from "../lib/storage"
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useCallback } from 'react';
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -16,6 +16,9 @@ import axios from 'axios';
 import { io } from 'socket.io-client';
 import { toast } from 'react-toastify';
 
+const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
+const getAdminToken = () => getStorage('adminAccessToken') || getStorage('adminToken');
+
 const MainContent = () => {
   const [dashboardData, setDashboardData] = useState(null);
   const [realTimeData, setRealTimeData] = useState(null);
@@ -23,15 +26,6 @@ const MainContent = () => {
   const [socket, setSocket] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(new Date());
-
-  const API_URI = process.env.NEXT_PUBLIC_API_URI || "http://localhost:3000";
-
-  const getAdminToken = () => {
-    return getStorage("adminAccessToken") ||
-           getStorage("adminToken") ||
-           getStorage("adminRefreshToken") ||
-           getStorage("accessToken");
-  };
 
   const formatCurrency = (amount, currency = 'BDT') => {
     return new Intl.NumberFormat('en-US', {
@@ -56,7 +50,7 @@ const MainContent = () => {
     });
   };
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     try {
       const token = getAdminToken();
       if (!token) {
@@ -76,9 +70,9 @@ const MainContent = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const fetchRealTimeData = async () => {
+  const fetchRealTimeData = useCallback(async () => {
     try {
       const token = getAdminToken();
       if (!token) return;
@@ -91,7 +85,7 @@ const MainContent = () => {
     } catch (error) {
       console.error('Error fetching real-time data:', error);
     }
-  };
+  }, []);
 
   useEffect(() => {
     const token = getAdminToken();
@@ -145,7 +139,7 @@ const MainContent = () => {
       alive = false;
       if (newSocket.connected) newSocket.disconnect();
     };
-  }, []);
+  }, [fetchRealTimeData]);
 
   useEffect(() => {
     fetchDashboardData();
@@ -156,7 +150,7 @@ const MainContent = () => {
     }, 30000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchDashboardData, fetchRealTimeData]);
 
   const chartColors = {
     primary: '#B1123B',
@@ -233,7 +227,7 @@ const MainContent = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
         <div className="card p-6">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-xs tracking-wider uppercase text-dark-gray font-medium">Today's Sales</span>
+            <span className="text-xs tracking-wider uppercase text-dark-gray font-medium">Today&apos;s Sales</span>
             <div className="p-2.5 bg-blush/50 rounded-full">
               <FiDollarSign className="text-maybelline-pink text-lg" />
             </div>
@@ -486,87 +480,6 @@ const MainContent = () => {
         </div>
       )}
 
-      {/* AI SEO Management */}
-      <div className="card p-6 border-l-4 border-gold">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="font-heading text-lg text-black">AI SEO</h3>
-            <p className="text-sm text-dark-gray/70">Auto-generates meta titles, descriptions, and keywords for every product</p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={async () => {
-                try {
-                  const token = getAdminToken();
-                  if (!token) { toast.error('Not authenticated'); return; }
-                  const res = await axios.post(`${API_URI}/api/seo/generate`, {}, {
-                    headers: { Authorization: `Bearer ${token}` },
-                  });
-                  toast.success(`Generated SEO for ${res.data.count} products`);
-                } catch (err) {
-                  toast.error(err?.response?.data?.message || 'Failed');
-                }
-              }}
-              className="px-3 py-2 bg-black text-pure-white text-xs font-medium tracking-wider uppercase hover:bg-maybelline-pink transition"
-            >
-              Generate Pending
-            </button>
-            <button
-              onClick={async () => {
-                if (!confirm('Force-regenerate SEO for ALL products? This will use AI credits.')) return;
-                try {
-                  const token = getAdminToken();
-                  if (!token) { toast.error('Not authenticated'); return; }
-                  const res = await axios.post(`${API_URI}/api/seo/force`, {}, {
-                    headers: { Authorization: `Bearer ${token}` },
-                  });
-                  toast.success(`Force-regenerated SEO for ${res.data.count} products`);
-                } catch (err) {
-                  toast.error(err?.response?.data?.message || 'Failed');
-                }
-              }}
-              className="px-3 py-2 border border-black text-black text-xs font-medium tracking-wider uppercase hover:bg-black hover:text-pure-white transition"
-            >
-              Force All
-            </button>
-          </div>
-        </div>
-        <SeoStats tokenFn={getAdminToken} API_URI={API_URI} />
-      </div>
-
-    </div>
-  );
-};
-
-const SeoStats = ({ tokenFn, API_URI }) => {
-  const [stats, setStats] = useState(null);
-  useEffect(() => {
-    (async () => {
-      try {
-        const token = tokenFn();
-        if (!token) return;
-        const res = await axios.get(`${API_URI}/api/seo/stats`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        setStats(res.data);
-      } catch {}
-    })();
-  }, []);
-  if (!stats) return <div className="text-sm text-mid-gray">Loading SEO stats...</div>;
-  return (
-    <div className="grid grid-cols-3 gap-4 mt-2">
-      <div className="bg-pure-white p-3 text-center">
-        <div className="text-2xl font-heading text-maybelline-pink">{stats.total}</div>
-        <div className="text-xs text-mid-gray">Total Products</div>
-      </div>
-      <div className="bg-pure-white p-3 text-center">
-        <div className="text-2xl font-heading text-black">{stats.withSEO}</div>
-        <div className="text-xs text-mid-gray">With SEO</div>
-      </div>
-      <div className="bg-pure-white p-3 text-center">
-        <div className="text-2xl font-heading text-dark-gray">{stats.pending || 0}</div>
-        <div className="text-xs text-mid-gray">Pending</div>
-      </div>
     </div>
   );
 };

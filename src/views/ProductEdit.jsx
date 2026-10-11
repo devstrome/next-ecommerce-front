@@ -13,9 +13,9 @@ import { useAdminProduct } from '../context/AdminProductContext';
 
 const ProductEdit = () => {
   const {
-    categoryTree, colors, sizes, genders, badges, measureTypes, shippingTypes,
+    categoryTree, colors, sizes, genders, badges, measureTypes, shippingTypes, regions,
     createCategory, createBrand, createColor, createSize, createGender, createBadge,
-    createMeasureType, findCategoryByName,
+    createMeasureType, createRegion, findCategoryByName,
   } = useAdminProduct();
   const [selectedCategoryObj, setSelectedCategoryObj] = useState(null);
   const [selectedSubcategoryObj, setSelectedSubcategoryObj] = useState(null);
@@ -34,6 +34,7 @@ const ProductEdit = () => {
     gender: '',
     measureType: '',
     unitName: '',
+    isDigitalProduct: false,
     isPreOrder: false,
     preOrderEstimatedDate: '',
     broadcast: false,
@@ -51,6 +52,7 @@ const ProductEdit = () => {
   const [seoOpen, setSeoOpen] = useState(false);
   const [basicOpen, setBasicOpen] = useState(true);
   const [variantOpen, setVariantOpen] = useState(false);
+  const [creatingRegionFor, setCreatingRegionFor] = useState(null);
   const [seoRowIdx, setSeoRowIdx] = useState(null);
   const [newVariantImages, setNewVariantImages] = useState({});
   const [deleteVariantImages, setDeleteVariantImages] = useState({});
@@ -58,9 +60,10 @@ const ProductEdit = () => {
   const [successMessage, setSuccessMessage] = useState('');
   const router = useRouter();
   const socketRef = useRef(null);
+  const loadProductRef = useRef(null);
 
   useEffect(() => {
-    loadProduct();
+    loadProductRef.current?.();
 
     socketRef.current = io(`${process.env.NEXT_PUBLIC_API_URI}`, {
       transports: ['websocket', 'polling'],
@@ -86,17 +89,27 @@ const ProductEdit = () => {
       const productRes = await axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/products/${id}`);
 
       const prod = productRes.data;
-      const normalizedVariants = (prod.variants || []).map(v => ({
+      const normalizedVariants = (prod.variants || []).map(v => {
+        const options = Array.isArray(v.options) ? v.options : [];
+        const sizes = Array.isArray(v.sizes) && v.sizes.length ? v.sizes : options.map(option => option.size || '');
+        // Older variants can have fewer price/stock entries than sizes (for
+        // example, sizes created before their matching fields were appended).
+        // Keep every rendered controlled input backed by a value.
+        const prices = sizes.map((_, index) => v.prices?.[index] ?? options[index]?.price ?? '');
+        const discountPrices = sizes.map((_, index) => v.discountPrices?.[index] ?? options[index]?.discountPrice ?? '');
+        const stockBySize = sizes.map((_, index) => v.stockBySize?.[index] ?? options[index]?.stock ?? 0);
+        return {
         _id: v._id,
+        regionId: v.regionId?._id || v.regionId || '',
         selectedColor: v.colorName || '',
         selectedColorHex: v.hexCode || '',
-        sizes: Array.isArray(v.sizes) ? v.sizes : [],
-        prices: Array.isArray(v.prices) ? v.prices : [],
-        discountPrices: Array.isArray(v.discountPrices) ? v.discountPrices : [],
-        badgeNames: Array.isArray(v.badgeNames) ? v.badgeNames : [],
-        badgeColors: Array.isArray(v.badgeColors) ? v.badgeColors : [],
-        stock: v.stock || '',
-        stockBySize: Array.isArray(v.stockBySize) ? v.stockBySize : [],
+        sizes,
+        prices,
+        discountPrices,
+        badgeNames: Array.isArray(v.badgeNames) && v.badgeNames.length ? v.badgeNames : options.map(option => option.badgeName || ''),
+        badgeColors: Array.isArray(v.badgeColors) && v.badgeColors.length ? v.badgeColors : options.map(option => option.badgeColor || ''),
+        stock: v.stock ?? stockBySize.reduce((sum, stock) => sum + (Number(stock) || 0), 0),
+        stockBySize,
         description: v.description || '',
         images: Array.isArray(v.images) ? v.images : [],
         // shippingOptions subdoc _ids are NOT Shipping collection ids (that bug
@@ -109,7 +122,8 @@ const ProductEdit = () => {
         measureType: v.measureType || prod.measureType || '',
         unitName: v.unitName || prod.unitName || '',
         seo: v.seo || {},
-      }));
+      };
+      });
 
       const rawCats = Array.isArray(prod.categories) ? prod.categories : [];
       const flatCats = [];
@@ -143,6 +157,7 @@ const ProductEdit = () => {
         gender: prod.gender || '',
         measureType: prod.measureType || '',
         unitName: prod.unitName || '',
+        isDigitalProduct: Boolean(prod.isDigitalProduct),
         isPreOrder: prod.isPreOrder || false,
         preOrderEstimatedDate: prod.preOrderEstimatedDate ? new Date(prod.preOrderEstimatedDate).toISOString().split('T')[0] : '',
         broadcast: prod.broadcast || false,
@@ -162,6 +177,7 @@ const ProductEdit = () => {
       console.error('Error fetching product:', error);
     }
   };
+  loadProductRef.current = loadProduct;
 
   // Keep unitName in sync with the catalog entry for the selected measure type
   // (legacy products may have a measureType but no/older unitName on file).
@@ -241,6 +257,25 @@ const ProductEdit = () => {
     }
   };
 
+  const handleCreateVariantRegion = async (vIdx, inputValue) => {
+    const name = String(inputValue || '').trim();
+    if (!name) return;
+    const existing = regions.find(region => region.name.trim().toLowerCase() === name.toLowerCase());
+    if (existing) {
+      updateVariantField(vIdx, { regionId: existing._id });
+      return;
+    }
+    setCreatingRegionFor(vIdx);
+    try {
+      const region = await createRegion(name);
+      updateVariantField(vIdx, { regionId: region._id });
+    } catch (err) {
+      alert(err.message || 'Failed to create region');
+    } finally {
+      setCreatingRegionFor(null);
+    }
+  };
+
   const handleCreateBrand = async (inputValue) => {
     if (!selectedSubcategoryObj?._id) {
       alert('Select a subcategory first');
@@ -289,6 +324,7 @@ const ProductEdit = () => {
 
   const colorOptions = colors.map(c => ({ value: c.name, label: `${c.name} (${c.hexCode})` }));
   const sizeOptions = sizes.map(s => ({ value: s.name, label: s.name }));
+  const regionOptions = regions.map(region => ({ value: region._id, label: region.name }));
   const genderOptions = genders.map(g => ({ value: g.type, label: g.type }));
   const measureTypeOptions = measureTypes.map(m => ({
     value: m.measureType,
@@ -307,7 +343,7 @@ const ProductEdit = () => {
   const handleVariantSizePriceChange = (vIdx, index, value, type) => {
     setProduct(prev => {
       const variants = [...prev.variants];
-      const arr = [...variants[vIdx][type]];
+      const arr = [...(variants[vIdx][type] || [])];
       arr[index] = value;
       variants[vIdx] = { ...variants[vIdx], [type]: arr };
       return { ...prev, variants };
@@ -319,9 +355,9 @@ const ProductEdit = () => {
       const variants = [...prev.variants];
       variants[vIdx] = {
         ...variants[vIdx],
-        sizes: [...variants[vIdx].sizes, ''],
-        prices: [...variants[vIdx].prices, ''],
-        discountPrices: [...variants[vIdx].discountPrices, ''],
+        sizes: [...(variants[vIdx].sizes || []), ''],
+        prices: [...(variants[vIdx].prices || []), ''],
+        discountPrices: [...(variants[vIdx].discountPrices || []), ''],
       };
       return { ...prev, variants };
     });
@@ -411,6 +447,7 @@ const ProductEdit = () => {
   const emptyVariant = {
     selectedColor: '',
     selectedColorHex: '',
+    regionId: '',
     description: '',
     stock: 0,
     sizes: [],
@@ -453,8 +490,9 @@ const ProductEdit = () => {
     formData.append('gender', product.gender);
     formData.append('measureType', product.measureType);
     formData.append('unitName', product.unitName);
+    formData.append('isDigitalProduct', product.isDigitalProduct ? 'true' : 'false');
     formData.append('isPreOrder', product.isPreOrder ? 'true' : 'false');
-    if (product.preOrderEstimatedDate) formData.append('preOrderEstimatedDate', product.preOrderEstimatedDate);
+    formData.append('preOrderEstimatedDate', product.isPreOrder ? product.preOrderEstimatedDate : '');
     formData.append('comingSoon', product.comingSoon ? 'true' : 'false');
 
     if (product.mainImage && typeof product.mainImage !== 'string') {
@@ -467,6 +505,7 @@ const ProductEdit = () => {
       _id: v._id,
       colorName: v.selectedColor,
       hexCode: v.selectedColorHex,
+      regionId: v.regionId || null,
       sizes: v.sizes,
       prices: v.prices,
       discountPrices: v.discountPrices,
@@ -621,10 +660,22 @@ const ProductEdit = () => {
               <input
                 type="checkbox"
                 checked={product.isPreOrder || false}
-                onChange={(e) => setProduct(prev => ({ ...prev, isPreOrder: e.target.checked }))}
+                onChange={(e) => setProduct(prev => ({ ...prev, isPreOrder: e.target.checked, preOrderEstimatedDate: e.target.checked ? prev.preOrderEstimatedDate : '' }))}
                 className="accent-maybelline-pink"
               />
               Pre-order product
+            </label>
+            <label className="mb-4 flex cursor-pointer items-start gap-3 rounded-lg border border-cool-gray bg-white p-4 text-sm text-dark-gray">
+              <input
+                type="checkbox"
+                checked={product.isDigitalProduct || false}
+                onChange={(e) => setProduct((prev) => ({ ...prev, isDigitalProduct: e.target.checked }))}
+                className="mt-0.5 accent-maybelline-pink"
+              />
+              <span>
+                <span className="block font-semibold text-black">Digital product · apply to every variant</span>
+                <span className="mt-1 block text-xs text-dark-gray">Checkout will require bKash or Nagad payment and a transaction ID.</span>
+              </span>
             </label>
             {product.isPreOrder && (
               <div className="mb-4">
@@ -763,6 +814,20 @@ const ProductEdit = () => {
                               isClearable
                               formatCreateLabel={(input) => `Create "${input}" — pick hex`}
                             />
+                            <Creatable
+                              value={regionOptions.find(option => option.value === String(v.regionId || '')) || null}
+                              options={regionOptions}
+                              onChange={(option) => updateVariantField(vIdx, { regionId: option?.value || null })}
+                              onCreateOption={(input) => handleCreateVariantRegion(vIdx, input)}
+                              isLoading={creatingRegionFor === vIdx}
+                              isSearchable
+                              isClearable
+                              className="mt-2"
+                              classNamePrefix="select"
+                              placeholder="Search or create a region"
+                              formatCreateLabel={(input) => `Create region “${input}”`}
+                              aria-label={`Region for ${v.selectedColor || `variant ${vIdx + 1}`}`}
+                            />
                             {showColorHexPicker && (
                               <div className="flex items-center gap-2 mt-2 p-2 bg-cool-gray rounded">
                                 <span className="text-xs text-dark-gray font-medium whitespace-nowrap">Color: {pendingColorName}</span>
@@ -819,14 +884,14 @@ const ProductEdit = () => {
                               <input
                                 type="number"
                                 placeholder="Price"
-                                value={v.prices[i]}
+                                value={v.prices?.[i] ?? ''}
                                 onChange={(e)=>handleVariantSizePriceChange(vIdx, i, e.target.value, 'prices')}
                                 className="px-2 py-1 border border-cool-gray bg-white text-black w-28"
                               />
                               <input
                                 type="number"
                                 placeholder="Discount"
-                                value={v.discountPrices[i]}
+                                value={v.discountPrices?.[i] ?? ''}
                                 onChange={(e)=>handleVariantSizePriceChange(vIdx, i, e.target.value, 'discountPrices')}
                                 className="px-2 py-1 border border-cool-gray bg-white text-black w-28"
                               />

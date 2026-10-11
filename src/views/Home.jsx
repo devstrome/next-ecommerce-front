@@ -1,5 +1,6 @@
 'use client'
 import React, { useState, useEffect } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
 import Link from 'next/link';
 import axios from 'axios';
 import { FiArrowRight, FiStar } from 'react-icons/fi';
@@ -9,6 +10,7 @@ import ProductCard from '../components/ProductCard';
 import ProductCartModal from '../components/ProductCartModal';
 import NewsletterSubscribe from '../components/NewsletterSubscribe';
 import PopupAd from '../components/PopupAd';
+import { fetchProductCollection, selectProductCollection } from '../store/slices/productSlice';
 
 const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
 
@@ -52,14 +54,17 @@ const ViewAllLink = ({ href = '/products', label = 'View All' }) => (
 );
 
 function Home() {
+  const dispatch = useDispatch();
+  const newArrivalsCollection = useSelector((state) => selectProductCollection(state, 'newArrivals'));
+  const topProductsCollection = useSelector((state) => selectProductCollection(state, 'topRated'));
   const [categories, setCategories] = useState([]);
   const [categoriesLoading, setCategoriesLoading] = useState(true);
-  const [newArrivals, setNewArrivals] = useState([]);
-  const [newLoading, setNewLoading] = useState(true);
+  const newArrivals = newArrivalsCollection.items;
+  const newLoading = newArrivalsCollection.status === 'idle' || newArrivalsCollection.status === 'loading';
   const [topRated, setTopRated] = useState([]);
   const [topRatedLoading, setTopRatedLoading] = useState(true);
-  const [topProducts, setTopProducts] = useState([]);
-  const [topProductsLoading, setTopProductsLoading] = useState(true);
+  const topProducts = topProductsCollection.items;
+  const topProductsLoading = topProductsCollection.status === 'idle' || topProductsCollection.status === 'loading';
   const [cartModalProductId, setCartModalProductId] = useState(null);
 
   useEffect(() => {
@@ -80,18 +85,8 @@ function Home() {
   }, []);
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const { data } = await axios.get(`${API_URI}/api/products`, { params: { limit: 8 } });
-        if (Array.isArray(data)) setNewArrivals(data);
-      } catch (err) {
-        console.error('Error fetching new arrivals:', err);
-      } finally {
-        setNewLoading(false);
-      }
-    };
-    load();
-  }, []);
+    dispatch(fetchProductCollection({ key: 'newArrivals', path: '/api/products', params: { limit: 8 } }));
+  }, [dispatch]);
 
   useEffect(() => {
     const load = async () => {
@@ -109,18 +104,8 @@ function Home() {
 
   // Real top-rated products (sorted by averageRating, fallback to curated slides)
   useEffect(() => {
-    const load = async () => {
-      try {
-        const { data } = await axios.get(`${API_URI}/api/products/top-rated`, { params: { limit: 8 } });
-        if (Array.isArray(data)) setTopProducts(data);
-      } catch (err) {
-        console.error('Error fetching top rated products:', err);
-      } finally {
-        setTopProductsLoading(false);
-      }
-    };
-    load();
-  }, []);
+    dispatch(fetchProductCollection({ key: 'topRated', path: '/api/products/top-rated', params: { limit: 8 } }));
+  }, [dispatch]);
 
   const salePrice = (item) =>
     item.discountPrice && item.discountPrice < (item.price ?? item.mainPrice)
@@ -247,6 +232,7 @@ function Home() {
                     key={product._id}
                     Data={product}
                     onAddToCart={(id) => setCartModalProductId(id)}
+                    onBuyNow={(id) => setCartModalProductId(id)}
                   />
                 ))}
               </div>
@@ -312,7 +298,7 @@ function Home() {
                     <img
                       src={slide.imageUrl}
                       alt={slide.name}
-                      className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                      className="w-full h-full object-contain p-4 sm:p-5 transition-transform duration-500 group-hover:scale-[1.02]"
                       loading="lazy"
                     />
                     {slide.mainBadgeName && (
@@ -378,7 +364,7 @@ function Home() {
                       <img
                         src={item.mainImage}
                         alt={item.name}
-                        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                        className="w-full h-full object-contain p-4 sm:p-5 transition-transform duration-500 group-hover:scale-[1.02]"
                         loading="lazy"
                       />
                       {item.mainBadgeName && (

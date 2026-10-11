@@ -1,5 +1,5 @@
 'use client'
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { FaPlus, FaEdit, FaTrash, FaEye, FaSearch, FaUpload } from 'react-icons/fa';
 import { getStorage } from "../lib/storage";
@@ -25,7 +25,7 @@ const BlogAdmin = () => {
 
   const categories = ['General', 'Skincare', 'Makeup', 'Haircare', 'Fragrance', 'Tips & Tricks', 'News', 'Trends'];
 
-  const fetchBlogs = async () => {
+  const fetchBlogs = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -40,9 +40,9 @@ const BlogAdmin = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [searchQuery, statusFilter]);
 
-  useEffect(() => { fetchBlogs(); }, [searchQuery, statusFilter]);
+  useEffect(() => { fetchBlogs(); }, [fetchBlogs]);
 
   const handleSave = async () => {
     try {

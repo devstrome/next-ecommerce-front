@@ -1,7 +1,7 @@
 'use client'
 import React from 'react';
 import Link from "next/link";
-import { FiArrowLeft, FiPackage, FiTag, FiGrid, FiTruck, FiPercent, FiImage, FiStar, FiLink2, FiBox, FiMonitor, FiLayers, FiFilter } from 'react-icons/fi';
+import { FiArrowLeft, FiPackage, FiTag, FiGrid, FiTruck, FiPercent, FiImage, FiStar, FiLink2, FiBox, FiMonitor, FiLayers, FiFilter, FiMapPin } from 'react-icons/fi';
 import { LuBadgeCheck } from "react-icons/lu";
 import { FaTransgenderAlt } from "react-icons/fa";
 import { TbGeometry } from "react-icons/tb";
@@ -10,6 +10,7 @@ const ProductAdminPage = () => {
   const menuItems = [
     { name: 'Products', icon: <FiBox />, path: '/admin/dashboard/products/products' },
     { name: 'Categories', icon: <FiTag />, path: '/admin/dashboard/products/categories' },
+    { name: 'Regions', icon: <FiMapPin />, path: '/admin/dashboard/products/regions' },
     { name: 'Colors', icon: <SiExcalidraw />, path: '/admin/dashboard/products/colors' },
     { name: 'Sizes', icon: <FiGrid />, path: '/admin/dashboard/products/sizes' },
     { name: 'Gender', icon: <FaTransgenderAlt />, path: '/admin/dashboard/products/gender' },

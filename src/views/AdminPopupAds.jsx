@@ -5,12 +5,35 @@ import { FaPlus, FaEdit, FaTrash, FaArrowLeft, FaExternalLinkAlt, FaToggleOn, Fa
 import { useRouter } from "next/navigation";
 import { toast } from 'react-toastify';
 
+const EMPTY_FORM = {
+  title: '',
+  imageUrl: '',
+  linkUrl: '',
+  isActive: true,
+  isUrgent: false,
+  urgentDurationValue: 1,
+  urgentDurationUnit: 'hours',
+};
+
+const URGENT_PRESETS = {
+  '1h': { value: 1, unit: 'hours' },
+  '6h': { value: 6, unit: 'hours' },
+  '24h': { value: 24, unit: 'hours' },
+  '3d': { value: 3, unit: 'days' },
+  '1w': { value: 1, unit: 'weeks' },
+};
+
+const getDurationPreset = ({ urgentDurationValue, urgentDurationUnit }) =>
+  Object.entries(URGENT_PRESETS).find(([, duration]) =>
+    Number(duration.value) === Number(urgentDurationValue) && duration.unit === urgentDurationUnit
+  )?.[0] || 'custom';
+
 const AdminPopupAds = () => {
   const [ads, setAds] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ title: '', imageUrl: '', linkUrl: '', isActive: true });
+  const [form, setForm] = useState(EMPTY_FORM);
   const router = useRouter();
 
   useEffect(() => { fetchAds(); }, []);
@@ -24,9 +47,39 @@ const AdminPopupAds = () => {
     finally { setLoading(false); }
   };
 
-  const openCreate = () => { setEditing(null); setForm({ title: '', imageUrl: '', linkUrl: '', isActive: true }); setShowForm(true); };
+  const openCreate = () => { setEditing(null); setForm({ ...EMPTY_FORM }); setShowForm(true); };
 
-  const openEdit = (ad) => { setEditing(ad); setForm({ title: ad.title || '', imageUrl: ad.imageUrl || '', linkUrl: ad.linkUrl || '', isActive: ad.isActive }); setShowForm(true); };
+  const openEdit = (ad) => {
+    setEditing(ad);
+    setForm({
+      ...EMPTY_FORM,
+      title: ad.title || '',
+      imageUrl: ad.imageUrl || '',
+      linkUrl: ad.linkUrl || '',
+      isActive: ad.isActive,
+      isUrgent: Boolean(ad.isUrgent),
+      urgentDurationValue: Number(ad.urgentDurationValue) || 1,
+      urgentDurationUnit: ad.urgentDurationUnit || 'hours',
+    });
+    setShowForm(true);
+  };
+
+  const changeUrgentPreset = (preset) => {
+    if (preset === 'custom') {
+      setForm((current) => ({
+        ...current,
+        urgentDurationValue: 30,
+        urgentDurationUnit: 'minutes',
+      }));
+      return;
+    }
+    const duration = URGENT_PRESETS[preset];
+    setForm((current) => ({
+      ...current,
+      urgentDurationValue: duration.value,
+      urgentDurationUnit: duration.unit,
+    }));
+  };
 
   const handleSave = async () => {
     if (!form.imageUrl) { toast.error('Image URL is required'); return; }
@@ -87,6 +140,66 @@ const AdminPopupAds = () => {
                 <input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} className="border-[#BDBDBD]" />
                 Active
               </label>
+              <div className="border border-[#F1D5DC] bg-[#FFF8FA] p-4 space-y-3">
+                <label className="flex items-center gap-2 text-sm font-semibold text-[#1B1B1B]">
+                  <input type="checkbox" checked={form.isUrgent} onChange={(e) => setForm({ ...form, isUrgent: e.target.checked })} />
+                  Urgent popup with automatic expiry
+                </label>
+                {form.isUrgent && (
+                  <>
+                    <p className="text-xs text-[#6B5560]">The popup will be disabled automatically when this duration ends.</p>
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-[#4A4A4A] mb-1">Duration preset</label>
+                        <select
+                          value={getDurationPreset(form)}
+                          onChange={(e) => changeUrgentPreset(e.target.value)}
+                          className="w-full px-3 py-2 border border-[#BDBDBD] bg-white text-[#1B1B1B]"
+                        >
+                          <option value="1h">1 hour</option>
+                          <option value="6h">6 hours</option>
+                          <option value="24h">24 hours</option>
+                          <option value="3d">3 days</option>
+                          <option value="1w">1 week</option>
+                          <option value="custom">Custom duration</option>
+                        </select>
+                      </div>
+                      {getDurationPreset(form) === 'custom' && (
+                        <div>
+                          <label className="block text-xs font-medium text-[#4A4A4A] mb-1">Custom duration</label>
+                          <div className="flex gap-2">
+                            <input
+                              type="number"
+                              min="1"
+                              max="10080"
+                              value={form.urgentDurationValue}
+                              onChange={(e) => setForm({ ...form, urgentDurationValue: e.target.value })}
+                              className="w-full min-w-0 px-3 py-2 border border-[#BDBDBD] bg-white text-[#1B1B1B]"
+                            />
+                            <select
+                              value={form.urgentDurationUnit}
+                              onChange={(e) => setForm({ ...form, urgentDurationUnit: e.target.value })}
+                              className="px-3 py-2 border border-[#BDBDBD] bg-white text-[#1B1B1B]"
+                              aria-label="Urgent duration unit"
+                            >
+                              <option value="seconds">Seconds</option>
+                              <option value="minutes">Minutes</option>
+                              <option value="hours">Hours</option>
+                              <option value="days">Days</option>
+                              <option value="weeks">Weeks</option>
+                            </select>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    {editing?.urgentExpiresAt && (
+                      <p className="text-xs text-[#6B5560]">
+                        Current expiry: {new Date(editing.urgentExpiresAt).toLocaleString()}
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
               <div className="flex gap-2 pt-2">
                 <button onClick={handleSave} className="px-4 py-2 bg-[#1B1B1B] text-white hover:bg-[#4A4A4A] transition">Save</button>
                 <button onClick={() => setShowForm(false)} className="px-4 py-2 bg-[#F4F4F4] text-[#4A4A4A] hover:bg-[#E8E8E8] transition">Cancel</button>
@@ -100,7 +213,7 @@ const AdminPopupAds = () => {
         ) : ads.length === 0 ? (
           <div className="bg-white p-12 text-center border border-[#BDBDBD]">
             <p className="text-[#4A4A4A] text-lg">No popup ads yet</p>
-            <p className="text-[#4A4A4A] text-sm mt-1">Click "Add Popup" to create one</p>
+            <p className="text-[#4A4A4A] text-sm mt-1">Click &quot;Add Popup&quot; to create one</p>
           </div>
         ) : (
           <div className="grid gap-4">
@@ -112,6 +225,11 @@ const AdminPopupAds = () => {
                   <h3 className="font-semibold text-[#1B1B1B] truncate">{ad.title || '(no title)'}</h3>
                   {ad.linkUrl && <p className="text-xs text-[#B1123B] truncate flex items-center gap-1"><FaExternalLinkAlt size={10} />{ad.linkUrl}</p>}
                   <span className={`inline-block mt-1 text-xs px-2 py-0.5 ${ad.isActive ? 'bg-green-100 text-green-700' : 'bg-[#F4F4F4] text-[#4A4A4A]'}`}>{ad.isActive ? 'Active' : 'Inactive'}</span>
+                  {ad.isUrgent && (
+                    <span className="inline-block mt-1 ml-2 text-xs px-2 py-0.5 bg-amber-100 text-amber-800">
+                      Urgent · expires {ad.urgentExpiresAt ? new Date(ad.urgentExpiresAt).toLocaleString() : 'not scheduled'}
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <button onClick={() => toggleActive(ad)} className="p-2 hover:bg-[#F4F4F4] text-[#4A4A4A] hover:text-[#1B1B1B] min-h-[44px] min-w-[44px] flex items-center justify-center" title="Toggle active">{ad.isActive ? <FaToggleOn size={20} className="text-green-500" /> : <FaToggleOff size={20} />}</button>

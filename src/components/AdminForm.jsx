@@ -2,6 +2,7 @@
 // src/components/AdminForm.jsx
 import React, { useState, useEffect } from 'react';
 import { FaUser, FaEnvelope, FaUserTag, FaLock, FaUserShield, FaImage, FaEye, FaEyeSlash } from 'react-icons/fa';
+import { ADMIN_PERMISSIONS } from '../lib/adminPermissions';
 
 const AdminForm = ({ onSubmit, currentAdmin, onCancel }) => {
   const [admin, setAdmin] = useState({
@@ -10,7 +11,9 @@ const AdminForm = ({ onSubmit, currentAdmin, onCancel }) => {
     email: '',
     userName: '',
     password: '',
-    superAdmin: false,
+    role: 'custom',
+    roleName: 'Custom role',
+    permissions: ['dashboard'],
     image: null
   });
   const [showPassword, setShowPassword] = useState(false);
@@ -19,13 +22,20 @@ const AdminForm = ({ onSubmit, currentAdmin, onCancel }) => {
 
   useEffect(() => {
     if (currentAdmin) {
+      const isSuperAdmin = currentAdmin.superAdmin || currentAdmin.role === 'super_admin';
+      const isCustomRole = currentAdmin.role === 'custom';
+      const permissions = isCustomRole
+        ? (Array.isArray(currentAdmin.permissions) ? currentAdmin.permissions.filter((permission) => permission !== 'admins') : [])
+        : ADMIN_PERMISSIONS.filter(({ key }) => key !== 'admins').map(({ key }) => key);
       setAdmin({
         firstName: currentAdmin.firstName || '',
         lastName: currentAdmin.lastName || '',
         email: currentAdmin.email || '',
         userName: currentAdmin.userName || '',
         password: '', // Don't populate password for security
-        superAdmin: currentAdmin.superAdmin || false,
+        role: isSuperAdmin ? 'super_admin' : 'custom',
+        roleName: isCustomRole ? (currentAdmin.roleName || 'Custom role') : 'Assigned admin',
+        permissions,
         image: null
       });
       setImagePreview(currentAdmin.imageUrl);
@@ -36,7 +46,9 @@ const AdminForm = ({ onSubmit, currentAdmin, onCancel }) => {
         email: '',
         userName: '',
         password: '',
-        superAdmin: false,
+        role: 'custom',
+        roleName: 'Custom role',
+        permissions: ['dashboard'],
         image: null
       });
       setImagePreview(null);
@@ -58,7 +70,16 @@ const AdminForm = ({ onSubmit, currentAdmin, onCancel }) => {
       };
       reader.readAsDataURL(file);
     } else if (type === 'checkbox') {
-      setAdmin({ ...admin, [name]: checked });
+      if (name === 'permission') {
+        setAdmin((current) => ({
+          ...current,
+          permissions: checked
+            ? [...new Set([...current.permissions, value])]
+            : current.permissions.filter((permission) => permission !== value),
+        }));
+      } else {
+        setAdmin({ ...admin, [name]: checked });
+      }
     } else {
       setAdmin({ ...admin, [name]: value });
     }
@@ -84,6 +105,12 @@ const AdminForm = ({ onSubmit, currentAdmin, onCancel }) => {
     if (admin.password && admin.password.length < 6) {
       newErrors.password = 'Password must be at least 6 characters';
     }
+    if (admin.role === 'custom' && admin.permissions.length === 0) {
+      newErrors.permissions = 'Select at least one sidebar section';
+    }
+    if (admin.role === 'custom' && !admin.roleName.trim()) {
+      newErrors.roleName = 'Enter a name for this role';
+    }
     
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -93,7 +120,7 @@ const AdminForm = ({ onSubmit, currentAdmin, onCancel }) => {
     e.preventDefault();
     
     if (validateForm()) {
-      onSubmit({ ...admin, _id: currentAdmin?._id });
+      onSubmit({ ...admin, superAdmin: admin.role === 'super_admin', _id: currentAdmin?._id });
     }
   };
 
@@ -265,26 +292,48 @@ const AdminForm = ({ onSubmit, currentAdmin, onCancel }) => {
           )}
         </div>
 
-        {/* Super Admin Toggle */}
-        <div className="flex items-center space-x-3">
-          <input
-            type="checkbox"
-            id="superAdmin"
-            name="superAdmin"
-            checked={admin.superAdmin}
-            onChange={handleChange}
-            className="w-4 h-4 text-maybelline-pink bg-gray-100 border-gray-300 rounded focus:ring-maybelline-pink focus:ring-2"
-          />
-          <label htmlFor="superAdmin" className="flex items-center text-sm font-medium text-gray-700">
-            <FaUserShield className="mr-2 text-red-500" />
-            Super Admin Access
-          </label>
-        </div>
-        {admin.superAdmin && (
-          <p className="text-sm text-maybelline-magenta bg-maybelline-light p-2 rounded">
-            ⚠️ Super admins have full system access and can manage other admins.
-          </p>
-        )}
+        <section className="space-y-3 rounded-lg border border-gray-200 p-4">
+          <div>
+            <label htmlFor="admin-role" className="mb-1 block text-sm font-semibold text-gray-800">Admin role</label>
+            <select
+              id="admin-role"
+              name="role"
+              value={admin.role}
+              onChange={(event) => setAdmin((current) => ({ ...current, role: event.target.value }))}
+              className="block w-full rounded-lg border border-gray-300 bg-white px-3 py-2"
+            >
+              <option value="custom">Custom role with selected sections</option>
+              <option value="super_admin">Super admin</option>
+            </select>
+          </div>
+          {admin.role === 'custom' && (
+            <>
+              <div>
+                <label htmlFor="roleName" className="mb-1 block text-sm font-medium text-gray-700">Role name</label>
+                <input id="roleName" name="roleName" value={admin.roleName} onChange={handleChange} placeholder="e.g. Inventory Manager" className="block w-full rounded-lg border border-gray-300 px-3 py-2" />
+                {errors.roleName && <p className="mt-1 text-xs text-red-600">{errors.roleName}</p>}
+              </div>
+              <div>
+                <p className="mb-2 text-sm font-medium text-gray-700">Choose sections this admin can access. Each selected section allows viewing, creating, editing, and deleting its records.</p>
+                <div className="grid max-h-56 grid-cols-1 gap-2 overflow-y-auto rounded border border-gray-200 p-3 sm:grid-cols-2">
+                  {ADMIN_PERMISSIONS.filter(({ key }) => key !== 'admins').map(({ key, label }) => (
+                    <label key={key} className="flex items-center gap-2 text-sm text-gray-700">
+                      <input type="checkbox" name="permission" value={key} checked={admin.permissions.includes(key)} onChange={handleChange} className="h-4 w-4 accent-[#B1123B]" />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                {errors.permissions && <p className="mt-1 text-xs text-red-600">{errors.permissions}</p>}
+              </div>
+            </>
+          )}
+          {admin.role === 'super_admin' && (
+            <p className="rounded bg-red-50 p-2 text-sm text-red-700"><FaUserShield className="mr-2 inline" />Super admins can manage other admin accounts and have full access.</p>
+          )}
+          {currentAdmin && currentAdmin.role === 'admin' && !currentAdmin.superAdmin && (
+            <p className="rounded bg-amber-50 p-2 text-sm text-amber-800">This older admin currently has full section access. All non-admin sections are selected below; uncheck the sections they should not keep, then save to assign a restricted role.</p>
+          )}
+        </section>
 
         {/* Buttons */}
         <div className="flex items-center justify-between pt-4">

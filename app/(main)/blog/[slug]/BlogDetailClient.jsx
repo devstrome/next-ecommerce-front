@@ -3,7 +3,10 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import Link from 'next/link';
 import { FiArrowLeft, FiClock, FiUser, FiEye, FiTag, FiHeart, FiMessageCircle, FiSend, FiTrash2, FiShare2 } from 'react-icons/fi';
+import { FaFacebookF, FaInstagram, FaLinkedinIn, FaPinterestP, FaWhatsapp, FaXTwitter, FaYoutube } from 'react-icons/fa6';
 import SEOHead from '../../../../src/components/SEOHead';
+import { SOCIAL_LINKS } from '../../../../src/config/socialLinks';
+import { getPublicCurrentUrl, getPublicSiteUrl } from '../../../../src/lib/publicSiteUrl';
 
 const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
 
@@ -90,7 +93,7 @@ export default function BlogDetailClient({ slug }) {
   };
 
   const handleShare = async () => {
-    const url = typeof window !== 'undefined' ? window.location.href : '';
+    const url = getPublicCurrentUrl();
     if (navigator.share) {
       try { await navigator.share({ title: blog.title, url }); } catch {}
     } else {
@@ -254,20 +257,20 @@ export default function BlogDetailClient({ slug }) {
 
         {/* Social Share Links */}
         {(() => {
-          const shareUrl = typeof window !== 'undefined' ? window.location.href : '';
+          const shareUrl = getPublicSiteUrl(`/blog/${encodeURIComponent(slug)}`);
           const shareTitle = blog?.title || '';
           const socialLinks = [
-            { name: 'Facebook', url: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`, color: 'bg-blue-600', icon: 'Fb' },
-            { name: 'Twitter', url: `https://twitter.com/intent/tweet?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(shareTitle)}`, color: 'bg-sky-500', icon: 'X' },
-            { name: 'Pinterest', url: `https://pinterest.com/pin/create/button/?url=${encodeURIComponent(shareUrl)}&description=${encodeURIComponent(shareTitle)}`, color: 'bg-red-600', icon: 'P' },
-            { name: 'WhatsApp', url: `https://wa.me/?text=${encodeURIComponent(shareTitle + ' ' + shareUrl)}`, color: 'bg-green-600', icon: 'W' },
-            { name: 'LinkedIn', url: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl)}`, color: 'bg-blue-700', icon: 'L' },
+            { name: 'Facebook', url: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`, color: 'bg-blue-600', Icon: FaFacebookF },
+            { name: 'X', url: `https://twitter.com/intent/tweet?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(shareTitle)}`, color: 'bg-black', Icon: FaXTwitter },
+            { name: 'Pinterest', url: `https://pinterest.com/pin/create/button/?url=${encodeURIComponent(shareUrl)}&description=${encodeURIComponent(shareTitle)}`, color: 'bg-red-600', Icon: FaPinterestP },
+            { name: 'WhatsApp', url: `https://wa.me/?text=${encodeURIComponent(shareTitle + ' ' + shareUrl)}`, color: 'bg-green-600', Icon: FaWhatsapp },
+            { name: 'LinkedIn', url: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl)}`, color: 'bg-blue-700', Icon: FaLinkedinIn },
           ];
           return (
             <div className="mt-8">
               <p className="text-sm font-medium text-dark-gray mb-3">Share this article</p>
               <div className="flex items-center gap-3">
-                {socialLinks.map((link) => (
+                {socialLinks.map(({ Icon, ...link }) => (
                   <a
                     key={link.name}
                     href={link.url}
@@ -276,7 +279,7 @@ export default function BlogDetailClient({ slug }) {
                     title={`Share on ${link.name}`}
                     className={`w-9 h-9 rounded-full ${link.color} text-pure-white flex items-center justify-center text-xs font-bold hover:opacity-80 transition-opacity`}
                   >
-                    {link.icon}
+                    <Icon size={16} />
                   </a>
                 ))}
               </div>
@@ -288,10 +291,16 @@ export default function BlogDetailClient({ slug }) {
         <div className="border-t border-cool-gray mt-10 pt-8">
           <h3 className="font-heading text-lg font-bold text-black mb-4">Follow Us</h3>
           <div className="flex items-center gap-4">
-            <a href="https://facebook.com/BELORELLA" target="_blank" rel="noopener noreferrer" className="w-9 h-9 rounded-full bg-blue-600 text-pure-white flex items-center justify-center text-xs font-bold hover:opacity-80 transition-opacity" title="Facebook">Fb</a>
-            <a href="https://instagram.com/belorella.ig" target="_blank" rel="noopener noreferrer" className="w-9 h-9 rounded-full bg-pink-600 text-pure-white flex items-center justify-center text-xs font-bold hover:opacity-80 transition-opacity" title="Instagram">Ig</a>
-            <a href="https://youtube.com/@BELORELLA" target="_blank" rel="noopener noreferrer" className="w-9 h-9 rounded-full bg-red-600 text-pure-white flex items-center justify-center text-xs font-bold hover:opacity-80 transition-opacity" title="YouTube">Yt</a>
-            <a href="https://x.com/BELORELLAX" target="_blank" rel="noopener noreferrer" className="w-9 h-9 rounded-full bg-black text-pure-white flex items-center justify-center text-xs font-bold hover:opacity-80 transition-opacity" title="X">X</a>
+            {[
+              { label: 'Facebook', href: SOCIAL_LINKS.facebook, Icon: FaFacebookF, hover: 'hover:bg-[#1877F2]' },
+              { label: 'Instagram', href: SOCIAL_LINKS.instagram, Icon: FaInstagram, hover: 'hover:bg-[#E4405F]' },
+              { label: 'YouTube', href: SOCIAL_LINKS.youtube, Icon: FaYoutube, hover: 'hover:bg-[#FF0000]' },
+              { label: 'X', href: SOCIAL_LINKS.twitter, Icon: FaXTwitter, hover: 'hover:bg-black' },
+            ].map(({ label, href, Icon, hover }) => (
+              <a key={label} href={href} target="_blank" rel="noopener noreferrer" className={`w-10 h-10 rounded-full border border-gray-300 text-gray-600 flex items-center justify-center ${hover} hover:border-transparent hover:text-white transition-colors`} title={label} aria-label={`Follow BELORELLA on ${label}`}>
+                <Icon size={17} />
+              </a>
+            ))}
           </div>
         </div>
 

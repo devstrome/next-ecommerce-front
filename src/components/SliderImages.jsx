@@ -11,7 +11,7 @@ const SliderImages = ({ ImageInfo }) => {
                     <img
                         src={ImageInfo.imageUrl}
                         alt={ImageInfo.name}
-                        className="w-full h-full object-cover transition-transform duration-700 hover:scale-105"
+                        className="w-full h-full object-contain p-4 sm:p-5 transition-transform duration-500 hover:scale-[1.02]"
                         loading="lazy"
                     />
 

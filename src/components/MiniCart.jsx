@@ -1,16 +1,22 @@
 'use client'
-import React, { useContext } from 'react';
+import React, { useContext, useEffect } from 'react';
 import Link from 'next/link';
 import { FiX, FiMinus, FiPlus, FiTrash2, FiShoppingBag } from 'react-icons/fi';
 import { CartContext } from '../context/CartContext';
 import { UserContext } from '../context/UserContext';
 import { formatMeasureLine } from '../lib/measure';
 import { formatBDT } from '../config/brand';
+import { publishFloatingPanelVisibility } from '../hooks/useFloatingPanelVisibility';
 
 const MiniCart = ({ open, onClose }) => {
   const { cartItems = [], increaseQuantity, decreaseQuantity, removeItem, discount = 0 } =
     useContext(CartContext);
   const { isLoggedIn } = useContext(UserContext);
+
+  useEffect(() => {
+    publishFloatingPanelVisibility('cart', open);
+    return () => publishFloatingPanelVisibility('cart', false);
+  }, [open]);
 
   if (!open) return null;
 
@@ -22,19 +28,19 @@ const MiniCart = ({ open, onClose }) => {
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/40 z-50" onClick={onClose} aria-hidden="true" />
+      <div className="fixed inset-0 z-[10000] bg-black/40" onClick={onClose} aria-hidden="true" />
       <div
-        className="fixed bottom-0 left-0 right-0 z-50 bg-pure-white rounded-t-2xl shadow-2xl max-h-[85vh] flex flex-col animate-slide-up"
+        className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] left-2 right-2 z-[10001] flex max-h-[calc(100dvh-6rem-env(safe-area-inset-bottom))] min-h-0 flex-col overflow-hidden rounded-2xl bg-pure-white shadow-2xl animate-slide-up md:bottom-0 md:left-0 md:right-0 md:max-h-[85vh] md:rounded-t-2xl"
         role="dialog"
         aria-label="Shopping cart"
       >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-cool-gray">
-          <h3 className="text-sm font-bold text-black tracking-wide uppercase">
+        <div className="flex shrink-0 items-center justify-between border-b border-cool-gray px-4 py-2.5">
+          <h3 className="text-sm font-bold uppercase tracking-wide text-black">
             Your Cart ({itemCount})
           </h3>
           <button
             onClick={onClose}
-            className="text-mid-gray hover:text-black transition-colors"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-mid-gray transition-colors hover:bg-gray-100 hover:text-black"
             aria-label="Close cart"
           >
             <FiX size={20} />
@@ -42,7 +48,7 @@ const MiniCart = ({ open, onClose }) => {
         </div>
 
         {cartItems.length === 0 ? (
-          <div className="px-6 py-12 text-center">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-12 text-center">
             <FiShoppingBag size={36} className="mx-auto text-mid-gray/50 mb-3" />
             <p className="text-sm text-dark-gray mb-4">Your cart is empty</p>
             <Link
@@ -55,10 +61,11 @@ const MiniCart = ({ open, onClose }) => {
           </div>
         ) : (
           <>
-            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+            <div className="min-h-0 flex-1 touch-pan-y space-y-4 overflow-y-auto overscroll-contain px-5 py-4">
               {cartItems.map((item) => {
                 const identifier = getIdentifier(item);
                 const measureLine = formatMeasureLine(item);
+                const reachedStockLimit = !item.isPreOrder && item.stockAvailable != null && Number(item.quantity) >= Number(item.stockAvailable);
                 return (
                   <div key={identifier} className="flex gap-3">
                     <Link href={`/products/${item.productId}`} onClick={onClose} className="shrink-0">
@@ -70,8 +77,16 @@ const MiniCart = ({ open, onClose }) => {
                     </Link>
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-medium text-black line-clamp-2">{item.name}</p>
+                      {item.isPreOrder && (
+                        <p className="text-[10px] font-semibold text-maybelline-pink mt-0.5">
+                          Pre-order{item.preOrderEstimatedDate ? ` · Est. ${new Date(item.preOrderEstimatedDate).toLocaleDateString()}` : ''}
+                        </p>
+                      )}
                       {measureLine && (
                         <p className="text-[10px] text-mid-gray mt-0.5">{measureLine}</p>
+                      )}
+                      {(item.regionName || item.regionId?.name) && (
+                        <p className="text-[10px] text-mid-gray">Region: {item.regionName || item.regionId.name}</p>
                       )}
                       <p className="text-xs font-semibold text-maybelline-pink mt-1">
                         {formatBDT(item.price.toFixed(2))}
@@ -91,6 +106,8 @@ const MiniCart = ({ open, onClose }) => {
                           onClick={() => increaseQuantity(identifier)}
                           className="w-6 h-6 border border-cool-gray flex items-center justify-center text-black hover:border-black transition-colors"
                           aria-label="Increase quantity"
+                          disabled={reachedStockLimit}
+                          title={reachedStockLimit ? `Only ${item.stockAvailable} item(s) are available` : 'Increase quantity'}
                         >
                           <FiPlus size={11} />
                         </button>
@@ -108,7 +125,7 @@ const MiniCart = ({ open, onClose }) => {
               })}
             </div>
 
-            <div className="border-t border-cool-gray px-5 py-4 space-y-3">
+            <div className="shrink-0 space-y-3 border-t border-cool-gray px-5 py-4">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-dark-gray">Subtotal</span>
                 <span className="font-semibold text-black">{formatBDT(total.toFixed(2))}</span>

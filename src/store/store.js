@@ -5,9 +5,10 @@ import cart from './slices/cartSlice';
 import checkout from './slices/checkoutSlice';
 import orders from './slices/orderSlice';
 import wishlist from './slices/wishlistSlice';
+import regions from './slices/regionSlice';
 
 export const makeStore = () => configureStore({
-  reducer: { auth, products, cart, checkout, orders, wishlist },
+  reducer: { auth, products, cart, checkout, orders, wishlist, regions },
 });
 
 const store = makeStore();

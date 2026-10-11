@@ -1,6 +1,7 @@
 'use client'
 import { getStorage, setStorage, removeStorage } from "../lib/storage"
 import React, { useContext, useEffect, useState } from "react";
+import { useDispatch, useSelector } from 'react-redux';
 import { CartContext } from "../context/CartContext";
 import { UserContext } from "../context/UserContext";
 import { ToastContainer, toast } from "react-toastify";
@@ -8,6 +9,9 @@ import { useRouter } from "next/navigation";
 import { formatMeasureLine } from "../lib/measure";
 import { formatBDT } from "../config/brand";
 import "react-toastify/dist/ReactToastify.css";
+import { cartActions } from '../store/slices/cartSlice';
+import { validateCheckout } from '../store/slices/checkoutSlice';
+import { placeOrder } from '../store/slices/orderSlice';
 import { 
   FaMoneyBillAlt, 
   FaMobileAlt, 
@@ -32,8 +36,8 @@ function CheckoutPage() {
     cartItems = [],
     discount = 0,
     coupon = null,
-    clearCart,
     removeItem,
+    fetchCart,
   } = useContext(CartContext);
 
   const {
@@ -42,9 +46,15 @@ function CheckoutPage() {
     paymentMethods,
     defaultPaymentMethod,
     isLoggedIn,
+    authRequest,
     updateAddress,
     addPaymentMethod,
   } = useContext(UserContext);
+  const digitalOnlyCart = cartItems.length > 0 && cartItems.every((item) => Boolean(item.isDigitalProduct));
+  const requiresWalletPayment = cartItems.some((item) => Boolean(item.isDigitalProduct));
+  const availablePaymentMethods = requiresWalletPayment
+    ? paymentMethods.filter((method) => ['bkash', 'nagad'].includes(String(method.type || '').toLowerCase()))
+    : paymentMethods;
 
   const [shippingInfo, setShippingInfo] = useState({
     fullName: user?.fullName || "",
@@ -67,13 +77,44 @@ function CheckoutPage() {
     isDefault: false,
   });
   const [transactionNumber, setTransactionNumber] = useState("");
+  const [loyaltyBalance, setLoyaltyBalance] = useState(0);
+  const [loyaltyRequested, setLoyaltyRequested] = useState('');
+  const [loyaltyMaxRedeemPercent, setLoyaltyMaxRedeemPercent] = useState(100);
+  const [loyaltyEnabled, setLoyaltyEnabled] = useState(false);
   const [loading, setLoading] = useState(false);
   const [shippingOptions, setShippingOptions] = useState([]);
   const [selectedShipping, setSelectedShipping] = useState(null);
   const [deliveryPhone, setDeliveryPhone] = useState('');
-  const [ruleEval, setRuleEval] = useState(null);
   const [rulesTick, setRulesTick] = useState(0);
+  const dispatch = useDispatch();
+  const checkoutState = useSelector((state) => state.checkout);
   const router = useRouter();
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isLoggedIn || !user?._id) {
+      setLoyaltyBalance(0);
+      setLoyaltyRequested('');
+      setLoyaltyEnabled(false);
+      return () => { cancelled = true; };
+    }
+    authRequest(`${process.env.NEXT_PUBLIC_API_URI}/api/loyalty/me`, { method: 'GET' })
+      .then((data) => {
+        if (cancelled) return;
+        setLoyaltyBalance(Math.max(0, Number(data.balanceBDT) || 0));
+        setLoyaltyMaxRedeemPercent(Math.min(100, Math.max(0, Number(data.maxRedeemPercent ?? 100) || 0)));
+        setLoyaltyEnabled(Boolean(data.enabled));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLoyaltyBalance(0);
+          setLoyaltyEnabled(false);
+        }
+      });
+    return () => { cancelled = true; };
+    // authRequest is provided by UserContext and changes identity during renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoggedIn, user?._id]);
 
   useEffect(() => {
     if (address && useSavedAddress) {
@@ -106,6 +147,13 @@ function CheckoutPage() {
   }, [defaultPaymentMethod]);
 
   useEffect(() => {
+    if (!requiresWalletPayment) return;
+    const currentType = String(selectedPaymentMethod?.type || '').toLowerCase();
+    if (['bkash', 'nagad'].includes(currentType)) return;
+    setSelectedPaymentMethod(availablePaymentMethods[0] || null);
+  }, [requiresWalletPayment, selectedPaymentMethod, availablePaymentMethods]);
+
+  useEffect(() => {
     let cancelled = false;
     const loadShipping = async () => {
       try {
@@ -113,6 +161,20 @@ function CheckoutPage() {
           if (!cancelled) {
             setShippingOptions([]);
             setSelectedShipping(null);
+          }
+          return;
+        }
+
+        if (cartItems.every((item) => Boolean(item.isDigitalProduct))) {
+          const digitalDeliveryOption = {
+            name: 'Digital Products — Free Delivery',
+            charge: 0,
+            estimatedDays: 0,
+            isDigitalDelivery: true,
+          };
+          if (!cancelled) {
+            setShippingOptions([digitalDeliveryOption]);
+            setSelectedShipping(digitalDeliveryOption);
           }
           return;
         }
@@ -228,25 +290,40 @@ function CheckoutPage() {
   };
 
   const mainTotal = cartItems.reduce((acc, item) => acc + item.price * item.quantity, 0);
-  const discountPercentage = (discount / mainTotal) * 100;
+  const couponRegions = [...new Set(
+    (coupon?.applicableProducts || []).flatMap((productRule) => productRule.variants || [])
+      .map((variant) => variant.regionName || variant.regionId?.name)
+      .filter(Boolean)
+  )];
   const shippingCharge = selectedShipping?.charge ? Number(selectedShipping.charge) : 0;
-  const totalAfterDiscount = mainTotal - discount;
   const paymentMethodKey = !selectedPaymentMethod
     ? ''
     : selectedPaymentMethod.type === 'cash'
       ? 'Cash on Delivery'
       : selectedPaymentMethod.type;
-  const effectiveShipping = ruleEval ? Number(ruleEval.deliveryCharge) : shippingCharge;
+  const cartSignature = cartItems
+    .map(i => `${i._id || i.guestItemId || ''}-${i.productId?._id || i.productId}-${i.regionId || ''}-${i.variantId}:${i.size}:${i.measureType}:${i.unitName}:${i.quantity}`)
+    .join(',');
+  const checkoutRequestKey = JSON.stringify([cartSignature, selectedShipping?.name || '', shippingCharge, paymentMethodKey, mainTotal, discount]);
+  const ruleEval = checkoutState.validation?.requestKey === checkoutRequestKey ? checkoutState.validation : null;
+  const displaySubtotal = ruleEval ? Number(ruleEval.subtotal || 0) : mainTotal;
+  const displayDiscount = ruleEval ? Number(ruleEval.discountAmount || 0) : discount;
+  const displayShippingCharge = ruleEval ? Number(ruleEval.baseDelivery || 0) : shippingCharge;
+  const discountPercentage = displaySubtotal > 0 ? (displayDiscount / displaySubtotal) * 100 : 0;
+  const totalAfterDiscount = ruleEval ? Number(ruleEval.orderAmount || 0) : mainTotal - discount;
+  const effectiveShipping = ruleEval ? Number(ruleEval.deliveryCharge || 0) : shippingCharge;
   const extraFeeTotal = ruleEval ? Number(ruleEval.extraFeeTotal || 0) : 0;
   const grandTotal = totalAfterDiscount + effectiveShipping + extraFeeTotal;
-  const ruleBlockers = ruleEval?.blockers || [];
-  const checkoutBlocked = ruleBlockers.length > 0;
+  const loyaltyCap = loyaltyEnabled ? grandTotal * loyaltyMaxRedeemPercent / 100 : 0;
+  const loyaltyApplied = isLoggedIn
+    ? Math.round(Math.min(Math.max(0, Number(loyaltyRequested) || 0), loyaltyBalance, loyaltyCap, grandTotal) * 100) / 100
+    : 0;
+  const amountDue = Math.max(0, Math.round((grandTotal - loyaltyApplied) * 100) / 100);
+  const ruleBlockers = ruleEval?.blockers || (checkoutState.status === 'failed' && checkoutState.error ? [{ message: checkoutState.error }] : []);
+  const checkoutBlocked = !ruleEval || !ruleEval.ok || ruleBlockers.length > 0;
   const deliveryRuleNotes = (ruleEval?.appliedRules || []).filter(r =>
-    ['free_delivery_above', 'delivery_multiplier', 'extra_delivery_fee'].includes(r.type)
+    ['free_delivery_above', 'digital_free_delivery', 'delivery_multiplier', 'extra_delivery_fee'].includes(r.type)
   );
-  const cartSignature = cartItems
-    .map(i => `${i._id || i.guestItemId || ''}-${i.productId}-${i.variantId}:${i.quantity}`)
-    .join(',');
 
   // Evaluate admin checkout rules (delivery multipliers, fees, limits) on cart/shipping/payment changes
   // Re-evaluate when admin coupons/rules/shipping/prices change over socket
@@ -257,38 +334,38 @@ function CheckoutPage() {
   }, []);
 
   useEffect(() => {
-    if (!cartItems.length) {
-      setRuleEval(null);
-      return;
-    }
+    if (!cartItems.length) return;
     let cancelled = false;
-    const timer = setTimeout(async () => {
+    const timer = setTimeout(() => {
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URI}/api/checkout-rules/evaluate`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            subtotal: mainTotal,
-            discountAmount: discount,
-            shippingCharge,
-            shippingMethodName: selectedShipping?.name || '',
-            paymentMethod: paymentMethodKey,
-            items: cartItems.map(i => ({ productId: i.productId, name: i.name, quantity: i.quantity })),
-          }),
+        dispatch(validateCheckout({
+          shippingName: selectedShipping?.name || '',
+          paymentMethod: paymentMethodKey,
+          requestKey: checkoutRequestKey,
+        })).unwrap().then((data) => {
+          if (!cancelled && data.cart) dispatch(cartActions.cartServerSnapshot({ cart: data.cart }));
+        }).catch((error) => {
+          if (!cancelled) console.error('Checkout validation failed:', error);
         });
-        if (!res.ok) throw new Error('evaluate failed');
-        const data = await res.json();
-        if (!cancelled) setRuleEval(data);
-      } catch (e) {
-        if (!cancelled) setRuleEval(null);
+      } catch (error) {
+        if (!cancelled) console.error('Checkout validation failed:', error);
       }
     }, 350);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [mainTotal, discount, shippingCharge, selectedShipping?.name, paymentMethodKey, cartSignature, rulesTick]);
+  }, [dispatch, mainTotal, discount, shippingCharge, selectedShipping?.name, paymentMethodKey, cartSignature, checkoutRequestKey, rulesTick, cartItems.length]);
 
 const handleCheckout = async () => {
   if (!validateShippingInfo()) return;
 
+  if (amountDue > 0 && requiresWalletPayment && !['bkash', 'nagad'].includes(String(selectedPaymentMethod?.type || '').toLowerCase())) {
+    toast.error('Digital products require bKash or Nagad payment. Add or select a wallet payment method to continue.');
+    return;
+  }
+
+  if (!ruleEval) {
+    toast.info(checkoutState.status === 'loading' ? 'Checking current prices and stock…' : 'Checkout details are still being validated.');
+    return;
+  }
   if (checkoutBlocked) {
     toast.error(ruleBlockers[0].message);
     return;
@@ -312,12 +389,12 @@ const handleCheckout = async () => {
     phone: shippingInfo.phone
   };
 
-  if (!selectedPaymentMethod) {
+  if (amountDue > 0 && !selectedPaymentMethod) {
     toast.error("Please select a payment method.");
     return;
   }
 
-  const isMobilePayment = ['bkash', 'nagad'].includes(selectedPaymentMethod.type.toLowerCase());
+  const isMobilePayment = amountDue > 0 && ['bkash', 'nagad'].includes(String(selectedPaymentMethod?.type || '').toLowerCase());
   if (isMobilePayment) {
     if (!transactionNumber.trim()) {
       toast.error("Please provide a valid transaction number.");
@@ -337,38 +414,18 @@ const handleCheckout = async () => {
   setLoading(true);
 
   try {
-    const paymentMethodToSend = selectedPaymentMethod.type === 'cash' 
-      ? 'Cash on Delivery' 
-      : selectedPaymentMethod.type;
+    const paymentMethodToSend = amountDue <= 0
+      ? 'Loyalty Balance'
+      : selectedPaymentMethod.type === 'cash'
+        ? 'Cash on Delivery'
+        : selectedPaymentMethod.type;
 
     const orderData = {
-      userId: user._id,
-      items: cartItems.map((item) => ({
-        variantId: item.variantId,
-        productId: item.productId,
-        discountApplied: item.discountApplied || 0,
-        name: item.name,
-        quantity: item.quantity,
-        price: item.price,
-        mainImage: item.mainImage,
-        size: item.size,
-        color: item.color,
-        measureType: item.measureType,
-        unitName: item.unitName,
-      })),
-      totalAmount: mainTotal,
-      shipping: selectedShipping ? {
-        name: selectedShipping.name,
-        charge: shippingCharge,
-        estimatedDays: selectedShipping.estimatedDays || 0,
-      } : null,
-      shippingCost: effectiveShipping,
-      grandTotal: grandTotal,
-      discountAmount: discount,
-      couponCode: coupon?.code || null,
+      shipping: selectedShipping ? { name: selectedShipping.name } : null,
       shippingAddress: orderShippingAddress,
       paymentMethod: paymentMethodToSend,
-      selectedPaymentMethodId: selectedPaymentMethod._id || selectedPaymentMethod.methodId,
+      selectedPaymentMethodId: amountDue <= 0 ? 'loyalty' : selectedPaymentMethod._id || selectedPaymentMethod.methodId,
+      loyaltyAmountBDT: loyaltyApplied,
       paymentDetails: isMobilePayment ? { 
         trxId: transactionNumber.trim(),
         walletNumberMasked: selectedPaymentMethod.walletNumberMasked,
@@ -376,23 +433,8 @@ const handleCheckout = async () => {
       } : {},
     };
 
-    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URI}/api/order`, {
-      method: "POST",
-      headers: { 
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${getStorage('accessToken')}`
-      },
-      body: JSON.stringify(orderData),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.message || "Failed to place order");
-    }
-
-    const result = await response.json();
-    
-    clearCart();
+    const result = await dispatch(placeOrder(orderData)).unwrap();
+    dispatch(cartActions.cartServerSnapshot({ cart: { items: [], couponId: null, totalAmount: 0, discountAmount: 0 } }));
     toast.success("Order placed successfully!");
     
     router.push(`/profile/orders/order-confirmation/${result.orderId}`, {
@@ -407,17 +449,19 @@ const handleCheckout = async () => {
     console.error("Checkout error:", error);
     
     let errorMessage = "Failed to place order. Please try again later.";
-    if (error.message.includes("network")) {
+    const message = typeof error === 'string' ? error : error.message || '';
+    if (message.toLowerCase().includes("network")) {
       errorMessage = "Network error. Please check your connection and try again.";
-    } else if (error.message.includes("validation")) {
+    } else if (message.toLowerCase().includes("validation")) {
       errorMessage = "Invalid order data. Please check your information.";
     }
     
-    toast.error(error.message || errorMessage);
+    toast.error(message || errorMessage);
+    if (message) await fetchCart();
     
     if (window.analytics) {
       window.analytics.track('Checkout Error', {
-        error: error.message,
+        error: message,
         userId: user?._id
       });
     }
@@ -711,26 +755,27 @@ const handleCheckout = async () => {
                 ) : (
                   <div className="space-y-3">
                     {shippingOptions.map((opt, idx) => (
-                      <label key={idx} className="flex items-center gap-4 p-4 border border-cool-gray hover:border-maybelline-pink/50 hover:bg-cool-gray transition-all duration-200 cursor-pointer">
+                      <label key={idx} className={`flex items-center gap-4 p-4 border border-cool-gray ${opt.isDigitalDelivery ? 'bg-green-50 cursor-default' : 'hover:border-maybelline-pink/50 hover:bg-cool-gray cursor-pointer'} transition-all duration-200`}>
                         <input
                           type="radio"
                           name="shippingOption"
                           checked={selectedShipping?.name === opt.name}
-                          onChange={() => setSelectedShipping(opt)}
+                          onChange={() => { if (!opt.isDigitalDelivery) setSelectedShipping(opt); }}
+                          disabled={Boolean(opt.isDigitalDelivery)}
                           className="w-5 h-5 text-maybelline-pink border-cool-gray focus:ring-maybelline-pink"
                         />
                         <div className="flex justify-between items-center w-full">
                           <div>
-                            <span className="font-semibold text-black">{opt.name}</span>
-                            <p className="text-sm text-dark-gray">{opt.estimatedDays} days delivery</p>
+                            <span className="font-semibold text-black">{opt.isDigitalDelivery ? 'Free Delivery' : opt.name}</span>
+                            <p className="text-sm text-dark-gray">{opt.isDigitalDelivery ? 'Digital code will be sent by email after payment confirmation.' : `${opt.estimatedDays} days delivery`}</p>
                           </div>
-                          <span className="font-bold text-maybelline-pink">{formatBDT(Number(opt.charge).toFixed(2))}</span>
+                          <span className={`font-bold ${opt.isDigitalDelivery ? 'text-green-600' : 'text-maybelline-pink'}`}>{opt.isDigitalDelivery ? 'Free' : formatBDT(Number(opt.charge).toFixed(2))}</span>
                         </div>
                       </label>
                     ))}
                   </div>
                 )}
-                {deliveryPhone && (
+                {!digitalOnlyCart && deliveryPhone && (
                   <p className="mt-4 text-sm text-dark-gray">
                     Delivery inquiries: <a href={`tel:${deliveryPhone}`} className="font-semibold text-maybelline-pink hover:underline">{deliveryPhone}</a>
                   </p>
@@ -748,6 +793,11 @@ const handleCheckout = async () => {
               </div>
 
               <div className="p-6">
+                {requiresWalletPayment && (
+                  <div className="mb-4 rounded-lg border border-maybelline-pink/20 bg-maybelline-pink/5 p-3 text-sm text-dark-gray">
+                    This cart contains a digital product. Choose bKash or Nagad and enter the payment transaction ID.
+                  </div>
+                )}
                 {!addingNewPayment ? (
                   <div className="space-y-4">
                     <select
@@ -761,12 +811,12 @@ const handleCheckout = async () => {
                       className="w-full p-4 border border-cool-gray font-sans text-black bg-pure-white focus:ring-1 focus:ring-maybelline-pink focus:border-maybelline-pink outline-none transition-all duration-200"
                     >
                       <option value="">Select a payment method</option>
-                      {paymentMethods.map((method) => (
+                      {availablePaymentMethods.map((method) => (
                         <option key={method._id} value={method._id}>
                           {method.label || `${method.type.toUpperCase()} ${method.walletNumberMasked || method.last4 || ''}`}
                         </option>
                       ))}
-                      <option value="Cash On Delivery">Cash on Delivery</option>
+                      {!requiresWalletPayment && <option value="Cash On Delivery">Cash on Delivery</option>}
                     </select>
 
                     {selectedPaymentMethod && (
@@ -815,7 +865,7 @@ const handleCheckout = async () => {
                             <label className="block text-sm font-medium text-dark-gray mb-1">Send Money To</label>
                             <input
                               type="text"
-                              value={"+8801873886367"}
+                              value={String(selectedPaymentMethod.type || '').toLowerCase() === 'bkash' ? '01601886367' : '01873886367'}
                               className="w-full p-3 border border-cool-gray bg-pure-white font-sans text-black"
                               readOnly
                             />
@@ -850,8 +900,8 @@ const handleCheckout = async () => {
                       </button>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-3 mb-4">
-                      {['bkash', 'nagad', 'card'].map(type => (
+                    <div className={`grid gap-3 mb-4 ${requiresWalletPayment ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                      {(requiresWalletPayment ? ['bkash', 'nagad'] : ['bkash', 'nagad', 'card']).map(type => (
                         <button
                           key={type}
                           onClick={() => setNewPaymentMethod(prev => ({ ...prev, type }))}
@@ -966,8 +1016,17 @@ const handleCheckout = async () => {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-black line-clamp-2">{item.name}</p>
-                        {item.size && <p className="text-sm text-dark-gray">{formatMeasureLine(item)}</p>}
+                        {item.isPreOrder && (
+                          <p className="text-xs font-semibold text-maybelline-pink">
+                            Pre-order{item.preOrderEstimatedDate ? ` · Est. ${new Date(item.preOrderEstimatedDate).toLocaleDateString()}` : ''}
+                          </p>
+                        )}
+                        {item.isDigitalProduct && (
+                          <p className="text-xs font-semibold text-maybelline-pink">Digital product · online payment required</p>
+                        )}
+                        {formatMeasureLine(item) && <p className="text-sm text-dark-gray">{formatMeasureLine(item)}</p>}
                         {item.color && <p className="text-sm text-dark-gray">Color: {item.color}</p>}
+                        {(item.regionName || item.regionId?.name) && <p className="text-sm text-dark-gray">Region: {item.regionName || item.regionId.name}</p>}
                         <p className="text-sm text-dark-gray">Qty: {item.quantity}</p>
                       </div>
                       <div className="flex flex-col items-end">
@@ -993,14 +1052,14 @@ const handleCheckout = async () => {
               <div className="space-y-3 border-t border-cool-gray pt-4">
                 <div className="flex justify-between items-center">
                   <span className="text-dark-gray">Subtotal</span>
-                  <span className="font-semibold text-black">{formatBDT(mainTotal.toFixed(2))}</span>
+                  <span className="font-semibold text-black">{formatBDT(displaySubtotal.toFixed(2))}</span>
                 </div>
                 
-                {discount > 0 && (
+                {displayDiscount > 0 && (
                   <>
                     <div className="flex justify-between items-center text-dark-gray">
                       <span>Discount</span>
-                      <span className="font-semibold">- {formatBDT(discount.toFixed(2))}</span>
+                      <span className="font-semibold">- {formatBDT(displayDiscount.toFixed(2))}</span>
                     </div>
                     <div className="flex justify-between items-center text-dark-gray">
                       <span>Discount Percentage</span>
@@ -1010,9 +1069,17 @@ const handleCheckout = async () => {
                 )}
                 
                 {coupon?.code && (
-                  <div className="flex justify-between items-center text-dark-gray">
+                  <div className="flex justify-between items-start gap-3 text-dark-gray">
                     <span>Coupon Applied</span>
-                    <span className="font-semibold">{coupon.code}</span>
+                    <span className="text-right font-semibold">
+                      <span className="block">{coupon.code}</span>
+                      {Number(coupon.maxDiscountAmount) > 0 && (
+                        <span className="block text-xs font-normal">Maximum saving {formatBDT(coupon.maxDiscountAmount)}</span>
+                      )}
+                      {couponRegions.length > 0 && (
+                        <span className="block text-xs font-normal">Regions: {couponRegions.join(', ')}</span>
+                      )}
+                    </span>
                   </div>
                 )}
                 
@@ -1021,16 +1088,18 @@ const handleCheckout = async () => {
                   <span className="font-semibold text-black text-right">
                     {ruleEval?.freeDelivery ? (
                       <>
-                        <span className="line-through text-mid-gray mr-2">{formatBDT(shippingCharge.toFixed(2))}</span>
+                        {displayShippingCharge > 0 && (
+                          <span className="line-through text-mid-gray mr-2">{formatBDT(displayShippingCharge.toFixed(2))}</span>
+                        )}
                         <span className="text-green-600">Free</span>
                       </>
-                    ) : effectiveShipping !== shippingCharge ? (
+                    ) : effectiveShipping !== displayShippingCharge ? (
                       <>
-                        <span className="line-through text-mid-gray mr-2">{formatBDT(shippingCharge.toFixed(2))}</span>
+                        <span className="line-through text-mid-gray mr-2">{formatBDT(displayShippingCharge.toFixed(2))}</span>
                         <span>{formatBDT(effectiveShipping.toFixed(2))}</span>
                       </>
                     ) : (
-                      <>{formatBDT(shippingCharge.toFixed(2))}</>
+                      <>{formatBDT(displayShippingCharge.toFixed(2))}</>
                     )}
                   </span>
                 </div>
@@ -1050,10 +1119,59 @@ const handleCheckout = async () => {
                   </div>
                 ))}
 
+                {isLoggedIn && loyaltyEnabled && (
+                  <div className="rounded-lg border border-rose-100 bg-rose-50/50 p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <label htmlFor="checkout-loyalty" className="font-medium text-black">Use loyalty balance</label>
+                      <span className="text-xs text-dark-gray">Available {formatBDT(loyaltyBalance.toFixed(2))}</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        id="checkout-loyalty"
+                        type="number"
+                        min="0"
+                        max={Math.min(loyaltyBalance, loyaltyCap)}
+                        step="0.01"
+                        value={loyaltyRequested}
+                        onChange={(event) => setLoyaltyRequested(event.target.value)}
+                        placeholder="BDT amount"
+                        className="min-w-0 flex-1 rounded border border-cool-gray px-3 py-2 text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setLoyaltyRequested(String(Math.round(Math.min(loyaltyBalance, loyaltyCap) * 100) / 100))}
+                        className="rounded border border-cool-gray px-3 text-sm font-medium hover:bg-white"
+                        disabled={loyaltyBalance <= 0 || loyaltyCap <= 0}
+                      >Use max</button>
+                      <button
+                        type="button"
+                        onClick={() => setLoyaltyRequested('')}
+                        className="rounded border border-cool-gray px-3 text-sm hover:bg-white"
+                      >Clear</button>
+                    </div>
+                    {loyaltyMaxRedeemPercent < 100 && (
+                      <p className="text-xs text-dark-gray">Up to {loyaltyMaxRedeemPercent}% of this order can be paid with loyalty balance.</p>
+                    )}
+                  </div>
+                )}
+
+                {loyaltyApplied > 0 && (
+                  <div className="flex justify-between items-center text-green-700">
+                    <span>Loyalty balance applied</span>
+                    <span className="font-semibold">- {formatBDT(loyaltyApplied.toFixed(2))}</span>
+                  </div>
+                )}
+
                 <div className="flex justify-between items-center text-xl font-bold pt-3 border-t border-cool-gray">
                   <span>Total</span>
                   <span className="text-maybelline-pink">{formatBDT(grandTotal.toFixed(2))}</span>
                 </div>
+                {loyaltyApplied > 0 && (
+                  <div className="flex justify-between items-center text-lg font-bold">
+                    <span>Pay now</span>
+                    <span className="text-maybelline-pink">{formatBDT(amountDue.toFixed(2))}</span>
+                  </div>
+                )}
               </div>
 
               {(ruleEval?.notices || []).length > 0 && !checkoutBlocked && (

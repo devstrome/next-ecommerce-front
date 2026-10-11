@@ -1,6 +1,6 @@
 'use client'
 import { getStorage, setStorage, removeStorage } from "../lib/storage"
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import { useRouter } from "next/navigation";
@@ -25,6 +25,11 @@ export const POSProvider = ({ children }) => {
     email: '',
     address: ''
   });
+  const [loyaltyCustomer, setLoyaltyCustomer] = useState(null);
+  const [loyaltyRequested, setLoyaltyRequested] = useState('');
+  const [posGiftCode, setPosGiftCodeValue] = useState('');
+  const [posGiftCodeDetails, setPosGiftCodeDetails] = useState(null);
+  const [posGiftCodeLoading, setPosGiftCodeLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [scannedBarcode, setScannedBarcode] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -41,10 +46,11 @@ export const POSProvider = ({ children }) => {
   const searchInputRef = useRef(null);
   const barcodeInputRef = useRef(null);
   const router = useRouter();
-  const { isAuthenticated, loading: authLoading } = useAdmin();
+  const { isAuthenticated, loading: authLoading, hasPermission } = useAdmin();
+  const canAccessPos = hasPermission('pos') || hasPermission('posOrders');
 
   // Helper function for authenticated requests
-  const makeAuthenticatedRequest = (config) => {
+  const makeAuthenticatedRequest = useCallback((config) => {
     const token = getStorage('adminAccessToken');
     return axios({
       ...config,
@@ -54,22 +60,9 @@ export const POSProvider = ({ children }) => {
         'Content-Type': 'application/json'
       }
     });
-  };
+  }, []);
 
-  useEffect(() => {
-    if (!authLoading && !isAuthenticated) {
-      toast.error('Please log in as admin to access POS');
-      router.push('/admin');
-      return;
-    }
-    
-    if (isAuthenticated) {
-      fetchStats();
-      fetchRecentOrders();
-    }
-  }, [isAuthenticated, authLoading]);
-
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       const response = await makeAuthenticatedRequest({
         method: 'GET',
@@ -79,9 +72,9 @@ export const POSProvider = ({ children }) => {
     } catch (error) {
       console.error('Error fetching stats:', error);
     }
-  };
+  }, [makeAuthenticatedRequest]);
 
-  const fetchRecentOrders = async () => {
+  const fetchRecentOrders = useCallback(async () => {
     try {
       const response = await makeAuthenticatedRequest({
         method: 'GET',
@@ -91,7 +84,20 @@ export const POSProvider = ({ children }) => {
     } catch (error) {
       console.error('Error fetching recent orders:', error);
     }
-  };
+  }, [makeAuthenticatedRequest]);
+
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      toast.error('Please log in as admin to access POS');
+      router.push('/admin');
+      return;
+    }
+
+    if (isAuthenticated && canAccessPos) {
+      fetchStats();
+      fetchRecentOrders();
+    }
+  }, [isAuthenticated, authLoading, router, fetchStats, fetchRecentOrders, canAccessPos]);
 
   const searchProducts = async (query) => {
     if (!query.trim()) {
@@ -103,7 +109,7 @@ export const POSProvider = ({ children }) => {
       setLoading(true);
       const response = await makeAuthenticatedRequest({
         method: 'GET',
-        url: `${process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000'}/api/pos/search?query=${query}`
+        url: `${process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000'}/api/pos/search?query=${encodeURIComponent(query)}`
       });
       setSearchResults(response.data.inventory);
     } catch (error) {
@@ -122,7 +128,7 @@ export const POSProvider = ({ children }) => {
       // Use the inventory scan endpoint for both barcodes and QR codes
       const response = await makeAuthenticatedRequest({
         method: 'GET',
-        url: `${process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000'}/api/inventory/scan?code=${barcode}`
+        url: `${process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000'}/api/inventory/scan?code=${encodeURIComponent(barcode)}`
       });
       
       if (response.data.success) {
@@ -147,7 +153,7 @@ export const POSProvider = ({ children }) => {
       // Use the inventory scan endpoint for QR codes
       const response = await makeAuthenticatedRequest({
         method: 'GET',
-        url: `${process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000'}/api/inventory/scan?code=${qrData}`
+        url: `${process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000'}/api/inventory/scan?code=${encodeURIComponent(qrData)}`
       });
       
       if (response.data.success) {
@@ -187,9 +193,16 @@ export const POSProvider = ({ children }) => {
       variantInfo: {
         size: inventory.size,
         color: inventory.color?.name,
+        variantId: inventory.variantId?._id || inventory.variantId || null,
         barcode: inventory.barcode,
+        realBarcode: inventory.realBarcode || '',
+        qrCode: inventory.qrCode || '',
+        imageUrl: inventory.variantImage || inventory.imageUri || inventory.productId?.mainImage || '',
+        hexCode: inventory.color?.hexCode || inventory.hexCode || '',
         measureType: inventory.variantId?.measureType,
-        unitName: inventory.variantId?.unitName
+        unitName: inventory.variantId?.unitName,
+        regionId: inventory.regionId?._id || inventory.regionId || inventory.variantId?.regionId?._id || inventory.variantId?.regionId || null,
+        regionName: inventory.regionName || inventory.regionId?.name || inventory.variantId?.regionName || inventory.variantId?.regionId?.name || ''
       },
       quantity: 1, // Each inventory item represents 1 unit
       unitPrice: inventory.price,
@@ -208,6 +221,10 @@ export const POSProvider = ({ children }) => {
   const clearCart = () => {
     setCart([]);
     setCustomer({ name: '', phone: '', email: '', address: '' });
+    setLoyaltyCustomer(null);
+    setLoyaltyRequested('');
+    setPosGiftCodeValue('');
+    setPosGiftCodeDetails(null);
     setPaymentMethod('cash');
     setTaxRate(0);
     setDiscount(0);
@@ -223,14 +240,71 @@ export const POSProvider = ({ children }) => {
     return { subtotal, taxAmount, discountAmount, total };
   };
 
+  const lookupLoyaltyCustomer = async (query) => {
+    const search = String(query || '').trim();
+    if (search.length < 3) throw new Error('Enter at least 3 characters of phone or email');
+    const response = await makeAuthenticatedRequest({
+      method: 'GET',
+      url: `${process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000'}/api/pos/loyalty/customer?query=${encodeURIComponent(search)}`,
+    });
+    const linkedCustomer = response.data.customer;
+    setLoyaltyCustomer(linkedCustomer);
+    setLoyaltyRequested('');
+    setPosGiftCodeValue('');
+    setPosGiftCodeDetails(null);
+    setCustomer((current) => ({
+      ...current,
+      name: linkedCustomer.name || current.name,
+      email: linkedCustomer.email || current.email,
+      phone: linkedCustomer.phone || current.phone,
+    }));
+    return linkedCustomer;
+  };
+
+  const clearLoyaltyCustomer = () => {
+    setLoyaltyCustomer(null);
+    setLoyaltyRequested('');
+    setPosGiftCodeValue('');
+    setPosGiftCodeDetails(null);
+  };
+
+  const setPOSGiftCode = (value) => {
+    setPosGiftCodeValue(String(value || '').toUpperCase());
+    setPosGiftCodeDetails(null);
+  };
+
+  const clearPOSGiftCode = () => {
+    setPosGiftCodeValue('');
+    setPosGiftCodeDetails(null);
+  };
+
+  const validatePOSGiftCode = async () => {
+    if (!loyaltyCustomer?.userId) throw new Error('Find and select the customer who will use this gift code');
+    const code = String(posGiftCode || '').trim().toUpperCase();
+    if (!code) throw new Error('Enter a gift code');
+    setPosGiftCodeLoading(true);
+    try {
+      const response = await makeAuthenticatedRequest({
+        method: 'POST',
+        url: `${process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000'}/api/pos/gift-codes/validate`,
+        data: { code, userId: loyaltyCustomer.userId },
+      });
+      const details = { ...response.data.giftCode, code };
+      setPosGiftCodeDetails(details);
+      return details;
+    } finally {
+      setPosGiftCodeLoading(false);
+    }
+  };
+
   const processOrder = async () => {
     if (cart.length === 0) {
       toast.error('Cart is empty');
       return;
     }
 
-    if (!customer.name.trim()) {
-      toast.error('Customer name is required');
+    if (posGiftCode.trim() && (!posGiftCodeDetails || posGiftCodeDetails.code !== posGiftCode.trim().toUpperCase())) {
+      toast.error('Apply and validate the gift code before completing the sale');
       return;
     }
 
@@ -246,6 +320,9 @@ export const POSProvider = ({ children }) => {
         discount: discountAmount,
         total,
         paymentMethod,
+        loyaltyUserId: loyaltyCustomer?.userId || null,
+        loyaltyAmountBDT: Math.max(0, Number(loyaltyRequested) || 0),
+        loyaltyGiftCode: posGiftCodeDetails?.code || '',
         outlet,
         notes
       };
@@ -298,6 +375,11 @@ export const POSProvider = ({ children }) => {
     // State
     cart,
     customer,
+    loyaltyCustomer,
+    loyaltyRequested,
+    posGiftCode,
+    posGiftCodeDetails,
+    posGiftCodeLoading,
     searchQuery,
     scannedBarcode,
     searchResults,
@@ -315,6 +397,9 @@ export const POSProvider = ({ children }) => {
     
     // Actions
     setCustomer,
+    setLoyaltyRequested,
+    setPOSGiftCode,
+    clearPOSGiftCode,
     setSearchQuery,
     setScannedBarcode,
     setShowScanner,
@@ -333,6 +418,9 @@ export const POSProvider = ({ children }) => {
     clearCart,
     calculateTotals,
     processOrder,
+    lookupLoyaltyCustomer,
+    validatePOSGiftCode,
+    clearLoyaltyCustomer,
     printReceipt,
     fetchStats,
     fetchRecentOrders

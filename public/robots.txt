@@ -1,6 +1,14 @@
 User-agent: *
 Allow: /
-Disallow: /admin/
-Disallow: /profile/
+Disallow: /admin
+Disallow: /profile
+Disallow: /cart
+Disallow: /checkout
+Disallow: /login
+Disallow: /signup
+Disallow: /forgot-password
+Disallow: /wishlist
+Disallow: /api/
+Allow: /api/seo/sitemap.xml
 
 Sitemap: https://belorella.com/api/seo/sitemap.xml

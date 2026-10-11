@@ -1,6 +1,6 @@
 'use client'
 import { getStorage } from "../lib/storage"
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { FaPlus, FaEdit, FaTrash, FaArrowLeft, FaSearch, FaFilter, FaInfoCircle } from 'react-icons/fa';
 import { useRouter } from "next/navigation";
@@ -8,12 +8,17 @@ import { useRouter } from "next/navigation";
 const RULE_TYPES = [
   { value: 'min_order', label: 'Minimum Order Amount', unit: 'BDT', hint: 'Blocks checkout when the order amount is below this value.' },
   { value: 'max_order', label: 'Maximum Order Amount', unit: 'BDT', hint: 'Blocks checkout when the order amount exceeds this value.' },
-  { value: 'free_delivery_above', label: 'Free Delivery Above', unit: 'BDT', hint: 'Delivery charge becomes 0 when the order amount reaches this value. Wins over multipliers.' },
+  { value: 'free_delivery_above', label: 'Free Delivery Above', unit: 'BDT', hint: 'Physical product subtotal after discounts must reach this value. Digital product value and delivery charge do not count. Wins over multipliers.' },
+  { value: 'digital_free_delivery', label: 'Free Delivery for Digital Products', unit: 'auto', hint: 'Digital-only carts have no courier fee. Mixed carts use physical delivery rules, and only physical product value counts toward the free-delivery threshold.' },
   { value: 'delivery_multiplier', label: 'Delivery Charge Multiplier', unit: '×', hint: 'Multiplies the delivery charge. Example: 2 = charge 2x. Applied in priority order.' },
   { value: 'extra_delivery_fee', label: 'Extra Delivery Fee', unit: 'BDT', hint: 'Flat amount added to the delivery charge (e.g. priority handling).' },
   { value: 'handling_fee_percent', label: 'Handling / Service Fee', unit: '%', hint: 'Percentage fee on the order amount after discount. Shown as a separate fee line.' },
   { value: 'cod_min', label: 'COD Minimum Order', unit: 'BDT', hint: 'Cash on Delivery blocked when order amount is below this value.' },
   { value: 'cod_max', label: 'COD Maximum Order', unit: 'BDT', hint: 'Cash on Delivery blocked when order amount exceeds this value.' },
+  { value: 'bkash_min', label: 'bKash Minimum Order', unit: 'BDT', hint: 'bKash is blocked when the order amount is below this value.' },
+  { value: 'bkash_max', label: 'bKash Maximum Order', unit: 'BDT', hint: 'bKash is blocked when the order amount exceeds this value.' },
+  { value: 'nagad_min', label: 'Nagad Minimum Order', unit: 'BDT', hint: 'Nagad is blocked when the order amount is below this value.' },
+  { value: 'nagad_max', label: 'Nagad Maximum Order', unit: 'BDT', hint: 'Nagad is blocked when the order amount exceeds this value.' },
   { value: 'max_qty_per_item', label: 'Max Quantity Per Product', unit: 'qty', hint: 'Limits how many units of a single product can be ordered.' },
 ];
 
@@ -26,12 +31,14 @@ const CheckoutRulesAdmin = () => {
   const router = useRouter();
   const API = process.env.NEXT_PUBLIC_API_URI;
 
-  const token = getStorage('adminAccessToken') || getStorage('adminToken') || getStorage('adminRefreshToken') || getStorage('accessToken');
-  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  const headers = useMemo(() => {
+    const token = getStorage('adminAccessToken') || getStorage('adminToken');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }, []);
 
   const selectedType = RULE_TYPES.find(t => t.value === form.type);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       setLoading(true);
       const res = await axios.get(`${API}/api/checkout-rules/admin/all`, { headers });
@@ -41,20 +48,20 @@ const CheckoutRulesAdmin = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [API, headers]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
     const onStore = () => load();
     window.addEventListener('storeChanged', onStore);
     return () => window.removeEventListener('storeChanged', onStore);
-  }, []);
+  }, [load]);
 
   const submit = async (e) => {
     e.preventDefault();
     try {
-      const payload = { ...form, value: Number(form.value), priority: Number(form.priority) };
+      const payload = { ...form, value: selectedType?.unit === 'auto' ? 0 : Number(form.value), priority: Number(form.priority) };
       if (editingId) {
         await axios.put(`${API}/api/checkout-rules/${editingId}`, payload, { headers });
       } else {
@@ -105,6 +112,7 @@ const CheckoutRulesAdmin = () => {
   const typeUnit = (type) => RULE_TYPES.find(t => t.value === type)?.unit || '';
   const formatValue = (it) => {
     const unit = typeUnit(it.type);
+    if (unit === 'auto') return 'Automatic';
     if (unit === '×') return `${Number(it.value)}×`;
     if (unit === '%') return `${Number(it.value)}%`;
     if (unit === 'qty') return `${Number(it.value)} / product`;
@@ -183,16 +191,20 @@ const CheckoutRulesAdmin = () => {
               <label className="block text-sm font-medium text-[#4A4A4A] mb-1">
                 Value {selectedType ? `(${selectedType.unit})` : ''}
               </label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                className="w-full px-4 py-2 border border-[#BDBDBD] bg-white focus:outline-none focus:ring-2 focus:ring-[#B1123B] text-[#1B1B1B]"
-                value={form.value}
-                onChange={e => setForm({ ...form, value: e.target.value })}
-                placeholder={selectedType?.unit === '×' ? 'e.g. 2' : selectedType?.unit === '%' ? 'e.g. 2' : '0.00'}
-                required
-              />
+              {selectedType?.unit === 'auto' ? (
+                <div className="w-full px-4 py-2 border border-[#BDBDBD] bg-[#FAF8F6] text-[#4A4A4A]">Automatic — no threshold</div>
+              ) : (
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className="w-full px-4 py-2 border border-[#BDBDBD] bg-white focus:outline-none focus:ring-2 focus:ring-[#B1123B] text-[#1B1B1B]"
+                  value={form.value}
+                  onChange={e => setForm({ ...form, value: e.target.value })}
+                  placeholder={selectedType?.unit === '×' ? 'e.g. 2' : selectedType?.unit === '%' ? 'e.g. 2' : '0.00'}
+                  required
+                />
+              )}
             </div>
             <div className="sm:col-span-2 md:col-span-3">
               <label className="block text-sm font-medium text-[#4A4A4A] mb-1">
@@ -240,8 +252,9 @@ const CheckoutRulesAdmin = () => {
           <h2 className="text-lg font-semibold mb-2 text-[#1B1B1B]">How rules are applied</h2>
           <ul className="text-sm text-[#4A4A4A] list-disc pl-5 space-y-1">
             <li>Rules run in <span className="font-medium">priority order</span> (lower number first).</li>
-            <li>Blocking rules (min/max order, COD limits, max qty) stop checkout until resolved.</li>
-            <li>Free delivery above threshold <span className="font-medium">wins over</span> multipliers/extra fees.</li>
+            <li>Blocking rules (min/max order, payment limits, max qty) stop checkout until resolved.</li>
+            <li>Free delivery uses physical product value after discounts; digital product value and delivery charge do not count toward its threshold. It <span className="font-medium">wins over</span> multipliers/extra fees.</li>
+            <li>Digital-only carts show Free Delivery without Inside/Outside Dhaka courier options. Mixed carts use physical delivery rules.</li>
             <li>Otherwise delivery = base charge × multipliers + extra fees (priority order).</li>
             <li>Handling fees are added as separate lines on the order total. Server always recomputes totals.</li>
           </ul>
@@ -280,7 +293,7 @@ const CheckoutRulesAdmin = () => {
                   <tr key={it._id} className="hover:bg-[#F4F4F4] border-b border-[#BDBDBD]">
                     <td className="py-3 px-4 font-medium text-[#1B1B1B]">
                       {it.name}
-                      {it.message && <p className="text-xs text-[#9A9A9A] font-normal mt-0.5">"{it.message}"</p>}
+                      {it.message && <p className="text-xs text-[#9A9A9A] font-normal mt-0.5">&quot;{it.message}&quot;</p>}
                     </td>
                     <td className="py-3 px-4 text-[#4A4A4A]">{typeLabel(it.type)}</td>
                     <td className="py-3 px-4 text-[#1B1B1B] font-medium">{formatValue(it)}</td>

@@ -1,5 +1,5 @@
 'use client'
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import Link from 'next/link';
 import { FiSearch, FiClock, FiUser, FiArrowRight } from 'react-icons/fi';
@@ -12,11 +12,12 @@ export default function BlogListPage() {
   const [blogs, setBlogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
-  const fetchBlogs = async (p = 1, cat = 'All', q = '') => {
+  const fetchBlogs = useCallback(async (p = 1, cat = 'All', q = '') => {
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: p, limit: 12 });
@@ -30,14 +31,14 @@ export default function BlogListPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { fetchBlogs(page, activeCategory, searchQuery); }, [page, activeCategory]);
+  useEffect(() => { fetchBlogs(page, activeCategory, appliedSearch); }, [fetchBlogs, page, activeCategory, appliedSearch]);
 
   const handleSearch = (e) => {
     e.preventDefault();
     setPage(1);
-    fetchBlogs(1, activeCategory, searchQuery);
+    setAppliedSearch(searchQuery.trim());
   };
 
   return (

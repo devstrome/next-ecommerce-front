@@ -1,5 +1,5 @@
 'use client'
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { FaQrcode, FaDownload, FaTimes } from 'react-icons/fa';
 import QRCode from 'qrcode';
 
@@ -7,13 +7,7 @@ const QRCodeGenerator = ({ data, onClose, isOpen }) => {
   const [qrCodeUrl, setQrCodeUrl] = useState('');
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    if (isOpen && data) {
-      generateQRCode();
-    }
-  }, [isOpen, data]);
-
-  const generateQRCode = async () => {
+  const generateQRCode = useCallback(async () => {
     try {
       setError('');
       const url = await QRCode.toDataURL(data, {
@@ -49,7 +43,11 @@ const QRCodeGenerator = ({ data, onClose, isOpen }) => {
         setError('Failed to generate QR code');
       }
     }
-  };
+  }, [data]);
+
+  useEffect(() => {
+    if (isOpen && data) generateQRCode();
+  }, [isOpen, data, generateQRCode]);
 
   const downloadQRCode = () => {
     if (!qrCodeUrl) return;

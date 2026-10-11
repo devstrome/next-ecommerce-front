@@ -3,7 +3,9 @@ import { getStorage, setStorage, removeStorage } from "../lib/storage"
 import React, { createContext, useContext, useState, useEffect } from "react";
 import axios from "axios";
 import { io } from "socket.io-client";
+import { notificationFeedStorage, showBrowserNotification as showNativeBrowserNotification } from '../lib/browserNotifications';
 
+const API_URI = process.env.NEXT_PUBLIC_API_URI || "http://localhost:3000";
 const AdminChatContext = createContext();
 
 export const useAdminChat = () => {
@@ -16,6 +18,8 @@ export const useAdminChat = () => {
 
 export const AdminChatProvider = ({ children }) => {
   const [rooms, setRooms] = useState([]);
+  const roomsRef = React.useRef(rooms);
+  roomsRef.current = rooms;
   const [activeRoom, setActiveRoom] = useState(null);
   const [activeRoomId, setActiveRoomId] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -24,6 +28,7 @@ const [imageToSend, setImageToSend] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [socket, setSocket] = useState(null);
+  const socketRef = React.useRef(null);
   const [isConnected, setIsConnected] = useState(false);
   
   // Admin state - get from localStorage or context
@@ -35,12 +40,18 @@ const [imageToSend, setImageToSend] = useState("");
   // Notification states
   const [unreadCount, setUnreadCount] = useState(0);
   const [newMessageNotifications, setNewMessageNotifications] = useState([]);
+  const [activityNotifications, setActivityNotifications] = useState([]);
+  const activityNotificationsRef = React.useRef(activityNotifications);
+  activityNotificationsRef.current = activityNotifications;
+  const notificationFeedKeyRef = React.useRef(null);
+  const notificationFeedKey = admin?._id ? `belorella:notification-feed:admin:${admin._id}` : null;
   const [showNotification, setShowNotification] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [isTyping, setIsTyping] = useState(false);
 
   // Ref to avoid stale activeRoom in socket handlers
   const activeRoomIdRef = React.useRef(null);
+  const sendInFlightRef = React.useRef(false);
   useEffect(() => {
     activeRoomIdRef.current = activeRoom?._id || activeRoomId || null;
   }, [activeRoom?._id, activeRoomId]);
@@ -50,23 +61,51 @@ const [imageToSend, setImageToSend] = useState("");
   adminIdRef.current = admin?._id || null;
   const fetchRoomRef = React.useRef(null);
 
-  // Use environment variable with fallback to port 5000
-  const API_URI = process.env.NEXT_PUBLIC_API_URI || "http://localhost:3000";
-
-  // Request browser notification permission
   useEffect(() => {
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
-    }
-  }, []);
+    notificationFeedKeyRef.current = notificationFeedKey;
+    const saved = notificationFeedStorage.read(notificationFeedKey);
+    activityNotificationsRef.current = saved;
+    setActivityNotifications(saved);
+  }, [notificationFeedKey]);
+
+  const addActivityNotification = (notification) => {
+    const key = notificationFeedKeyRef.current;
+    const current = activityNotificationsRef.current;
+    if (current.some((item) => item.id === notification.id)) return;
+    const next = [{ read: false, createdAt: new Date().toISOString(), ...notification }, ...current].slice(0, 50);
+    activityNotificationsRef.current = next;
+    setActivityNotifications(next);
+    notificationFeedStorage.write(key, next);
+  };
+
+  const markActivityNotificationRead = (id) => {
+    const next = activityNotificationsRef.current.map((item) => item.id === id ? { ...item, read: true } : item);
+    activityNotificationsRef.current = next;
+    setActivityNotifications(next);
+    notificationFeedStorage.write(notificationFeedKeyRef.current, next);
+  };
+
+  const markAllActivityNotificationsRead = () => {
+    const next = activityNotificationsRef.current.map((item) => ({ ...item, read: true }));
+    activityNotificationsRef.current = next;
+    setActivityNotifications(next);
+    notificationFeedStorage.write(notificationFeedKeyRef.current, next);
+  };
+
+  const clearActivityNotifications = () => {
+    activityNotificationsRef.current = [];
+    setActivityNotifications([]);
+    notificationFeedStorage.write(notificationFeedKeyRef.current, []);
+  };
+
+  const addActivityNotificationRef = React.useRef(addActivityNotification);
+  addActivityNotificationRef.current = addActivityNotification;
 
   // Helper function to get admin token
   const getAdminToken = () => {
     // Try different possible token keys in order of preference
     const token = getStorage("adminAccessToken") || 
-                  getStorage("adminToken") || 
-                  getStorage("adminRefreshToken") || 
-                  getStorage("accessToken");
+                  getStorage("adminToken");
     
     if (!token) {
       return null;
@@ -77,11 +116,14 @@ const [imageToSend, setImageToSend] = useState("");
 
   // Helper function to show notification
   const showMessageNotification = (message) => {
+    const room = roomsRef.current.find((item) => String(item._id) === String(message.roomId));
+    const customer = room?.customerId || {};
+    const sender = message.senderName || customer.fullName || [customer.firstName, customer.lastName].filter(Boolean).join(' ') || customer.email || 'Customer';
     const notification = {
       id: Date.now(),
-      message: message.text,
+      message: message.text || (message.image ? 'Sent an image' : 'Sent a message'),
       roomId: message.roomId,
-      sender: message.senderType === 'customer' ? 'Customer' : 'Admin',
+      sender,
       timestamp: new Date().toLocaleTimeString()
     };
     
@@ -96,88 +138,33 @@ const [imageToSend, setImageToSend] = useState("");
 
   // Helper function to show browser notification
   const showBrowserNotification = (message) => {
-    if ("Notification" in window && Notification.permission === "granted") {
-      const room = rooms.find(r => r._id === message.roomId);
-      const customerName = room?.customerId?.firstName || room?.customerId?.email || 'Customer';
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+      const room = roomsRef.current.find(r => String(r._id) === String(message.roomId));
+      const customer = room?.customerId || {};
+      const customerName = message.senderName || customer.fullName || [customer.firstName, customer.lastName].filter(Boolean).join(' ') || customer.email || 'Customer';
       const title = `💬 New message from ${customerName}`;
-      const options = {
-        body: message.text.length > 100 ? message.text.substring(0, 100) + '...' : message.text,
-        icon: '/favicon.ico',
-        badge: '/favicon.ico',
-        tag: `chat-${message.roomId}`,
-        requireInteraction: false,
-        silent: false,
-        vibrate: [200, 100, 200],
-        data: {
-          roomId: message.roomId,
-          messageId: message._id,
-          senderType: message.senderType,
-          timestamp: new Date().toISOString()
-        },
-        actions: [
-          {
-            action: 'open',
-            title: '📱 Open Chat',
-            icon: '/favicon.ico'
-          },
-          {
-            action: 'mark_read',
-            title: '✅ Mark Read',
-            icon: '/favicon.ico'
-          },
-          {
-            action: 'dismiss',
-            title: '❌ Dismiss',
-            icon: '/favicon.ico'
-          }
-        ]
-      };
-      
-      const notification = new Notification(title, options);
-      
-      // Handle notification clicks
-      notification.onclick = (event) => {
-        event.preventDefault();
-        window.focus();
-        if (message.roomId) {
-          window.location.href = `/admin/dashboard/inbox/${message.roomId}`;
-        }
-        notification.close();
-      };
-      
-      // Handle notification actions
-      notification.onactionclick = (event) => {
-        event.preventDefault();
-        if (event.action === 'open') {
-          window.focus();
-          if (message.roomId) {
-            window.location.href = `/admin/dashboard/inbox/${message.roomId}`;
-          }
-        } else if (event.action === 'mark_read') {
-          // Mark messages as read via socket
-          if (socket && socket.connected) {
-            socket.emit("markMessagesAsRead", {
-              roomId: message.roomId,
-              readerType: "admin",
-              readerId: admin._id
-            });
-          }
-        }
-        notification.close();
-      };
-      
-      // Auto-close notification after 15 seconds
-      setTimeout(() => {
-        notification.close();
-      }, 15000);
+      const messagePreview = typeof message.text === 'string' && message.text.trim()
+        ? message.text.trim()
+        : message.image ? 'Sent an image' : 'Sent a message';
+      const senderDetails = [customer.email, customer.phone || customer.phoneNumber].filter(Boolean).join(' · ');
+      showNativeBrowserNotification({
+        title,
+        body: message.notificationBody || [messagePreview, senderDetails].filter(Boolean).join('\n'),
+        image: message.image || undefined,
+        url: `/admin/dashboard/inbox/${message.roomId}`,
+        tag: `admin-chat-${message._id || message.roomId}`,
+        data: { roomId: message.roomId, messageId: message._id, senderName: customerName },
+      });
     }
   };
+  const showBrowserNotificationRef = React.useRef(showBrowserNotification);
+  showBrowserNotificationRef.current = showBrowserNotification;
 
   // Helper function to calculate unread count
   const calculateUnreadCount = (roomsList) => {
     const count = roomsList.reduce((total, room) => {
       const unreadMessages = room.messages?.filter(msg => 
-        msg.senderType === 'customer' && !msg.readBy?.some(read => read.readerType === 'admin')
+        (msg.senderType === 'customer' || msg.senderType === 'guest') && !msg.readBy?.some(read => read.readerType === 'admin')
       ) || [];
       return total + unreadMessages.length;
     }, 0);
@@ -276,7 +263,7 @@ const [imageToSend, setImageToSend] = useState("");
     } finally {
       setLoading(false);
     }
-  }, [API_URI]);
+  }, []);
 
   // --- Fetch specific room ---
   const fetchRoom = React.useCallback(async (roomId) => {
@@ -314,7 +301,7 @@ const [imageToSend, setImageToSend] = useState("");
     } finally {
       setLoading(false);
     }
-  }, [API_URI]);
+  }, []);
 
   // Keep latest fetchRoom available to one-time socket listeners (reconnect resync)
   fetchRoomRef.current = fetchRoom;
@@ -323,13 +310,14 @@ const [imageToSend, setImageToSend] = useState("");
   const handleSend = React.useCallback(async () => {
     const trimmed = inputMessage.trim();
     const image = imageToSend;
-    if ((!trimmed && !image) || !activeRoom?._id) return;
+    if ((!trimmed && !image) || !activeRoom?._id || !socket?.connected || !admin?._id || sendInFlightRef.current) return;
+    sendInFlightRef.current = true;
     
     try {
       setError(null);
       
       // Send message via socket first for immediate feedback
-      if (socket) {
+      if (socket.connected) {
         const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         const tempMessage = {
           _id: tempId,
@@ -362,6 +350,8 @@ const [imageToSend, setImageToSend] = useState("");
     } catch (err) {
       console.error("Error sending message:", err);
       setError(err.response?.data?.message || "Failed to send message");
+    } finally {
+      sendInFlightRef.current = false;
     }
   }, [inputMessage, imageToSend, activeRoom?._id, socket, admin?._id]);
 
@@ -429,8 +419,8 @@ const [imageToSend, setImageToSend] = useState("");
       return;
     }
 
-    // Prevent multiple socket connections
-    if (socket && socket.connected) {
+    // Prevent duplicate socket connections without closing over React state.
+    if (socketRef.current?.connected) {
       return;
     }
 
@@ -448,6 +438,7 @@ const [imageToSend, setImageToSend] = useState("");
     socketClient.on("connect", () => {
       setIsConnected(true);
       socketClient.emit("joinAdminRoom");
+      socketClient.emit("getOnlineUsers");
       setError(null);
       // Rejoin + resync the active chat room after a reconnect
       const rid = activeRoomIdRef.current;
@@ -463,65 +454,71 @@ const [imageToSend, setImageToSend] = useState("");
 
     socketClient.on("disconnect", () => {
       setIsConnected(false);
+      setOnlineUsers([]);
     });
+    socketRef.current = socketClient;
 
     // Listen for new chat rooms
     socketClient.on("newChatRoom", (room) => {
-      setRooms((prevRooms) => [room, ...prevRooms]);
-      setUnreadCount(prev => prev + 1);
+      setRooms((prevRooms) => {
+        const updatedRooms = [room, ...prevRooms];
+        setUnreadCount(calculateUnreadCount(updatedRooms));
+        return updatedRooms;
+      });
       
-      // Show browser notification for new chat room
-      if ("Notification" in window && Notification.permission === "granted") {
-        const customerName = room?.customerId?.firstName || room?.customerId?.email || 'Customer';
-        const title = `New chat request from ${customerName}`;
-        const options = {
-          body: "A new customer has started a chat conversation",
-          icon: '/favicon.ico',
-          badge: '/favicon.ico',
-          tag: 'new-chat-room',
-          requireInteraction: true,
-          silent: false,
-          vibrate: [300, 100, 300, 100, 300], // Special vibration for new chat
-          data: {
-            roomId: room._id,
-            type: 'new-chat'
-          },
-          actions: [
-            {
-              action: 'assign',
-              title: 'Assign to Me',
-              icon: '/favicon.ico'
-            },
-            {
-              action: 'view',
-              title: 'View Chat',
-              icon: '/favicon.ico'
-            }
-          ]
-        };
-        
-        const notification = new Notification(title, options);
-        
-        // Handle notification clicks
-        notification.onclick = (event) => {
-          event.preventDefault();
-          window.focus();
-          window.location.href = `/admin/dashboard/inbox/${room._id}`;
-          notification.close();
-        };
-        
-        // Handle notification actions
-        notification.onactionclick = (event) => {
-          event.preventDefault();
-          if (event.action === 'assign') {
-            // Auto-assign the room to current admin
-            autoAssignAdmin();
-          } else if (event.action === 'view') {
-            window.location.href = `/admin/dashboard/inbox/${room._id}`;
-          }
-          notification.close();
-        };
-      }
+      const customer = room?.customerId || {};
+      const customerName = customer.fullName || [customer.firstName, customer.lastName].filter(Boolean).join(' ') || customer.email || 'Customer';
+      addActivityNotificationRef.current?.({
+        id: `chat-room:${room._id}`,
+        kind: 'message',
+        title: `New chat from ${customerName}`,
+        body: `${customer.email || 'Customer'} started a conversation. Open the inbox to reply.`,
+        url: `/admin/dashboard/inbox/${room._id}`,
+        createdAt: room.createdAt || new Date().toISOString(),
+      });
+      showNativeBrowserNotification({
+        title: `New chat from ${customerName}`,
+        body: `${customer.email || 'Customer'} started a conversation.`,
+        url: `/admin/dashboard/inbox/${room._id}`,
+        tag: `admin-chat-room-${room._id}`,
+        data: { roomId: room._id, type: 'new-chat', senderName: customerName },
+      });
+    });
+
+    socketClient.on('admin:orderNotification', (orderEvent) => {
+      if (!orderEvent?.orderId) return;
+      const eventType = orderEvent.eventType || 'update';
+      const status = orderEvent.orderStatus ? ` · ${orderEvent.orderStatus}` : '';
+      const title = eventType === 'create'
+        ? `New order #${orderEvent.orderId}`
+        : `Order #${orderEvent.orderId}${status}`;
+      const itemLines = (orderEvent.items || []).slice(0, 3).map((item) =>
+        `${item.name || 'Product'} ×${Number(item.quantity) || 1}${[item.variantName, item.color, item.size, item.regionName].filter(Boolean).length ? ` · ${[item.variantName, item.color, item.size, item.regionName].filter(Boolean).join(' / ')}` : ''}`
+      );
+      const customerDetails = [orderEvent.customerName, orderEvent.customerPhone, orderEvent.shippingAddress].filter(Boolean).join(' · ');
+      const amount = Number(orderEvent.grandTotal ?? orderEvent.totalAmount);
+      const money = Number.isFinite(amount) ? `BDT ${amount.toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
+      const payment = [orderEvent.paymentMethod, orderEvent.paymentStatus].filter(Boolean).join(' · ');
+      const summary = [customerDetails, itemLines.join(', '), (orderEvent.items?.length || 0) > 3 ? `+${orderEvent.items.length - 3} more item(s)` : '', money, payment].filter(Boolean).join('\n');
+      const stableId = `order:${orderEvent.orderId}:${eventType}:${orderEvent.updatedAt || orderEvent.createdAt || Date.now()}`;
+      addActivityNotificationRef.current?.({
+        id: stableId,
+        kind: 'order',
+        title,
+        body: summary || 'Open the order page to review the order details.',
+        image: orderEvent.firstItemImage || orderEvent.items?.[0]?.image || '',
+        url: `/admin/dashboard/orders?order=${encodeURIComponent(orderEvent.orderId)}`,
+        createdAt: orderEvent.updatedAt || orderEvent.createdAt || new Date().toISOString(),
+        details: orderEvent,
+      });
+      showNativeBrowserNotification({
+        title,
+        body: summary || 'Open the order page to review the order details.',
+        image: orderEvent.firstItemImage || orderEvent.items?.[0]?.image || undefined,
+        url: `/admin/dashboard/orders?order=${encodeURIComponent(orderEvent.orderId)}`,
+        tag: stableId,
+        data: { orderId: orderEvent.orderId, eventType, customerName: orderEvent.customerName },
+      });
     });
 
     // Listen for updates to messages in rooms
@@ -600,8 +597,26 @@ const [imageToSend, setImageToSend] = useState("");
       
       // Show notification for customer messages, always
       if (message.senderType !== 'admin') {
+        const room = roomsRef.current.find((item) => String(item._id) === String(message.roomId));
+        const customer = room?.customerId || {};
+        const senderName = message.senderName || customer.fullName || [customer.firstName, customer.lastName].filter(Boolean).join(' ') || customer.email || (message.senderType === 'guest' ? 'Guest' : 'Customer');
+        const preview = typeof message.text === 'string' && message.text.trim()
+          ? message.text.trim()
+          : message.image ? 'Sent an image' : 'Sent a message';
+        const senderDetails = [customer.email, customer.phone || customer.phoneNumber].filter(Boolean).join(' · ');
+        const notificationBody = [preview, senderDetails].filter(Boolean).join('\n');
+        addActivityNotificationRef.current?.({
+          id: `chat-message:${message._id || `${message.roomId}:${message.createdAt || Date.now()}`}`,
+          kind: 'message',
+          title: `Message from ${senderName}`,
+          body: notificationBody,
+          image: message.image || '',
+          url: `/admin/dashboard/inbox/${message.roomId}`,
+          createdAt: message.createdAt || new Date().toISOString(),
+          details: { roomId: message.roomId, messageId: message._id, senderName },
+        });
         showMessageNotification(message);
-        showBrowserNotification(message);
+        showBrowserNotificationRef.current?.({ ...message, notificationBody });
       }
     });
 
@@ -767,13 +782,16 @@ const [imageToSend, setImageToSend] = useState("");
       ));
     });
 
-    socketClient.on("onlineStatusChanged", (data) => {
+    socketClient.on("onlineUsersList", (data) => {
+      setOnlineUsers(Array.from(new Set((data?.onlineUsers || []).map(String))));
+    });
+
+    socketClient.on("userOnlineStatus", (data) => {
+      if (!data?.userId) return;
+      const userId = String(data.userId);
       setOnlineUsers(prev => {
-        if (data.isOnline) {
-          return prev.includes(data.userId) ? prev : [...prev, data.userId];
-        } else {
-          return prev.filter(id => id !== data.userId);
-        }
+        if (data.isOnline) return prev.includes(userId) ? prev : [...prev, userId];
+        return prev.filter(id => id !== userId);
       });
     });
 
@@ -798,18 +816,17 @@ const [imageToSend, setImageToSend] = useState("");
     setSocket(socketClient);
 
     return () => {
-      if (socketClient) {
-        socketClient.disconnect();
-      }
+      socketClient.disconnect();
+      if (socketRef.current === socketClient) socketRef.current = null;
     };
-  }, []); // Removed API_URI dependency to prevent unnecessary reconnections
+  }, [admin?._id]);
 
   // --- Initial fetch rooms ---
   useEffect(() => {
     if (isConnected && rooms.length === 0) {
       fetchRooms();
     }
-  }, [isConnected, rooms.length]); // Only fetch if connected and no rooms loaded
+  }, [isConnected, rooms.length, fetchRooms]); // Only fetch if connected and no rooms loaded
 
   // --- Join room ---
   const joinRoom = React.useCallback(async (roomId) => {
@@ -840,7 +857,7 @@ const [imageToSend, setImageToSend] = useState("");
 
       // Optimistic UI: mark all customer messages as read locally immediately
       setMessages(prev => prev.map(msg => {
-        if (msg.senderType === 'customer' && !(msg.readBy || []).some(r => r.readerType === 'admin')) {
+        if (['customer', 'guest'].includes(msg.senderType) && !(msg.readBy || []).some(r => r.readerType === 'admin')) {
           return {
             ...msg,
             readBy: [
@@ -857,7 +874,7 @@ const [imageToSend, setImageToSend] = useState("");
         return {
           ...r,
           messages: (r.messages || []).map(msg => {
-            if (msg.senderType === 'customer' && !(msg.readBy || []).some(r => r.readerType === 'admin')) {
+            if (['customer', 'guest'].includes(msg.senderType) && !(msg.readBy || []).some(r => r.readerType === 'admin')) {
               return {
                 ...msg,
                 readBy: [
@@ -873,10 +890,10 @@ const [imageToSend, setImageToSend] = useState("");
 
       // Recalculate unread count immediately
       setUnreadCount(prev => calculateUnreadCount(
-        (typeof rooms === 'object' ? rooms : []).map(r => r._id === roomId ? {
+        (Array.isArray(roomsRef.current) ? roomsRef.current : []).map(r => r._id === roomId ? {
           ...r,
           messages: (r.messages || []).map(msg => (
-            msg.senderType === 'customer' && !(msg.readBy || []).some(rd => rd.readerType === 'admin')
+            ['customer', 'guest'].includes(msg.senderType) && !(msg.readBy || []).some(rd => rd.readerType === 'admin')
               ? { ...msg, readBy: [...(msg.readBy || []), { readerType: 'admin', readerId: admin._id, readAt: new Date().toISOString() }] }
               : msg
           ))
@@ -911,7 +928,18 @@ const [imageToSend, setImageToSend] = useState("");
       setRooms(prevRooms => {
         const updatedRooms = prevRooms.map(room =>
           room._id === roomId
-            ? { ...room, messages: room.messages?.map(msg => ({ ...msg, readBy: msg.readBy || [] })) }
+            ? {
+                ...room,
+                messages: (room.messages || []).map(msg => {
+                  if (!['customer', 'guest'].includes(msg.senderType) || msg.readBy?.some(read => read.readerType === 'admin')) return msg;
+                  return {
+                    ...msg,
+                    readBy: [...(Array.isArray(msg.readBy) ? msg.readBy : []), {
+                      readerType: 'admin', readerId: admin?._id, readAt: new Date().toISOString()
+                    }]
+                  };
+                })
+              }
             : room
         );
         const newCount = calculateUnreadCount(updatedRooms);
@@ -1077,6 +1105,7 @@ const [imageToSend, setImageToSend] = useState("");
     error,
     unreadCount,
     newMessageNotifications,
+    activityNotifications,
     showNotification,
     onlineUsers,
     isTyping,
@@ -1095,6 +1124,9 @@ const [imageToSend, setImageToSend] = useState("");
     setActiveRoomAndJoin, // Add the missing function
     clearError,
     clearNotifications,
+    markActivityNotificationRead,
+    markAllActivityNotificationsRead,
+    clearActivityNotifications,
     autoAssignAdmin,
     markAsRead, // Add the new socket-based markAsRead
     updateOnlineStatus, // Add the new socket-based updateOnlineStatus

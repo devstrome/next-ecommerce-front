@@ -1,10 +1,11 @@
 'use client'
 import { Helmet } from "react-helmet-async";
+import { BRAND } from "../config/brand";
 
 const SITE_NAME = "BELORELLA";
 const DEFAULT_DESCRIPTION = "Shop the latest trends with unbeatable prices. Quality products delivered to your doorstep in Bangladesh.";
 const DEFAULT_KEYWORDS = "BELORELLA, online shopping, Bangladesh, ecommerce, fashion, beauty, makeup, luxury";
-const DEFAULT_IMAGE = "/logo.png";
+const DEFAULT_IMAGE = BRAND.EMAIL_LOGO_URL;
 const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://belorella.com";
 
 const SEOHead = ({
@@ -17,6 +18,7 @@ const SEOHead = ({
   product,
   noindex = false,
   hideMeta = false,
+  hideProductSchema = false,
 }) => {
   // If a product object is passed, extract SEO from it
   const seo = product?.seo || {};
@@ -28,57 +30,28 @@ const SEOHead = ({
   const fullUrl = url ? `${BASE_URL}${url}` : BASE_URL;
 
   // ── Organization schema (always present) ──────────────
-  const orgSchema = {
-    "@context": "https://schema.org",
-    "@type": "Organization",
-    name: SITE_NAME,
-    url: BASE_URL,
-    logo: `${BASE_URL}/logo.png`,
-    image: `${BASE_URL}/logo.png`,
-    description: DEFAULT_DESCRIPTION,
-    contactPoint: {
-      "@type": "ContactPoint",
-      telephone: "+880-XXX-XXXXXX",
-      contactType: "customer service",
-    },
-    sameAs: [
-      "https://facebook.com/belorella",
-      "https://instagram.com/belorella",
-    ],
-  };
-
-  // ── Website schema ───────────────────────────────────
-  const websiteSchema = {
-    "@context": "https://schema.org",
-    "@type": "WebSite",
-    name: SITE_NAME,
-    url: BASE_URL,
-    potentialAction: {
-      "@type": "SearchAction",
-      target: {
-        "@type": "EntryPoint",
-        urlTemplate: `${BASE_URL}/products?search={search_term_string}`,
-      },
-      "query-input": "required name=search_term_string",
-    },
-  };
-
   // Structured data for products
-  const productSchema = product ? {
+  const knownPrices = product ? [
+    ...(product.variants || []).flatMap((variant) => Array.isArray(variant.options) && variant.options.length
+      ? variant.options.map((option) => Number(option.discountPrice) > 0 && Number(option.discountPrice) < Number(option.price) ? Number(option.discountPrice) : Number(option.price))
+      : (variant.prices || []).map((price, index) => Number(variant.discountPrices?.[index]) > 0 && Number(variant.discountPrices[index]) < Number(price) ? Number(variant.discountPrices[index]) : Number(price))),
+    ...(product.variants?.length ? [] : [Number(product.discountPrice) > 0 && Number(product.discountPrice) < Number(product.mainPrice) ? Number(product.discountPrice) : Number(product.mainPrice)]),
+  ].filter((price) => Number.isFinite(price) && price > 0) : [];
+  const productSchema = product && !hideProductSchema ? {
     "@context": "https://schema.org",
     "@type": "Product",
     name: product.name,
     description: finalDescription,
-    image: product.mainImage || finalImage,
-    sku: product.sku || product._id,
+    image: [...new Set([product.seo?.ogImage, product.mainImage, ...(product.variants || []).flatMap((variant) => variant.images || [])].filter(Boolean))],
+    ...(product.sku ? { sku: product.sku } : {}),
     brand: product.brand ? { "@type": "Brand", name: product.brand } : undefined,
     offers: {
-      "@type": "Offer",
-      price: product.discountPrice || product.mainPrice,
+      "@type": knownPrices.length > 1 ? "AggregateOffer" : "Offer",
+      ...(knownPrices.length > 1 ? { lowPrice: Math.min(...knownPrices), highPrice: Math.max(...knownPrices), offerCount: knownPrices.length } : { price: knownPrices[0] }),
       priceCurrency: "BDT",
-      availability: "https://schema.org/InStock",
+      url: fullUrl,
     },
-    aggregateRating: product.averageRating ? {
+    aggregateRating: Number(product.averageRating) >= 1 && Number(product.averageRating) <= 5 && Number(product.totalReviews) > 0 ? {
       "@type": "AggregateRating",
       ratingValue: product.averageRating,
       reviewCount: product.totalReviews || 0,
@@ -112,9 +85,7 @@ const SEOHead = ({
       )}
 
       {/* Structured Data */}
-      <script type="application/ld+json">{JSON.stringify(orgSchema)}</script>
-      <script type="application/ld+json">{JSON.stringify(websiteSchema)}</script>
-      {productSchema && (
+      {productSchema && knownPrices.length > 0 && (
         <script type="application/ld+json">{JSON.stringify(productSchema)}</script>
       )}
     </Helmet>

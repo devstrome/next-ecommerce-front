@@ -73,7 +73,7 @@ export const NavigationProvider = ({ children }) => {
 
   const getBreadcrumbs = useCallback(() => {
     return historyRef.current;
-  }, [pathname]);
+  }, []);
 
   return (
     <NavigationContext.Provider value={{ getBreadcrumbs }}>

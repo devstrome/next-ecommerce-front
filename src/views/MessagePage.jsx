@@ -14,6 +14,10 @@ const AdminMessagePage = () => {
   const { id: roomId } = useParams();
   const router = useRouter();
   const messagesEndRef = useRef(null);
+  const sendInFlightRef = useRef(false);
+  const [customerImageError, setCustomerImageError] = useState(false);
+
+  useEffect(() => { setCustomerImageError(false); }, [roomId]);
   
   const {
     activeRoom,
@@ -40,19 +44,22 @@ const AdminMessagePage = () => {
     editMessage,
     deleteMessage,
   } = useAdminChat();
+  const chatActionsRef = useRef(null);
+  chatActionsRef.current = { activeRoom, fetchRoom, isConnected, joinRoom };
 
   useEffect(() => {
+    const current = chatActionsRef.current;
     if (!roomId) {
       router.push("/admin/login");
       return;
     }
-    if (!activeRoom || activeRoom._id !== roomId) {
+    if (!current?.activeRoom || current.activeRoom._id !== roomId) {
       console.log("Fetching room data for:", roomId);
-      fetchRoom(roomId);
+      current?.fetchRoom(roomId);
     } else {
-      console.log("Room already loaded:", activeRoom._id);
-      if (isConnected) {
-        joinRoom(roomId);
+      console.log("Room already loaded:", current.activeRoom._id);
+      if (current.isConnected) {
+        current.joinRoom(roomId);
       }
     }
   }, [roomId, router]);
@@ -62,7 +69,7 @@ const AdminMessagePage = () => {
       console.log("Joining room via socket:", roomId);
       joinRoom(roomId);
     }
-  }, [isConnected, activeRoom?._id, roomId]);
+  }, [isConnected, activeRoom?._id, roomId, joinRoom]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -73,7 +80,7 @@ const AdminMessagePage = () => {
       console.log("Marking messages as read for room:", roomId);
       markAsRead();
     }
-  }, [activeRoom?._id, roomId, isConnected, messages.length]);
+  }, [activeRoom?._id, roomId, isConnected, messages.length, markAsRead]);
 
   useEffect(() => {
     if (activeRoom?._id === roomId && isConnected) {
@@ -86,7 +93,7 @@ const AdminMessagePage = () => {
         updateOnlineStatus(false);
       }
     };
-  }, [activeRoom?._id, roomId, isConnected]);
+  }, [activeRoom?._id, roomId, isConnected, updateOnlineStatus]);
 
   useEffect(() => {
     return () => {
@@ -98,18 +105,21 @@ const AdminMessagePage = () => {
 
   const handleSendMessage = async () => {
     const hasImage = Boolean(imageToSend);
-    if ((!inputMessage.trim() && !hasImage) || activeRoom?.isClosed || !isConnected) return;
+    if ((!inputMessage.trim() && !hasImage) || activeRoom?.isClosed || !isConnected || sendInFlightRef.current) return;
     if (editingMsgId) {
       editMessage(editingMsgId, inputMessage.trim());
       setEditingMsgId(null);
       setInputMessage('');
       return;
     }
+    sendInFlightRef.current = true;
     try {
       sendTypingIndicator(false);
       await handleSend();
     } catch (err) {
       console.error("Failed to send message:", err);
+    } finally {
+      sendInFlightRef.current = false;
     }
   };
 
@@ -278,11 +288,16 @@ const AdminMessagePage = () => {
               <BiArrowBack className="w-5 h-5 text-[#4A4A4A]" />
             </button>
             <div className="flex items-center space-x-3">
-              <img
-                src={activeRoom.customerId?.imageUrl || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjQ4IiBoZWlnaHQ9IjQ4IiByeD0iMjQiIGZpbGw9IiNFNUU3RUIiLz4KPHBhdGggZD0iTTI0IDI0QzI4LjQxODMgMjQgMzIgMjAuNDE4MyAzMiAxNkMzMiAxMS41ODE3IDI4LjQxODMgOCAyNCA4QzE5LjU4MTcgOCAxNiAxMS41ODE3IDE2IDE2QzE2IDIwLjQxODMgMTkuNTgxNyAyNCAyNCAyNFoiIGZpbGw9IiM5Q0EzQUYiLz4KPHBhdGggZD0iTTQwIDQwQzQwIDMyLjI2ODkgMzIuODM3IDI2IDI0IDI2QzE1LjE2MyAyNiA4IDMyLjI2ODkgOCA0MEg0MFoiIGZpbGw9IiM5Q0EzQUYiLz4KPC9zdmc+Cg=='}
-                alt="Customer"
-                className="w-10 h-10 object-cover"
-              />
+              {(() => {
+                const customer = activeRoom.customerId || {};
+                const image = customer.imageUrl || customer.profileImage || '';
+                const initials = `${customer.firstName || activeRoom.guestName || 'C'} ${customer.lastName || ''}`.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase();
+                return image && !customerImageError ? (
+                  <img src={image} alt="Customer" onError={() => setCustomerImageError(true)} className="w-10 h-10 rounded-full object-cover" />
+                ) : (
+                  <div aria-label="Customer avatar" className="w-10 h-10 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center text-xs font-semibold">{initials}</div>
+                );
+              })()}
               <div>
                 <h2 className="font-semibold text-[#1B1B1B]">
                   {activeRoom.guestName || 
@@ -546,6 +561,7 @@ const AdminMessagePage = () => {
           <div className="flex items-center space-x-3">
             {editingMsgId && (
               <button
+                type="button"
                 onClick={() => { setEditingMsgId(null); setInputMessage(''); }}
                 className="p-3 text-[#4A4A4A] hover:text-[#1B1B1B] transition-colors shrink-0"
                 title="Cancel edit"
@@ -563,6 +579,7 @@ const AdminMessagePage = () => {
                   className="hidden"
                 />
                 <button
+                  type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={activeRoom.isClosed || uploadingImage}
                   className="p-3 border border-[#BDBDBD] text-[#4A4A4A] hover:text-[#B1123B] hover:border-[#B1123B] transition-colors shrink-0 disabled:opacity-50"
@@ -572,20 +589,26 @@ const AdminMessagePage = () => {
                 </button>
               </>
             )}
-            <input
-              type="text"
-              value={inputMessage}
-              onChange={handleInputChange}
-              onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
-              disabled={activeRoom.isClosed}
+              <textarea
+                rows={1}
+                value={inputMessage}
+                onChange={handleInputChange}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendMessage();
+                  }
+                }}
+                disabled={activeRoom.isClosed || !isConnected}
               placeholder={activeRoom.isClosed ? "Chat is closed" : editingMsgId ? "Editing message..." : "Type a message..."}
-              className={`flex-1 px-4 py-3 border border-[#BDBDBD] focus:outline-none focus:ring-2 focus:ring-[#B1123B] focus:border-transparent ${
+              className={`flex-1 min-h-12 max-h-32 resize-y px-4 py-3 border border-[#BDBDBD] focus:outline-none focus:ring-2 focus:ring-[#B1123B] focus:border-transparent ${
                 activeRoom.isClosed ? "bg-[#F4F4F4] cursor-not-allowed" : "bg-white"
               }`}
               autoFocus={!!editingMsgId}
             />
             {editingMsgId ? (
               <button
+                type="button"
                 onClick={() => {
                   if (inputMessage.trim()) { editMessage(editingMsgId, inputMessage.trim()); setEditingMsgId(null); setInputMessage(''); }
                 }}
@@ -600,8 +623,9 @@ const AdminMessagePage = () => {
               </button>
             ) : (
               <button
+                type="button"
                 onClick={handleSendMessage}
-                disabled={(!inputMessage.trim() && !imageToSend) || activeRoom.isClosed}
+                disabled={(!inputMessage.trim() && !imageToSend) || activeRoom.isClosed || !isConnected || uploadingImage}
                 className={`p-3 transition-colors ${
                   !activeRoom.isClosed && (inputMessage.trim() || imageToSend)
                     ? "bg-[#1B1B1B] text-white hover:bg-[#4A4A4A]"

@@ -1478,7 +1478,7 @@ const UserProfile = () => {
                         <FaEnvelope className="text-white text-2xl" />
                       </div>
                       <h4 className="text-lg font-semibold text-black mb-2 font-heading">Enter New Email</h4>
-                      <p className="text-dark-gray text-sm font-sans">We'll send a verification code to your new email address</p>
+                       <p className="text-dark-gray text-sm font-sans">We&apos;ll send a verification code to your new email address</p>
                     </div>
 
                     <div>
@@ -1535,7 +1535,7 @@ const UserProfile = () => {
                       </div>
                       <h4 className="text-lg font-semibold text-black mb-2 font-heading">Verify Your Email</h4>
                       <p className="text-dark-gray text-sm font-sans">
-                        We've sent a 6-digit verification code to <br />
+                         We&apos;ve sent a 6-digit verification code to <br />
                         <span className="font-medium text-black">{emailData.newEmail}</span>
                       </p>
                     </div>
@@ -1569,7 +1569,7 @@ const UserProfile = () => {
                           onClick={sendEmailOTP}
                           className="text-maybelline-pink hover:text-maybelline-pink/80 text-sm font-medium"
                         >
-                          Didn't receive the code? Resend
+                           Didn&apos;t receive the code? Resend
                         </button>
                       )}
                     </div>

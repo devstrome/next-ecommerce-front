@@ -23,10 +23,10 @@ export default function MainLayout({ children }) {
           <CartProvider>
             <ModernShell>
               <NavigationProvider>
-                <div className="flex flex-col min-h-screen">
+                <div className="flex min-h-screen min-w-0 flex-col pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-0">
                   <Navbar />
                   <Breadcrumb />
-                  <main className="flex-1">{children}</main>
+                  <main className="storefront-main min-w-0 flex-1">{children}</main>
                   <Footer />
                   <MobileTabBar />
                 </div>

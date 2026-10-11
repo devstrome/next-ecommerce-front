@@ -1,15 +1,7 @@
-'use client'
+import AdminProviders from './AdminProviders';
 
-import { AdminProvider } from '../../src/context/AdminContext'
-import { AdminChatProvider } from '../../src/context/AdminChatContext'
-import '../../src/index.css'
+export const metadata = { robots: { index: false, follow: false } }
 
-export default function AdminRootLayout({ children }) {
-  return (
-    <AdminProvider>
-      <AdminChatProvider>
-        {children}
-      </AdminChatProvider>
-    </AdminProvider>
-  )
+export default function AdminLayout({ children }) {
+  return <AdminProviders>{children}</AdminProviders>;
 }

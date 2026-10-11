@@ -1,5 +1,5 @@
 'use client'
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { getStorage } from '../../../../src/lib/storage';
 import { FiPlus, FiEdit2, FiTrash2, FiX, FiCheck, FiToggleLeft, FiToggleRight } from 'react-icons/fi';
@@ -15,7 +15,7 @@ export default function AnnouncementsPageClient() {
 
   const authHeaders = () => ({ headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` } });
 
-  const fetchAnnouncements = async () => {
+  const fetchAnnouncements = useCallback(async () => {
     try {
       const res = await axios.get(`${API_URI}/api/admin/announcements`, authHeaders());
       setAnnouncements(res.data);
@@ -24,9 +24,9 @@ export default function AnnouncementsPageClient() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { fetchAnnouncements(); }, []);
+  useEffect(() => { fetchAnnouncements(); }, [fetchAnnouncements]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

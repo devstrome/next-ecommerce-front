@@ -143,7 +143,7 @@ const NotFound = () => {
               </h1>
             </div>
             <p className="text-xl text-[#4A4A4A] max-w-2xl mx-auto leading-relaxed">
-              The page you're looking for seems to have wandered off. Don't worry, we'll help you find your way back!
+              The page you&apos;re looking for seems to have wandered off. Don&apos;t worry, we&apos;ll help you find your way back!
             </p>
           </div>
 

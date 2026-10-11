@@ -1,6 +1,6 @@
 'use client'
 import { getStorage, setStorage, removeStorage } from "../lib/storage"
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import { 
@@ -36,6 +36,21 @@ import { formatMeasureLine } from '../lib/measure';
 import { printThermalReceipt } from '../lib/print/thermal';
 import { buildA4Document } from '../lib/print/a4';
 import { printDocument } from '../lib/print';
+import QRCode from 'qrcode';
+import { barcodeImg } from '../lib/print/barcode';
+
+const escapePrintHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+}[character]));
+
+const printImageSource = (value) => {
+  const source = typeof value === 'string' ? value : value?.secure_url || value?.url || value?.src || value?.path || '';
+  return /^https:\/\//i.test(source)
+    || /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?\//i.test(source)
+    || /^\/(?!\/)/.test(source)
+    ? source
+    : '';
+};
 
 const AdminPOSOrders = () => {
   const [orders, setOrders] = useState([]);
@@ -65,7 +80,7 @@ const AdminPOSOrders = () => {
   const router = useRouter();
   const { isAuthenticated, loading: authLoading } = useAdmin();
 
-  const makeAuthenticatedRequest = (config) => {
+  const makeAuthenticatedRequest = useCallback((config) => {
     const token = getStorage('adminAccessToken');
     return axios({
       ...config,
@@ -75,22 +90,9 @@ const AdminPOSOrders = () => {
         'Content-Type': 'application/json'
       }
     });
-  };
+  }, []);
 
-  useEffect(() => {
-    if (!authLoading && !isAuthenticated) {
-      toast.error('Please log in as admin to access POS orders');
-      router.push('/admin');
-      return;
-    }
-    
-    if (isAuthenticated) {
-      fetchOrders();
-      fetchStats();
-    }
-  }, [pagination.page, filters, isAuthenticated, authLoading]);
-
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     try {
       setLoading(true);
       const params = new URLSearchParams({
@@ -104,20 +106,20 @@ const AdminPOSOrders = () => {
         url: `${process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000'}/api/pos/orders?${params}`
       });
       setOrders(response.data.posOrders);
-      setPagination({
-        ...pagination,
+      setPagination(previous => ({
+        ...previous,
         total: response.data.total,
         totalPages: response.data.totalPages
-      });
+      }));
     } catch (error) {
       console.error('Error fetching orders:', error);
       toast.error('Error fetching orders');
     } finally {
       setLoading(false);
     }
-  };
+  }, [filters, pagination.page, pagination.limit, makeAuthenticatedRequest]);
 
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       const response = await makeAuthenticatedRequest({
         method: 'GET',
@@ -127,7 +129,20 @@ const AdminPOSOrders = () => {
     } catch (error) {
       console.error('Error fetching stats:', error);
     }
-  };
+  }, [makeAuthenticatedRequest]);
+
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      toast.error('Please log in as admin to access POS orders');
+      router.push('/admin');
+      return;
+    }
+
+    if (isAuthenticated) {
+      fetchOrders();
+      fetchStats();
+    }
+  }, [authLoading, isAuthenticated, router, fetchOrders, fetchStats]);
 
   const viewOrder = async (orderId) => {
     try {
@@ -170,6 +185,7 @@ const AdminPOSOrders = () => {
         url: `${process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000'}/api/pos/orders/${orderId}`
       });
       const order = response.data.posOrder;
+      const safeOrderNumber = escapePrintHtml(order.orderNumber);
 
       const origin = window.location.origin;
       const fetchImg = async (path) => {
@@ -183,25 +199,45 @@ const AdminPOSOrders = () => {
         fetchImg('/logo.png'), fetchImg('/sign.png'), fetchImg('/seal.png')
       ]);
 
-      const itemRows = order.items.map(item => {
+      const itemRows = await Promise.all(order.items.map(async (item) => {
         const v = item.variantInfo || {};
-        const details = [formatMeasureLine(v), v.color, item.scannedBarcode ? `BC: ${item.scannedBarcode}` : '']
-          .filter(Boolean).join(' &bull; ');
+        const inventory = item.inventoryId && typeof item.inventoryId === 'object' ? item.inventoryId : {};
+        const image = printImageSource(v.imageUrl || inventory.imageUri || inventory.productId?.mainImage || item.productId?.mainImage || item.productId?.images?.[0]);
+        const qrText = String(inventory.qrCode || v.qrCode || '');
+        const barcode = String(inventory.barcode || v.barcode || item.scannedBarcode || '');
+        const qrData = qrText ? await QRCode.toDataURL(qrText, { width: 96, margin: 1, errorCorrectionLevel: 'M' }).catch(() => '') : '';
+        const barcodeMarkup = barcodeImg(barcode, 'display:block;width:100%;height:10mm;object-fit:contain;', { height: 36, width: 1.5 });
+        const imageMarkup = image
+          ? `<img class="product-photo" src="${escapePrintHtml(image)}" alt="${escapePrintHtml(item.productName || item.productId?.name || 'Product')}" />`
+          : '<div class="product-photo product-photo-empty"></div>';
+        const details = [
+          formatMeasureLine(v),
+          v.color,
+          v.regionName && `Region: ${v.regionName}`,
+          barcode && `My barcode: ${barcode}`,
+          v.realBarcode && `Product barcode: ${v.realBarcode}`,
+        ]
+          .filter(Boolean).map(escapePrintHtml).join(' &bull; ');
+        const codes = `<div class="assigned-codes">
+          <div class="assigned-code">${qrData ? `<img class="qr-code" src="${qrData}" alt="Assigned QR code" />` : '<div class="qr-code code-empty"></div>'}<small>QR</small></div>
+          <div class="assigned-code">${barcodeMarkup || '<div class="barcode code-empty"></div>'}<small>Barcode${barcode ? ` · ${escapePrintHtml(barcode)}` : ''}</small></div>
+        </div>`;
         return `
         <tr>
-          <td style="padding:10px 12px;font-weight:600;color:#1a1a1a">${item.productName || 'Product'}</td>
-          <td style="padding:10px 12px;color:#666;font-size:12px">${details}</td>
-          <td style="padding:10px 12px;text-align:right">${formatBDT(item.unitPrice)}</td>
-          <td style="padding:10px 12px;text-align:center">${item.quantity}</td>
-          <td style="padding:10px 12px;text-align:right;font-weight:600">${formatBDT(item.totalPrice)}</td>
+          <td><div class="product-cell">${imageMarkup}<span>${escapePrintHtml(item.productName || item.productId?.name || 'Product')}</span></div></td>
+          <td class="item-details">${details}</td>
+          <td>${codes}</td>
+          <td class="ta-right">${escapePrintHtml(formatBDT(item.unitPrice))}</td>
+          <td class="ta-center">${escapePrintHtml(item.quantity)}</td>
+          <td class="ta-right"><strong>${escapePrintHtml(formatBDT(item.totalPrice))}</strong></td>
         </tr>`;
-      }).join('');
+      })).join('');
 
       const generatedDate = new Date().toLocaleDateString('en-BD', { year: 'numeric', month: 'long', day: 'numeric' });
 
       const invoiceHeader = `
         <div class="inv-header">
-          ${logoDataURI ? `<img src="${logoDataURI}" alt="${BRAND.NAME}" style="height:56px;object-fit:contain" />` : ''}
+          ${logoDataURI ? `<img src="${logoDataURI}" alt="${BRAND.NAME}" style="width:56px;height:56px;padding:3px;box-sizing:border-box;border-radius:12px;background-color:#fff;object-fit:contain" />` : ''}
           <div class="brand">${BRAND.NAME}</div>
           <div class="sub">${BRAND.TAGLINE}</div>
         </div>`;
@@ -209,7 +245,7 @@ const AdminPOSOrders = () => {
       const bodyHtml = `
         <div class="titlebar">
           <div>
-            <div class="inv-title">POS INVOICE &mdash; #${order.orderNumber}</div>
+            <div class="inv-title">POS INVOICE &mdash; #${safeOrderNumber}</div>
             <div style="font-size:12px;color:#666">In-Store Purchase</div>
           </div>
           <div style="text-align:right">
@@ -221,30 +257,30 @@ const AdminPOSOrders = () => {
         <div class="info-grid">
           <div class="info-card">
             <div class="info-label">Customer</div>
-            <div style="font-size:13px;font-weight:600;color:#1a1a1a">${order.customer?.name || 'Walk-in'}</div>
-            <div style="font-size:12px;color:#666">${order.customer?.phone || ''}</div>
-            <div style="font-size:11px;color:#888">${order.customer?.email || ''}</div>
-            <div style="font-size:11px;color:#888">${order.customer?.address || ''}</div>
+            <div style="font-size:13px;font-weight:600;color:#1a1a1a">${escapePrintHtml(order.customer?.name || 'Walk-in')}</div>
+            <div style="font-size:12px;color:#666">${escapePrintHtml(order.customer?.phone || '')}</div>
+            <div style="font-size:11px;color:#888">${escapePrintHtml(order.customer?.email || '')}</div>
+            <div style="font-size:11px;color:#888">${escapePrintHtml(order.customer?.address || '')}</div>
           </div>
           <div class="info-card">
             <div class="info-label">Order Info</div>
-            <div style="font-size:12px;color:#333"><strong>Order:</strong> #${order.orderNumber}</div>
-            <div style="font-size:12px;color:#333"><strong>Date:</strong> ${new Date(order.createdAt).toLocaleString('en-BD')}</div>
-            <div style="font-size:12px;color:#333"><strong>Outlet:</strong> ${order.outlet || 'Main Outlet'}</div>
-            <div style="font-size:12px;color:#333"><strong>Cashier:</strong> ${order.cashier ? (order.cashier.firstName || '') + ' ' + (order.cashier.lastName || '') : 'N/A'}</div>
+            <div style="font-size:12px;color:#333"><strong>Order:</strong> #${safeOrderNumber}</div>
+            <div style="font-size:12px;color:#333"><strong>Date:</strong> ${escapePrintHtml(new Date(order.createdAt).toLocaleString('en-BD'))}</div>
+            <div style="font-size:12px;color:#333"><strong>Outlet:</strong> ${escapePrintHtml(order.outlet || 'Main Outlet')}</div>
+            <div style="font-size:12px;color:#333"><strong>Cashier:</strong> ${escapePrintHtml(order.cashier ? `${order.cashier.firstName || ''} ${order.cashier.lastName || ''}` : 'N/A')}</div>
           </div>
           <div class="info-card">
             <div class="info-label">Payment</div>
-            <div style="font-size:12px;color:#333"><strong>Method:</strong> ${(order.paymentMethod || 'N/A').toUpperCase()}</div>
+            <div style="font-size:12px;color:#333"><strong>Method:</strong> ${escapePrintHtml((order.paymentMethod || 'N/A').toUpperCase())}</div>
             <div style="font-size:12px;color:#333"><strong>Status:</strong> <span style="color:#16A34A;font-weight:600">PAID</span></div>
-            <div style="font-size:12px;color:#333"><strong>Order Status:</strong> ${(order.orderStatus || 'completed').toUpperCase()}</div>
-            ${order.notes ? `<div style="font-size:11px;color:#666;margin-top:4px"><strong>Notes:</strong> ${order.notes}</div>` : ''}
+            <div style="font-size:12px;color:#333"><strong>Order Status:</strong> ${escapePrintHtml((order.orderStatus || 'completed').toUpperCase())}</div>
+            ${order.notes ? `<div style="font-size:11px;color:#666;margin-top:4px"><strong>Notes:</strong> ${escapePrintHtml(order.notes)}</div>` : ''}
           </div>
         </div>
 
         <table class="inv-table">
           <thead>
-            <tr><th>Product</th><th>Details</th><th style="text-align:right">Price</th><th style="text-align:center">Qty</th><th style="text-align:right">Total</th></tr>
+            <tr><th>Product</th><th>Details</th><th>Assigned item codes</th><th class="ta-right">Price</th><th class="ta-center">Qty</th><th class="ta-right">Total</th></tr>
           </thead>
           <tbody>${itemRows}</tbody>
         </table>
@@ -278,10 +314,10 @@ const AdminPOSOrders = () => {
         </div>`;
 
       const html = buildA4Document({
-        title: `POS Invoice #${order.orderNumber}`,
+        title: `POS Invoice #${safeOrderNumber}`,
         header: invoiceHeader,
         bodyHtml,
-        pageHeader: `${BRAND.NAME} - POS Invoice #${order.orderNumber}`,
+        pageHeader: `${BRAND.NAME} - POS Invoice #${safeOrderNumber}`,
         pageFooter: BRAND.NAME,
         extraCss: `
           .inv-header { background: linear-gradient(135deg,#DC143C 0%,#9F123C 100%); padding: 16px 24px; border-radius: 6px; text-align: center; }
@@ -293,9 +329,28 @@ const AdminPOSOrders = () => {
           .info-card { background: #FFF8FA; border: 1px solid #FECDD3; border-radius: 8px; padding: 14px; break-inside: avoid; }
           .info-label { font-size: 9px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
           table.inv-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 6mm; }
-          table.inv-table th, table.inv-table td { border-bottom: 1px solid #eee; }
-          table.inv-table th { text-align: left; padding: 10px 12px; border-bottom: 2px solid #FECDD3; color: #DC143C; font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; background: #FFF1F2; }
+          table.inv-table { table-layout: fixed; }
+          table.inv-table th, table.inv-table td { border: 1px solid #eee; padding: 2.5mm 2mm; vertical-align: middle; overflow-wrap: anywhere; }
+          table.inv-table th { text-align: left; border-bottom: 2px solid #FECDD3; color: #DC143C; font-weight: 600; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.3px; background: #FFF1F2; }
+          table.inv-table th:nth-child(1), table.inv-table td:nth-child(1) { width: 22%; }
+          table.inv-table th:nth-child(2), table.inv-table td:nth-child(2) { width: 20%; }
+          table.inv-table th:nth-child(3), table.inv-table td:nth-child(3) { width: 23%; }
+          table.inv-table th:nth-child(4), table.inv-table td:nth-child(4) { width: 12%; }
+          table.inv-table th:nth-child(5), table.inv-table td:nth-child(5) { width: 7%; }
+          table.inv-table th:nth-child(6), table.inv-table td:nth-child(6) { width: 16%; }
           table.inv-table tr { break-inside: avoid; }
+          .product-cell { display:flex; align-items:center; gap:2mm; min-width:0; font-weight:600; line-height:1.25; }
+          .product-cell > span { min-width:0; overflow-wrap:anywhere; }
+          .product-photo { width:14mm; height:16mm; flex:none; object-fit:contain; border:1px solid #eee; border-radius:2mm; background:#fff; }
+          .product-photo-empty { display:block; }
+          .item-details { color:#666; font-size:8.5pt; line-height:1.45; }
+          .assigned-codes { display:flex; align-items:center; justify-content:center; gap:2mm; min-height:17mm; }
+          .assigned-code { width:50%; min-width:0; text-align:center; font-size:6.5pt; color:#666; }
+          .assigned-code img { display:block; max-width:100%; margin:0 auto 1mm; }
+          .qr-code { width:15mm; height:15mm; object-fit:contain; }
+          .barcode { height:10mm; }
+          .code-empty { border:1px solid #eee; background:#fff; }
+          .ta-right { text-align:right; } .ta-center { text-align:center; }
           .totals-wrap { display: flex; justify-content: flex-end; margin-bottom: 4mm; }
           .totals-inner { width: 300px; }
           .totals-line { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; font-size: 13px; color: #666; }
@@ -339,7 +394,7 @@ const AdminPOSOrders = () => {
           url: `${process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000'}/api/pos/orders/${selectedOrder._id}/refund`,
           data: refundData
         });
-      toast.success('Order refunded successfully');
+      toast.success('Refund processed successfully');
       setShowRefundModal(false);
       setRefundData({ refundAmount: 0, reason: '' });
       fetchOrders();
@@ -451,7 +506,7 @@ const AdminPOSOrders = () => {
           <div className="bg-white border border-[#BDBDBD] p-6 hover:bg-[#F4F4F4] transition-all duration-200">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-[#4A4A4A]">Today's Sales</p>
+                <p className="text-sm font-medium text-[#4A4A4A]">Today&apos;s Sales</p>
                 <p className="text-2xl font-bold text-green-600">{formatBDT(stats.todaySales || 0)}</p>
               </div>
               <div className="w-12 h-12 bg-green-100 flex items-center justify-center">
@@ -463,7 +518,7 @@ const AdminPOSOrders = () => {
           <div className="bg-white border border-[#BDBDBD] p-6 hover:bg-[#F4F4F4] transition-all duration-200">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-[#4A4A4A]">Today's Orders</p>
+                <p className="text-sm font-medium text-[#4A4A4A]">Today&apos;s Orders</p>
                 <p className="text-2xl font-bold text-[#1B1B1B]">{stats.todayOrders || 0}</p>
               </div>
               <div className="w-12 h-12 bg-[#F4F4F4] flex items-center justify-center">
@@ -633,7 +688,10 @@ const AdminPOSOrders = () => {
                         </div>
                       </td>
                       <td className="py-3 px-4">
-                        {getStatusBadge(order.orderStatus)}
+                        <div className="flex flex-wrap items-center gap-1">
+                          {getStatusBadge(order.orderStatus)}
+                          {order.paymentStatus === 'partially_refunded' && <span className="px-2.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-800">Partially refunded</span>}
+                        </div>
                       </td>
                       <td className="py-3 px-4 text-sm text-[#4A4A4A]">
                         {new Date(order.createdAt).toLocaleDateString()}
@@ -674,7 +732,7 @@ const AdminPOSOrders = () => {
                             <button
                               onClick={() => {
                                 setSelectedOrder(order);
-                                setRefundData({ refundAmount: order.total, reason: '' });
+                                setRefundData({ refundAmount: Math.max(0, Number(order.total) - Number(order.refundAmount || 0)), reason: '' });
                                 setShowRefundModal(true);
                               }}
                               className="text-red-600 hover:text-red-900 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
@@ -706,7 +764,10 @@ const AdminPOSOrders = () => {
                       <p className="font-medium text-[#1B1B1B]">{order.orderNumber}</p>
                       <p className="text-sm text-[#4A4A4A]">{order.outlet}</p>
                     </div>
-                    {getStatusBadge(order.orderStatus)}
+                    <div className="flex flex-wrap items-center gap-1">
+                      {getStatusBadge(order.orderStatus)}
+                      {order.paymentStatus === 'partially_refunded' && <span className="px-2.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-800">Partially refunded</span>}
+                    </div>
                   </div>
                   <div className="text-sm text-[#4A4A4A] mb-2">
                     <div>{order.customer.name} • {order.customer.phone}</div>
@@ -752,7 +813,7 @@ const AdminPOSOrders = () => {
                       <button
                         onClick={() => {
                           setSelectedOrder(order);
-                          setRefundData({ refundAmount: order.total, reason: '' });
+                          setRefundData({ refundAmount: Math.max(0, Number(order.total) - Number(order.refundAmount || 0)), reason: '' });
                           setShowRefundModal(true);
                         }}
                         className="flex items-center bg-red-500 text-white px-3 py-2 rounded text-sm hover:bg-red-600 transition min-h-[44px] min-w-[44px]"
@@ -867,7 +928,7 @@ const AdminPOSOrders = () => {
                       <div>
                         <p className="font-medium text-[#1B1B1B]">{item.productName}</p>
                         <p className="text-sm text-[#4A4A4A]">
-                          {[formatMeasureLine(item.variantInfo), item.variantInfo.color, `Qty: ${item.quantity}`].filter(Boolean).join(' • ')}
+                          {[formatMeasureLine(item.variantInfo), item.variantInfo.color, item.variantInfo.regionName && `Region: ${item.variantInfo.regionName}`, item.variantInfo.barcode && `My barcode: ${item.variantInfo.barcode}`, item.variantInfo.realBarcode && `Product barcode: ${item.variantInfo.realBarcode}`, `Qty: ${item.quantity}`].filter(Boolean).join(' • ')}
                         </p>
                       </div>
                       <p className="font-medium text-[#1B1B1B]">{formatBDT(item.totalPrice)}</p>
@@ -957,10 +1018,14 @@ const AdminPOSOrders = () => {
                 <label className="block text-sm font-medium text-[#4A4A4A]">Refund Amount</label>
                                  <input
                    type="number"
+                   min="0.01"
+                   max={Math.max(0, Number(selectedOrder.total) - Number(selectedOrder.refundAmount || 0))}
+                   step="0.01"
                    value={refundData.refundAmount}
                    onChange={(e) => setRefundData({ ...refundData, refundAmount: parseFloat(e.target.value) || 0 })}
                    className="mt-1 block w-full px-3 py-2 border border-[#BDBDBD] focus:outline-none focus:ring-2 focus:ring-[#B1123B] bg-white text-[#1B1B1B]"
                  />
+                 <p className="mt-1 text-xs text-[#777]">Remaining refundable: {formatBDT(Math.max(0, Number(selectedOrder.total) - Number(selectedOrder.refundAmount || 0)))}</p>
               </div>
               
               <div>

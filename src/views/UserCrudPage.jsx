@@ -1,6 +1,6 @@
 'use client'
 import { getStorage, setStorage, removeStorage } from "../lib/storage"
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useCallback } from 'react';
 import { toast } from 'react-toastify';
 import { 
   FaUsers, FaPlus, FaEdit, FaTrash, FaEye, FaEyeSlash, 
@@ -32,9 +32,7 @@ const UserCrudPage = () => {
   // Helper function to get admin token
   const getAdminToken = () => {
     return getStorage("adminAccessToken") || 
-           getStorage("adminToken") || 
-           getStorage("adminRefreshToken") || 
-           getStorage("accessToken");
+           getStorage("adminToken");
   };
 
   // Format date
@@ -56,6 +54,7 @@ const UserCrudPage = () => {
 
   // Initialize Socket.IO connection
   useEffect(() => {
+    if (!isAuthenticated) return;
     const token = getAdminToken();
     if (!token) {
       console.log('No admin token found for Socket.IO connection');
@@ -124,13 +123,13 @@ const UserCrudPage = () => {
       console.log('🔌 Cleaning up Socket.IO connection...');
       newSocket.disconnect();
     };
-  }, [API_URI]);
+  }, [API_URI, isAuthenticated]);
 
   // Fetch all users
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     try {
       console.log('👥 Fetching users...');
-      const token = getAdminToken();
+      const token = getStorage('adminAccessToken') || getStorage('adminToken');
       if (!token) {
         console.error('❌ No admin token found');
         toast.error('Authentication required');
@@ -174,7 +173,7 @@ const UserCrudPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [API_URI]);
 
   // Add new user
   const addUser = async (userData) => {
@@ -313,7 +312,7 @@ const UserCrudPage = () => {
     }
     if (!window.confirm(`Lift the ban for ${user.firstName} ${user.lastName}?`)) return;
     try {
-      const token = getAdminToken();
+      const token = getStorage('adminAccessToken') || getStorage('adminToken');
       if (!token) {
         toast.error('Authentication required');
         return;
@@ -372,7 +371,7 @@ const UserCrudPage = () => {
     if (isAuthenticated) {
       fetchUsers();
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, fetchUsers]);
 
   // Show loading while auth is being checked
   if (authLoading) {

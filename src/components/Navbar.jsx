@@ -2,10 +2,13 @@
 import React, { useState, useEffect, useContext, useRef } from "react";
 import Link from "next/link"
 import { useRouter, usePathname } from "next/navigation";
-import { FiSearch, FiUser, FiHeart, FiShoppingBag, FiMenu, FiX, FiChevronDown, FiGrid, FiLogOut } from "react-icons/fi";
+import { FiSearch, FiUser, FiHeart, FiShoppingBag, FiMenu, FiX, FiChevronDown, FiGrid, FiLogOut, FiGift } from "react-icons/fi";
 import { UserContext } from '../context/UserContext';
 import { CartContext } from '../context/CartContext';
+import { useUserChat } from '../context/UserChatContext';
 import MiniCart from './MiniCart';
+import NotificationBell from './NotificationBell';
+import { formatBDTShort } from '../config/brand';
 
 const API_URI = process.env.NEXT_PUBLIC_API_URI || "http://localhost:3000";
 
@@ -14,7 +17,8 @@ const Navbar = () => {
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showAnnouncement, setShowAnnouncement] = useState(true);
-  const [announcement, setAnnouncement] = useState(null);
+  const [announcements, setAnnouncements] = useState([]);
+  const [announcementIndex, setAnnouncementIndex] = useState(0);
   const [categories, setCategories] = useState([]);
   const [mobileExpanded, setMobileExpanded] = useState({});
   const [searchOpen, setSearchOpen] = useState(false);
@@ -31,8 +35,10 @@ const Navbar = () => {
   const catDropdownRef = useRef(null);
   const pathname = usePathname();
   const router = useRouter();
-  const { isLoggedIn, logout } = useContext(UserContext);
+  const { isLoggedIn, logout, loyaltyBalance } = useContext(UserContext);
+  const { activityNotifications, markActivityNotificationRead, markAllActivityNotificationsRead, clearActivityNotifications } = useUserChat();
   const isProfile = pathname.startsWith('/profile');
+  const announcement = announcements[announcementIndex] || null;
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 40);
@@ -50,18 +56,37 @@ const Navbar = () => {
         console.error("Failed to fetch categories", err);
       }
     };
-    const fetchAnnouncement = async () => {
+    const fetchAnnouncements = async () => {
+      try {
+        const res = await fetch(`${API_URI}/api/announcements/active`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            setAnnouncements(data.filter((item) => item?.text));
+            return;
+          }
+        }
+      } catch {}
+      // Keep compatibility with older API deployments while they are updated.
       try {
         const res = await fetch(`${API_URI}/api/announcements/random`);
         if (res.ok) {
           const data = await res.json();
-          if (data && data.text) setAnnouncement(data);
+          if (data?.text) setAnnouncements([data]);
         }
       } catch {}
     };
     fetchCategories();
-    fetchAnnouncement();
+    fetchAnnouncements();
   }, []);
+
+  useEffect(() => {
+    if (announcements.length < 2) return undefined;
+    const timer = window.setInterval(() => {
+      setAnnouncementIndex((current) => (current + 1) % announcements.length);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [announcements.length]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -94,8 +119,6 @@ const Navbar = () => {
     setSearchResults([]);
   };
 
-  const isHome = pathname === "/" || pathname === "/home";
-
   const leftLinks = [
     { label: "Home", href: "/" },
     { label: "Products", href: "/products" },
@@ -113,14 +136,16 @@ const Navbar = () => {
       {/* Announcement Bar */}
       {showAnnouncement && announcement && (
         <div className="relative bg-maybelline-pink text-pure-white text-xs tracking-[0.2em] uppercase">
-          <div className="flex items-center justify-center h-10 px-4">
-            {announcement.link ? (
-              <a href={announcement.link} className="font-medium hover:underline" target="_blank" rel="noopener noreferrer">
-                {announcement.text}
-              </a>
-            ) : (
-              <p className="font-medium">{announcement.text}</p>
-            )}
+          <div className="relative flex items-center justify-center h-10 px-10 overflow-hidden" aria-live="polite">
+            <div key={announcement._id || announcementIndex} className="announcement-slide absolute inset-x-10 flex items-center justify-center">
+              {announcement.link ? (
+                <a href={announcement.link} className="max-w-full truncate whitespace-nowrap text-center font-medium hover:underline" target="_blank" rel="noopener noreferrer">
+                  {announcement.text}
+                </a>
+              ) : (
+                <p className="max-w-full truncate whitespace-nowrap text-center font-medium">{announcement.text}</p>
+              )}
+            </div>
           </div>
           <button
             onClick={() => setShowAnnouncement(false)}
@@ -129,6 +154,16 @@ const Navbar = () => {
           >
             <FiX size={14} />
           </button>
+          <style jsx>{`
+            @keyframes announcement-slide {
+              from { opacity: 0; transform: translateY(14px); }
+              to { opacity: 1; transform: translateY(0); }
+            }
+            .announcement-slide { animation: announcement-slide 420ms ease-out both; }
+            @media (prefers-reduced-motion: reduce) {
+              .announcement-slide { animation: none; }
+            }
+          `}</style>
         </div>
       )}
 
@@ -269,17 +304,31 @@ const Navbar = () => {
           <div className="flex items-center gap-3 sm:gap-5">
             <button
               onClick={() => setSearchOpen(!searchOpen)}
-              className="hidden sm:flex touch-target items-center justify-center text-black hover:text-maybelline-pink transition-colors"
-              aria-label="Search"
+              className="flex touch-target items-center justify-center text-black transition-colors hover:text-maybelline-pink"
+              aria-label={searchOpen ? "Close search" : "Search"}
+              aria-expanded={searchOpen}
             >
-              <FiSearch size={20} />
+              {searchOpen ? <FiX size={20} /> : <FiSearch size={20} />}
             </button>
+            <NotificationBell
+              notifications={activityNotifications}
+              onRead={markActivityNotificationRead}
+              onReadAll={markAllActivityNotificationsRead}
+              onClear={clearActivityNotifications}
+              className="hidden shrink-0 sm:flex"
+            />
             <Link href="/wishlist"
               className="touch-target flex items-center justify-center text-black hover:text-maybelline-pink transition-colors"
               aria-label="Wishlist"
             >
               <FiHeart size={20} />
             </Link>
+            {isLoggedIn && (
+              <Link href="/profile/loyalty" className="hidden md:flex touch-target items-center justify-center gap-1.5 text-black hover:text-maybelline-pink transition-colors" aria-label={`Loyalty balance ${loyaltyBalance === null ? 'loading' : formatBDTShort(loyaltyBalance)}`} title={`Loyalty balance: ${loyaltyBalance === null ? 'loading' : formatBDTShort(loyaltyBalance)}`}>
+                <FiGift size={19} />
+                <span className="hidden xl:inline text-xs font-semibold">{loyaltyBalance === null ? 'BDT —' : formatBDTShort(loyaltyBalance)}</span>
+              </Link>
+            )}
             <Link href="/cart"
               onClick={(e) => {
                 if (typeof window !== 'undefined' && window.innerWidth < 640) {
@@ -493,6 +542,10 @@ const Navbar = () => {
                   {isLoggedIn ? (
                     <>
                       <Link href="/profile" onClick={() => setMobileMenuOpen(false)} className="block text-sm text-black hover:text-maybelline-pink font-medium py-3">My Account</Link>
+                      <Link href="/profile/loyalty" onClick={() => setMobileMenuOpen(false)} className="flex items-center justify-between gap-3 border-b border-cool-gray/50 py-3 text-sm font-medium text-black hover:text-maybelline-pink">
+                        <span className="flex items-center gap-2"><FiGift size={16} /> Loyalty balance</span>
+                        <span className="text-xs text-dark-gray">{loyaltyBalance === null ? 'BDT —' : formatBDTShort(loyaltyBalance)}</span>
+                      </Link>
                       <button
                         onClick={() => { setMobileMenuOpen(false); logout(); }}
                         className="flex items-center gap-2 text-sm text-red-500 hover:text-red-600 font-medium py-3 w-full"
@@ -645,8 +698,6 @@ const Navbar = () => {
       {/* Mobile Mini Cart */}
       <MiniCart open={miniCartOpen} onClose={() => setMiniCartOpen(false)} />
 
-      {/* Spacer for non-home pages */}
-      {!isHome && <div className="h-20" />}
     </div>
   );
 };

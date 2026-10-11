@@ -46,12 +46,10 @@ function CartPage() {
 
   const handleQuantityChange = (itemIdentifier, value) => {
     const sanitizedValue = value.replace(/[^0-9]/g, '');
-    const numericValue = Math.max(1, parseInt(sanitizedValue, 10) || 1);
     setLocalQuantities(prev => ({
       ...prev,
       [itemIdentifier]: sanitizedValue
     }));
-    updateQuantity(itemIdentifier, numericValue);
   };
 
   const toastConfig = {
@@ -66,6 +64,11 @@ function CartPage() {
   const subtotal = useMemo(() => {
     return cartItems.reduce((acc, item) => acc + (item.price * item.quantity), 0);
   }, [cartItems]);
+  const couponRegions = useMemo(() => [...new Set(
+    (coupon?.applicableProducts || []).flatMap((productRule) => productRule.variants || [])
+      .map((variant) => variant.regionName || variant.regionId?.name)
+      .filter(Boolean)
+  )], [coupon]);
 
   const total = subtotal - (discount || 0);
   const formattedSubtotal = subtotal.toFixed(2);
@@ -73,6 +76,46 @@ function CartPage() {
 
   const getItemIdentifier = (item) => {
     return isLoggedIn ? item._id : item.guestItemId;
+  };
+
+  const commitQuantityChange = async (item) => {
+    const itemIdentifier = getItemIdentifier(item);
+    const inputValue = localQuantities[itemIdentifier] ?? String(item.quantity);
+    if (inputValue.trim() === '') {
+      setLocalQuantities(prev => ({ ...prev, [itemIdentifier]: String(item.quantity) }));
+      return;
+    }
+
+    const requestedQuantity = Math.max(1, parseInt(inputValue, 10) || 1);
+    const stockLimit = item.stockAvailable == null ? null : Number(item.stockAvailable);
+    if (!item.isPreOrder && stockLimit !== null && stockLimit <= 0) {
+      setLocalQuantities(prev => ({ ...prev, [itemIdentifier]: String(item.quantity) }));
+      toast.info('This item is out of stock. Remove it from your cart.', toastConfig);
+      return;
+    }
+
+    const quantity = item.isPreOrder || stockLimit === null ? requestedQuantity : Math.min(requestedQuantity, stockLimit);
+    setLocalQuantities(prev => ({ ...prev, [itemIdentifier]: String(quantity) }));
+    if (requestedQuantity > quantity) {
+      toast.info(`Only ${quantity} item(s) are available`, toastConfig);
+    }
+    if (quantity === Number(item.quantity)) return;
+
+    const result = await updateQuantity(itemIdentifier, quantity);
+    if (result?.success === false) {
+      toast.info(result.message, toastConfig);
+      setLocalQuantities(prev => ({ ...prev, [itemIdentifier]: String(item.quantity) }));
+    }
+  };
+
+  const handleIncreaseQuantity = async (item) => {
+    const stockLimit = item.stockAvailable == null ? null : Number(item.stockAvailable);
+    if (!item.isPreOrder && stockLimit !== null && Number(item.quantity) >= stockLimit) {
+      toast.info(`Only ${stockLimit} item(s) are available`, toastConfig);
+      return;
+    }
+    const result = await increaseQuantity(getItemIdentifier(item));
+    if (result?.success === false) toast.info(result.message, toastConfig);
   };
 
   const handleApplyCoupon = async () => {
@@ -137,7 +180,7 @@ function CartPage() {
               </div>
               <h3 className="font-heading text-display-sm text-black mb-3 sm:mb-4">Your cart is empty</h3>
               <p className="font-sans text-sm sm:text-base text-dark-gray mb-6 sm:mb-8">
-                Looks like you haven't added any items to your cart yet.
+                Looks like you haven&apos;t added any items to your cart yet.
               </p>
               <button
                 onClick={() => router.push('/products')}
@@ -203,10 +246,18 @@ function CartPage() {
                                   <h3 className="font-heading text-base sm:text-lg text-black mb-2 line-clamp-2">
                                     {item.name}
                                   </h3>
+                                  {item.isPreOrder && (
+                                    <p className="text-xs font-semibold text-maybelline-pink mb-2">
+                                      Pre-order{item.preOrderEstimatedDate ? ` · Est. ${new Date(item.preOrderEstimatedDate).toLocaleDateString()}` : ''}
+                                    </p>
+                                  )}
+                                  {item.isDigitalProduct && (
+                                    <p className="mb-2 text-xs font-semibold text-maybelline-pink">Digital product · bKash or Nagad payment required</p>
+                                  )}
                                   
                                   {/* Product Variants */}
                                   <div className="flex flex-wrap gap-1 sm:gap-2 mb-2 sm:mb-3">
-                                    {item.size && (
+                                    {formatMeasureLine(item) && (
                                       <span className="inline-flex items-center px-2 sm:px-3 py-0.5 sm:py-1 text-xs font-medium bg-cool-gray text-dark-gray">
                                         {formatMeasureLine(item)}
                                       </span>
@@ -214,6 +265,11 @@ function CartPage() {
                                     {item.color && (
                                       <span className="inline-flex items-center px-2 sm:px-3 py-0.5 sm:py-1 text-xs font-medium bg-cool-gray text-dark-gray">
                                         Color: {item.color}
+                                      </span>
+                                    )}
+                                    {(item.regionName || item.regionId?.name) && (
+                                      <span className="inline-flex items-center px-2 sm:px-3 py-0.5 sm:py-1 text-xs font-medium bg-rose-50 text-rose-800">
+                                        Region: {item.regionName || item.regionId.name}
                                       </span>
                                     )}
                                   </div>
@@ -243,15 +299,19 @@ function CartPage() {
                                     </button>
                                     <input
                                       type="text"
+                                      inputMode="numeric"
+                                      maxLength={7}
                                       value={localQuantities[itemIdentifier] || ''}
                                       onChange={(e) => handleQuantityChange(itemIdentifier, e.target.value)}
+                                      onBlur={() => commitQuantityChange(item)}
+                                      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                                       className="w-12 sm:w-16 h-7 sm:h-8 text-center border border-cool-gray text-black font-sans text-sm focus:ring-1 focus:ring-maybelline-pink focus:border-maybelline-pink outline-none"
                                       disabled={isLoading || localLoading}
                                     />
                                     <button
-                                      onClick={() => increaseQuantity(itemIdentifier)}
+                                      onClick={() => handleIncreaseQuantity(item)}
                                       className="w-7 h-7 sm:w-8 sm:h-8 bg-pure-white border border-cool-gray hover:bg-cool-gray flex items-center justify-center transition-all duration-200 disabled:opacity-50 touch-target"
-                                      disabled={isLoading || localLoading}
+                                      disabled={isLoading || localLoading || (!item.isPreOrder && item.stockAvailable != null && Number(item.quantity) >= Number(item.stockAvailable))}
                                     >
                                       <FaPlus size={10} className="sm:w-3 sm:h-3 text-black" />
                                     </button>
@@ -296,8 +356,10 @@ function CartPage() {
                           <div>
                             <p className="text-black font-semibold">{coupon.code}</p>
                             <p className="text-sm text-dark-gray">
-                              {coupon.discount > 0 && `-${formatBDT(coupon.discount)} discount applied`}
+                              {coupon.discount > 0 && `${coupon.discount}% off · You saved ${formatBDT(discount)}`}
+                              {Number(coupon.maxDiscountAmount) > 0 && ` · Max saving ${formatBDT(coupon.maxDiscountAmount)}`}
                             </p>
+                            {couponRegions.length > 0 && <p className="mt-1 text-xs text-dark-gray">Applies to: {couponRegions.join(', ')}</p>}
                           </div>
                         </div>
                         <button

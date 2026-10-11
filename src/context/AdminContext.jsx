@@ -5,10 +5,22 @@ import { createContext, useContext, useReducer, useEffect } from 'react';
 import axios from 'axios';
 import { useRouter } from "next/navigation";
 import { withDevice } from '../lib/device';
+import { adminPermissionForPath, firstAllowedAdminPath, hasAdminPermission } from '../lib/adminPermissions';
 
 export const AdminContext = createContext();
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URI || "http://localhost:3000";
+
+const isBackendRequest = (config = {}) => {
+  try {
+    const requestUrl = new URL(config.url || '', config.baseURL || API_BASE_URL);
+    return requestUrl.origin === new URL(API_BASE_URL).origin;
+  } catch {
+    return false;
+  }
+};
+
+const isAbsoluteUrl = (url = '') => /^(?:[a-z][a-z\d+.-]*:)?\/\//i.test(url);
 
 const initialState = {
   admin: null,
@@ -20,15 +32,6 @@ const initialState = {
 };
 
 // --- Helpers ---
-const safeParse = (value) => {
-  try {
-    if (!value) return null;
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-};
-
 const fetchCurrentAdmin = async (accessToken) => {
   const res = await axios.get(`${API_BASE_URL}/api/admin/me`, {
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -101,11 +104,10 @@ export const AdminProvider = ({ children }) => {
         setStorage('adminAccessToken', token);
       }
 
-      let admin = safeParse(getStorage('adminData'));
-      if (!admin) {
-        admin = await fetchCurrentAdmin(token);
-        if (admin) setStorage('adminData', JSON.stringify(admin));
-      }
+      // Permission assignments may have changed while this admin was signed
+      // in elsewhere. Always hydrate the current role from the server.
+      const admin = await fetchCurrentAdmin(token);
+      if (admin) setStorage('adminData', JSON.stringify(admin));
 
       if (!admin) {
         clearAuthStorage();
@@ -126,13 +128,23 @@ export const AdminProvider = ({ children }) => {
 
 
   // --- Axios interceptors ---
+  // Admin screens use both context methods and direct axios calls. Read the
+  // token from storage for each request so child effects do not race the
+  // provider's state effect, and never forward admin credentials off-origin.
   useEffect(() => {
     const requestInterceptor = axios.interceptors.request.use(
       (config) => {
-        if (state.accessToken && !config.headers.Authorization) {
-          config.headers.Authorization = `Bearer ${state.accessToken}`;
+        if (!isAbsoluteUrl(config.url) && !config.baseURL) {
+          config.baseURL = API_BASE_URL;
         }
-        config.baseURL = API_BASE_URL;
+
+        if (isBackendRequest(config) && !config.skipAdminAuth) {
+          const token = getStorage('adminAccessToken') || getStorage('adminToken') || state.accessToken;
+          if (token) {
+            if (typeof config.headers?.set === 'function') config.headers.set('Authorization', `Bearer ${token}`);
+            else config.headers = { ...config.headers, Authorization: `Bearer ${token}` };
+          }
+        }
         return config;
       },
       (error) => Promise.reject(error)
@@ -142,29 +154,82 @@ export const AdminProvider = ({ children }) => {
       (response) => response,
       async (error) => {
         const originalRequest = error.config;
+        if (!originalRequest || !isBackendRequest(originalRequest)) {
+          return Promise.reject(error);
+        }
+
+        const banned = error.response?.status === 403 && error.response?.data?.banned === true;
+        if (banned) {
+          clearAuthStorage();
+          dispatch({ type: 'LOGOUT' });
+          router.replace('/admin');
+          return Promise.reject(error);
+        }
+
+        const permissionDenied = error.response?.status === 403 && (
+          error.response?.data?.requiredPermission ||
+          /role does not have access|not assigned to your role/i.test(error.response?.data?.message || '')
+        );
+        if (permissionDenied && !originalRequest._adminRoleRefresh) {
+          originalRequest._adminRoleRefresh = true;
+          try {
+            const token = getStorage('adminAccessToken') || state.accessToken;
+            const currentAdmin = token ? await fetchCurrentAdmin(token) : null;
+            if (currentAdmin) {
+              setStorage('adminData', JSON.stringify(currentAdmin));
+              dispatch({ type: 'SET_ADMIN_DATA', payload: currentAdmin });
+              if (typeof window !== 'undefined') {
+                const currentPermission = adminPermissionForPath(window.location.pathname);
+                if (currentPermission && !hasAdminPermission(currentAdmin, currentPermission)) {
+                  router.replace(firstAllowedAdminPath(currentAdmin));
+                }
+              }
+            }
+          } catch (roleRefreshError) {
+            console.warn('Unable to refresh admin role after a permission change:', roleRefreshError);
+          }
+        }
+
+        let requestPath = '';
+        try { requestPath = new URL(originalRequest.url || '', originalRequest.baseURL || API_BASE_URL).pathname; } catch {}
         if (
           error.response?.status === 401 &&
           !originalRequest._retry &&
-          state.refreshToken &&
-          !originalRequest.url.includes('/refresh-token')
+          !requestPath.endsWith('/admin/login') &&
+          !requestPath.endsWith('/admin/logout') &&
+          !requestPath.endsWith('/admin/refresh-token')
         ) {
+          const refreshToken = getStorage('adminRefreshToken') || state.refreshToken;
+          if (!refreshToken) {
+            clearAuthStorage();
+            dispatch({ type: 'LOGOUT' });
+            router.replace('/admin');
+            return Promise.reject(error);
+          }
           originalRequest._retry = true;
           try {
             const res = await axios.post(`${API_BASE_URL}/api/admin/refresh-token`, {
-              token: state.refreshToken,
-            });
-            const { accessToken } = res.data;
+              token: refreshToken,
+            }, { skipAdminAuth: true });
+            const { accessToken, refreshToken: rotatedRefreshToken } = res.data;
             setStorage('adminAccessToken', accessToken);
+            if (rotatedRefreshToken) setStorage('adminRefreshToken', rotatedRefreshToken);
 
             dispatch({
               type: 'REFRESH_TOKEN',
-              payload: { accessToken },
+              payload: { accessToken, refreshToken: rotatedRefreshToken },
             });
 
-            originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+            if (typeof originalRequest.headers?.set === 'function') {
+              originalRequest.headers.set('Authorization', `Bearer ${accessToken}`);
+            } else {
+              originalRequest.headers = { ...originalRequest.headers, Authorization: `Bearer ${accessToken}` };
+            }
             return axios(originalRequest);
           } catch (refreshError) {
-            await handleLogout();
+            clearAuthStorage();
+            dispatch({ type: 'LOGOUT' });
+            router.replace('/admin');
             return Promise.reject(refreshError);
           }
         }
@@ -176,7 +241,7 @@ export const AdminProvider = ({ children }) => {
       axios.interceptors.request.eject(requestInterceptor);
       axios.interceptors.response.eject(responseInterceptor);
     };
-  }, [state.accessToken, state.refreshToken]);
+  }, [state.accessToken, state.refreshToken, router]);
 
   // --- Auth Actions ---
   const login = async (credentials) => {
@@ -336,6 +401,7 @@ export const AdminProvider = ({ children }) => {
   // --- Exposed Context Value ---
   const value = {
     ...state,
+    hasPermission: (permission) => hasAdminPermission(state.admin, permission),
     login,
     logout: handleLogout,
     registerAdmin,

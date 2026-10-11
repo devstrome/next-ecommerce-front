@@ -1,5 +1,5 @@
 'use client'
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import axios from 'axios';
 import { FaPlus, FaEdit, FaTrash, FaArrowLeft, FaSearch, FaTimes, FaSitemap } from 'react-icons/fa';
 import { useRouter } from "next/navigation";
@@ -16,13 +16,9 @@ const CategoryManagement = () => {
   const router = useRouter();
 
   const API = `${process.env.NEXT_PUBLIC_API_URI}`;
-  const headers = { Authorization: `Bearer ${getStorage('adminAccessToken')}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${getStorage('adminAccessToken')}` }), []);
 
-  useEffect(() => {
-    fetchTree();
-  }, []);
-
-  const fetchTree = async () => {
+  const fetchTree = useCallback(async () => {
     setLoading(true);
     try {
       const res = await axios.get(`${API}/api/categories/tree`, { headers });
@@ -31,7 +27,11 @@ const CategoryManagement = () => {
       console.error('Error fetching tree:', err);
     }
     setLoading(false);
-  };
+  }, [API, headers]);
+
+  useEffect(() => {
+    fetchTree();
+  }, [fetchTree]);
 
   const handleAdd = async () => {
     if (!form.name.trim()) return;

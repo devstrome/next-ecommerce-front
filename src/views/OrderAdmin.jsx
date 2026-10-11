@@ -1,6 +1,6 @@
 'use client'
 import { getStorage, setStorage, removeStorage } from "../lib/storage"
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import { useAdmin } from '../context/AdminContext';
@@ -8,15 +8,13 @@ import RefundStatusTracker from '../components/RefundStatusTracker';
 import AdminCreateOrderModal from '../components/AdminCreateOrderModal';
 import QRScanner from '../components/QRScanner';
 import { QRCodeSVG } from 'qrcode.react';
-import QRCode from 'qrcode';
 import { toast } from 'react-toastify';
-import { printDocument } from '../lib/print';
-import { formatMeasureLine } from '../lib/measure';
 import { formatBDT } from '../config/brand';
+import { formatMeasureLine } from '../lib/measure';
 import { 
   FaFilter, 
   FaPrint, 
-  FaDownload, 
+  FaEnvelope,
   FaSearch, 
   FaCalendarAlt,
   FaUser,
@@ -68,6 +66,54 @@ const formatCurrency = (amount) => {
   return formatBDT(amount);
 };
 
+const InventoryDetailCard = ({ inventory, index }) => {
+  const variant = inventory?.variantId && typeof inventory.variantId === 'object' ? inventory.variantId : null;
+  const product = inventory?.productId && typeof inventory.productId === 'object' ? inventory.productId : null;
+  const idText = (value) => value && typeof value === 'object' ? String(value._id || value) : String(value || '');
+  const regionName = inventory?.regionName || inventory?.regionId?.name || variant?.regionName || '';
+  const colorName = inventory?.color?.name || inventory?.colorName || (typeof inventory?.color === 'string' ? inventory.color : '') || variant?.colorName || '';
+  const image = inventory?.imageUri || inventory?.variantImage || variant?.images?.[0]?.url || variant?.images?.[0] || product?.mainImage || '';
+  const location = inventory?.location || {};
+  const locationLabel = [location.warehouse, location.shelf, location.section].filter(Boolean).join(' · ');
+  const detail = (label, value, mono = false) => (
+    <div className="flex justify-between gap-3 text-sm" key={label}>
+      <span className="shrink-0 text-gray-600">{label}:</span>
+      <span className={`${mono ? 'font-mono break-all' : 'text-right break-words'} text-gray-800`}>{value || '—'}</span>
+    </div>
+  );
+
+  return (
+    <section key={inventory?._id || index} className="border border-gray-200 rounded-lg p-4">
+      <div className="flex flex-col sm:flex-row gap-4">
+        {image && <img src={image} alt={product?.name || 'Inventory item'} className="h-28 w-28 shrink-0 rounded border border-gray-100 bg-white object-contain" />}
+        <div className="grid flex-1 grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
+          <div className="space-y-2">
+            <h4 className="font-medium text-gray-900">{product?.name || 'Inventory item'} · Item {index + 1}</h4>
+            {detail('My barcode', inventory?.barcode, true)}
+            {detail('Product barcode', inventory?.realBarcode, true)}
+            {detail('QR code', inventory?.qrCode, true)}
+            {detail('Region', regionName)}
+            {detail('Color / size', [colorName, formatMeasureLine(inventory) || inventory?.size].filter(Boolean).join(' · '))}
+            {detail('Status', inventory?.status)}
+            {detail('Stock / available / assigned', `${Number(inventory?.stockQuantity) || 0} / ${Number(inventory?.availableQuantity) || 0} / ${Number(inventory?.assignedQuantity) || 0}`)}
+          </div>
+          <div className="space-y-2">
+            <h4 className="font-medium text-gray-900">Item details</h4>
+            {detail('Inventory ID', inventory?._id, true)}
+            {detail('Product ID', idText(product?._id || inventory?.productId), true)}
+            {detail('Variant ID', idText(variant?._id || inventory?.variantId), true)}
+            {detail('Price', formatBDT(inventory?.price))}
+            {detail('Discount price', inventory?.discountPrice != null ? formatBDT(inventory.discountPrice) : '')}
+            {detail('Unit cost', inventory?.costPrice != null ? formatBDT(inventory.costPrice) : '')}
+            {detail('Location', locationLabel)}
+            {detail('Notes', inventory?.notes)}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+};
+
 const AdminOrdersPage = () => {
   const { isAuthenticated, loading: authLoading, logout } = useAdmin();
   const [orders, setOrders] = useState([]);
@@ -76,6 +122,9 @@ const AdminOrdersPage = () => {
   const [updatingOrderId, setUpdatingOrderId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [editingOrder, setEditingOrder] = useState(null);
+  const [digitalFulfillmentDrafts, setDigitalFulfillmentDrafts] = useState({});
+  const [digitalFulfillmentLoading, setDigitalFulfillmentLoading] = useState(false);
+  const [digitalFulfillmentSaving, setDigitalFulfillmentSaving] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [ordersPerPage] = useState(10);
   const [pagination, setPagination] = useState({
@@ -123,6 +172,8 @@ const AdminOrdersPage = () => {
   // Product search states
   const [productSearchQuery, setProductSearchQuery] = useState('');
   const [allProducts, setAllProducts] = useState([]);
+  const allProductsRef = useRef(allProducts);
+  allProductsRef.current = allProducts;
   const [filteredProducts, setFilteredProducts] = useState([]);
   const [isLoadingProducts, setIsLoadingProducts] = useState(false);
   const [selectedProductStock, setSelectedProductStock] = useState({});
@@ -143,7 +194,7 @@ const AdminOrdersPage = () => {
 useEffect(() => {
   if (!isAuthenticated || !API_BASE_URL) return;
 
-  const adminToken = getStorage('adminAccessToken') || getStorage('adminRefreshToken');
+  const adminToken = getStorage('adminAccessToken') || getStorage('adminToken');
   socketRef.current = io(API_BASE_URL, {
     withCredentials: true,
     reconnectionAttempts: 3,
@@ -162,8 +213,7 @@ useEffect(() => {
   });
 
   socketRef.current.on('admin:newOrder', (newOrder) => {
-    setOrders(prev => [newOrder, ...prev]);
-    showNotification(`New order #${newOrder.orderId}`);
+    setOrders(prev => [{ ...newOrder, isNewForAdmin: true }, ...prev]);
   });
 
   socketRef.current.on('admin:updateOrder', (updatedOrder) => {
@@ -173,19 +223,16 @@ useEffect(() => {
     if (editingOrder?._id === updatedOrder._id) {
       setEditingOrder(prev => (prev ? { ...prev, ...updatedOrder } : updatedOrder));
     }
-    showNotification(`Order #${updatedOrder.orderId} updated`);
   });
 
   socketRef.current.on('admin:cancelOrder', (cancelledOrder) => {
     setOrders(prev => prev.map(order => 
       order._id === cancelledOrder._id ? { ...order, ...cancelledOrder } : order
     ));
-    showNotification(`Order #${cancelledOrder.orderId} cancelled`);
   });
 
   socketRef.current.on('admin:orderDeleted', (deletedOrder) => {
     setOrders(prev => prev.filter(order => order._id !== deletedOrder._id));
-    showNotification(`Order #${deletedOrder.orderId} deleted`);
   });
 
   socketRef.current.on('stockUpdate', (stockData) => {
@@ -200,18 +247,12 @@ useEffect(() => {
 }, [isAuthenticated, editingOrder]);
 
   const showNotification = (message) => {
-    if (Notification.permission === 'granted') {
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
       new Notification('Order Update', { body: message });
-    } else if (Notification.permission !== 'denied') {
-      Notification.requestPermission().then(permission => {
-        if (permission === 'granted') {
-          new Notification('Order Update', { body: message });
-        }
-      });
     }
   };
 
-  const fetchOrders = async (page = 1) => {
+  const fetchOrders = useCallback(async (page = 1) => {
     try {
       setLoading(true);
       const res = await axios.get(`${API_BASE_URL}/api/allorders?page=${page}&limit=${pagination.limit}`, {
@@ -242,7 +283,7 @@ useEffect(() => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [pagination.limit, logout]);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -250,7 +291,7 @@ useEffect(() => {
     } else if (isAuthenticated) {
       fetchOrders(currentPage);
     }
-  }, [isAuthenticated, authLoading, currentPage]);
+  }, [isAuthenticated, authLoading, currentPage, fetchOrders]);
 
   const filteredOrders = (orders || []).filter(order => {
     // Text search filter
@@ -375,7 +416,7 @@ useEffect(() => {
         {},
         {
           headers: {
-            Authorization: `Bearer ${getStorage('adminRefreshToken')}`
+            Authorization: `Bearer ${getStorage('adminAccessToken') || getStorage('adminToken')}`
           }
         }
       );
@@ -444,7 +485,9 @@ useEffect(() => {
       await fetchOrders(currentPage);
       if (editingOrder?._id === orderId) {
         try {
-          const fresh = await axios.get(`${API_BASE_URL}/api/orders/${orderId}`);
+          const fresh = await axios.get(`${API_BASE_URL}/api/admin/orders/${orderId}`, {
+            headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` },
+          });
           setEditingOrder(fresh.data);
         } catch (fetchErr) {
           console.error(fetchErr);
@@ -523,46 +566,6 @@ useEffect(() => {
     }
   };
 
-  const handleSendPdfDeliveredPaid = async () => {
-    if (!selectedOrderForPrint) return;
-    const orderId = selectedOrderForPrint._id;
-
-    if (!window.confirm('Mark this order as Delivered + Paid and send PDF invoice to customer?')) return;
-
-    setSendingPdf(true);
-    try {
-      const res = await axios.post(
-        `${API_BASE_URL}/api/orders/${orderId}/send-invoice-email`,
-        {},
-        { headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` } }
-      );
-
-      await fetchOrders(currentPage);
-
-      const updated = { ...selectedOrderForPrint, orderStatus: 'delivered', paymentStatus: 'completed' };
-      setSelectedOrderForPrint(updated);
-      setEditingOrder(prev => prev && prev._id === orderId ? { ...prev, orderStatus: 'delivered', paymentStatus: 'completed' } : prev);
-
-      if (res.data.success) {
-        const parts = ['Order marked as Delivered + Paid.'];
-        if (res.data.pdfGenerated) parts.push('PDF generated.');
-        if (res.data.emailSent) parts.push('Invoice sent to customer!');
-        else parts.push('Email sending failed.');
-        toast.success(parts.join(' '));
-      } else {
-        toast.error(res.data.message || 'Failed to process order');
-      }
-    } catch (err) {
-      if (err.response?.status === 401) {
-        logout();
-      }
-      toast.error(err.response?.data?.message || 'Failed to process order');
-      console.error(err);
-    } finally {
-      setSendingPdf(false);
-    }
-  };
-
   // 🔹 Inventory Scanning Functions
   const handleScanInventory = async (scannedCode) => {
     const orderId = scanningForOrder?._id;
@@ -595,6 +598,13 @@ useEffect(() => {
         return;
       }
 
+      const expectedRegionId = orderItem.regionId?._id || orderItem.regionId || orderItem.configuration?.regionId?._id || orderItem.configuration?.regionId;
+      const inventoryRegionId = inventoryItem.regionId?._id || inventoryItem.regionId;
+      if (expectedRegionId && inventoryRegionId && String(expectedRegionId) !== String(inventoryRegionId)) {
+        toast.error(`Region mismatch: scanned ${inventoryItem.regionName || inventoryItem.regionId?.name || 'another region'}`);
+        return;
+      }
+
       const assignResponse = await axios.post(
         `${API_BASE_URL}/api/orders/${scanningForOrder._id}/assign-inventory`,
         { orderItemIndex: scanningForItem, inventoryId: inventoryItem._id, scannedCode },
@@ -602,7 +612,7 @@ useEffect(() => {
       );
 
       if (assignResponse.data.success) {
-        toast.success(`Assigned ${inventoryItem.barcode} to order`);
+        toast.success(`Assigned ${inventoryItem.barcode}${inventoryItem.realBarcode ? ` · product barcode ${inventoryItem.realBarcode}` : ''} to order`);
 
         if (socketRef.current) {
           socketRef.current.emit('inventoryAssigned', {
@@ -652,6 +662,9 @@ useEffect(() => {
   // 🔹 Remove inventory item from order
   const handleRemoveInventory = async (orderId, orderItemIndex, inventoryId) => {
     if (!window.confirm('Are you sure you want to remove this inventory item from the order?')) return;
+    const sourceOrder = orders.find((order) => order._id === orderId)
+      || (editingOrder?._id === orderId ? editingOrder : null);
+    const orderItem = sourceOrder?.items?.[orderItemIndex] || null;
     
     try {
       const response = await axios.delete(
@@ -668,19 +681,13 @@ useEffect(() => {
       );
 
       if (response.data.success) {
-        // Get the order to find the item details
-        const order = orders.find(o => o._id === orderId);
-        if (order && order.items && order.items[orderItemIndex]) {
-          const orderItem = order.items[orderItemIndex];
-          
-          // Refresh stock data for this product
-          await fetchProductStock(orderItem.productId);
-        }
+        // Refresh stock data for this product when the order snapshot is present.
+        if (orderItem?.productId) await fetchProductStock(orderItem.productId);
 
         alert('Inventory item removed successfully and stock increased!');
         
         // Emit socket event for inventory removal
-        if (socketRef.current) {
+        if (socketRef.current && orderItem) {
           const eventData = {
             productId: orderItem.productId,
             variantId: orderItem.variantId,
@@ -782,605 +789,167 @@ useEffect(() => {
     setSelectedOrderForPrint(null);
   };
 
-     const generateSVGBarcode = (text) => {
-     if (!text || text.trim() === '') {
-       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 30" width="100%" height="100%">
-         <rect width="100" height="30" fill="#fff"/>
-         <text x="50" y="18" text-anchor="middle" font-family="monospace" font-size="8" fill="#999">No Barcode</text>
-       </svg>`;
-     }
+  const invoicePdfSettings = () => ({
+    showLogo: printSettings.showLogo,
+    includeSignature: printSettings.includeSignature,
+    includeQRCode: printSettings.includeQRCode,
+    includeBarcode: printSettings.includeBarcode,
+  });
 
-     try {
-       const uid = `bc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-       const svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-       svgEl.setAttribute('id', uid);
-       svgEl.style.position = 'absolute';
-       svgEl.style.left = '-9999px';
-       svgEl.style.top = '-9999px';
-       document.body.appendChild(svgEl);
+  const handleOpenInvoicePdf = async (order = selectedOrderForPrint) => {
+    if (!order?._id) return;
+    const preview = window.open('', '_blank');
+    if (!preview) {
+      toast.error('Allow popups to open the invoice PDF');
+      return;
+    }
+    preview.document.write('<!doctype html><title>BELORELLA invoice</title><body style="font:16px Arial;padding:32px;color:#555">Preparing invoice PDF…</body>');
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/orders/${order._id}/invoice-pdf`, {
+        params: invoicePdfSettings(),
+        responseType: 'blob',
+        headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` },
+      });
+      const pdfUrl = URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+      preview.location.replace(pdfUrl);
+      window.setTimeout(() => URL.revokeObjectURL(pdfUrl), 5 * 60 * 1000);
+    } catch (err) {
+      preview.close();
+      if (err.response?.status === 401) logout();
+      toast.error(err.response?.data?.message || 'Unable to create the invoice PDF');
+    }
+  };
 
-       JsBarcode(svgEl, text, {
-         format: 'CODE128',
-         width: 1,
-         height: 30,
-         displayValue: false,
-         background: '#ffffff',
-         lineColor: '#000000',
-         margin: 3,
-       });
+  const handleSendInvoicePdf = async (order = selectedOrderForPrint) => {
+    if (!order?._id) return;
+    setSendingPdf(true);
+    try {
+      const response = await axios.post(
+        `${API_BASE_URL}/api/orders/${order._id}/invoice-email`,
+        invoicePdfSettings(),
+        { headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` } }
+      );
+      toast.success(response.data.message || 'Invoice PDF emailed to the customer');
+    } catch (err) {
+      if (err.response?.status === 401) logout();
+      toast.error(err.response?.data?.message || 'Failed to email the invoice PDF');
+    } finally {
+      setSendingPdf(false);
+    }
+  };
 
-       const serializer = new XMLSerializer();
-       let svgStr = serializer.serializeToString(svgEl);
-       document.body.removeChild(svgEl);
+  const loadDigitalFulfillment = async (order) => {
+    const digitalItems = (order?.items || []).filter((item) => item.isDigitalProduct);
+    if (!digitalItems.length) {
+      setDigitalFulfillmentDrafts({});
+      return;
+    }
+    setDigitalFulfillmentLoading(true);
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/admin/orders/${order.orderId}/digital-fulfillment`, {
+        headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` },
+      });
+      const drafts = Object.fromEntries((response.data.items || []).map((item) => [String(item.itemId), {
+        details: item.details || {},
+        sentAt: item.sentAt || null,
+      }]));
+      setDigitalFulfillmentDrafts(drafts);
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not load digital delivery details');
+      setDigitalFulfillmentDrafts({});
+    } finally {
+      setDigitalFulfillmentLoading(false);
+    }
+  };
 
-       svgStr = svgStr.replace(/<svg([^>]+)>/, '<svg$1 width="100%" height="100%" preserveAspectRatio="xMidYMid meet">');
-       return svgStr;
-     } catch (e) {
-       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 25" width="100%" height="100%">
-         <rect width="80" height="25" fill="#fff"/>
-         <text x="40" y="15" text-anchor="middle" font-family="monospace" font-size="5" fill="#000">${text}</text>
-       </svg>`;
-     }
-   };
+  const saveDigitalFulfillment = async (sendEmail = false) => {
+    if (!editingOrder) return;
+    const items = (editingOrder.items || []).filter((item) => item.isDigitalProduct).map((item) => ({
+      itemId: String(item._id),
+      details: digitalFulfillmentDrafts[String(item._id)]?.details || {},
+    }));
+    if (!items.length) return;
+    setDigitalFulfillmentSaving(true);
+    try {
+      const response = await axios.put(`${API_BASE_URL}/api/orders/${editingOrder._id}/digital-fulfillment`, { items }, {
+        headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` },
+      });
+      const drafts = Object.fromEntries((response.data.items || []).map((item) => [String(item.itemId), {
+        details: item.details || {},
+        sentAt: item.sentAt || null,
+      }]));
+      setDigitalFulfillmentDrafts(drafts);
+      if (sendEmail) {
+        const emailResponse = await axios.post(`${API_BASE_URL}/api/orders/${editingOrder._id}/digital-fulfillment-email`, {}, {
+          headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` },
+        });
+        toast.success(emailResponse.data.message || 'Digital delivery details emailed');
+        await loadDigitalFulfillment(editingOrder);
+      } else {
+        toast.success('Digital delivery details saved securely');
+      }
+    } catch (error) {
+      if (error.response?.status === 401) logout();
+      toast.error(error.response?.data?.message || 'Could not save digital delivery details');
+    } finally {
+      setDigitalFulfillmentSaving(false);
+    }
+  };
 
-   // Generate QR Code SVG synchronously using qrcode.create
-   const generateQRCodeSVG = (text, size = 36) => {
-     if (!text || text.trim() === '') {
-       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">
-         <rect width="${size}" height="${size}" fill="#fff"/>
-         <text x="${size/2}" y="${size/2}" text-anchor="middle" font-family="monospace" font-size="6" fill="#ccc">QR</text>
-       </svg>`;
-     }
+  const updateDigitalFulfillmentField = (itemId, field, value) => {
+    setDigitalFulfillmentDrafts((current) => ({
+      ...current,
+      [String(itemId)]: {
+        ...(current[String(itemId)] || {}),
+        details: { ...(current[String(itemId)]?.details || {}), [field]: value },
+      },
+    }));
+  };
 
-     try {
-       const qr = QRCode.create(text, { errorCorrectionLevel: 'M' });
-       const n = qr.modules.size;
-       const cell = size / n;
-       let cells = '';
-       for (let r = 0; r < n; r++) {
-         for (let c = 0; c < n; c++) {
-           if (qr.modules.data[r * n + c]) {
-             cells += `<rect x="${c * cell}" y="${r * cell}" width="${cell}" height="${cell}" fill="#000"/>`;
-           }
-         }
-       }
-       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">
-         <rect width="${size}" height="${size}" fill="#fff"/>${cells}</svg>`;
-     } catch {
-       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">
-         <rect width="${size}" height="${size}" fill="#fff"/>
-         <text x="${size/2}" y="${size/2}" text-anchor="middle" font-family="monospace" font-size="5" fill="#000">${text}</text>
-       </svg>`;
-     }
-   };
+  const copyDigitalFulfillmentField = async (label, value) => {
+    const text = String(value ?? '');
+    if (!text.trim()) return;
 
-  const printOrder = () => {
-    if (!selectedOrderForPrint) return;
-
-    const order = selectedOrderForPrint;
-
-    const html = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Order #${order.orderId} - BELORELLA</title>
-          <style>
-            @media print {
-              * {
-                -webkit-print-color-adjust: exact;
-                print-color-adjust: exact;
-              }
-              @page {
-                size: A4;
-                margin: 1.5cm 2cm 2cm;
-                @top-center { content: "BELORELLA — Order #${order.orderId}"; font-family: 'Segoe UI', Arial, sans-serif; font-size: 8pt; color: #888; }
-                @bottom-center { content: "Page " counter(page) " of " counter(pages); font-family: 'Segoe UI', Arial, sans-serif; font-size: 8pt; color: #888; }
-                @bottom-left { content: "BELORELLA"; font-family: 'Segoe UI', Arial, sans-serif; font-size: 7.5pt; color: #999; }
-              }
-              body { 
-                margin: 0; 
-                padding: 0;
-                font-family: 'Segoe UI', Arial, sans-serif;
-              }
-              .no-print { display: none; }
-            }
-            thead { display: table-header-group; }
-            tr, .info-section, .total-row { break-inside: avoid; page-break-inside: avoid; }
-            h3, h4 { break-after: avoid; page-break-after: avoid; }
-            body { 
-              font-family: 'Segoe UI', Arial, sans-serif; 
-              margin: 0; 
-              padding: 0;
-              background: #fff;
-              color: #000;
-              font-size: 11px;
-              line-height: 1.4;
-              box-sizing: border-box;
-              overflow-x: hidden;
-            }
-            *, *::before, *::after { box-sizing: border-box; }
-            .header {
-              text-align: center;
-              margin-bottom: 18px;
-              padding-bottom: 14px;
-              border-bottom: 2px solid #000;
-            }
-            .logo {
-              max-width: 120px;
-              height: auto;
-              margin-bottom: 8px;
-              border: none !important;
-              outline: none !important;
-              border-radius: 25px;
-              padding: 4px;
-              box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-              background: #fff;
-            }
-            .seal {
-              max-width: 80px;
-              height: auto;
-              margin-top: 8px;
-              opacity: 0.85;
-            }
-            .sign {
-              max-width: 140px;
-              height: auto;
-              margin-top: 8px;
-            }
-            .company-name {
-              font-size: 22px;
-              font-weight: 700;
-              color: #000;
-              margin: 8px 0 2px;
-              text-transform: uppercase;
-              letter-spacing: 3px;
-            }
-            .header p {
-              color: #555;
-              margin: 2px 0;
-              font-size: 11px;
-            }
-            .order-title {
-              font-size: 16px;
-              font-weight: 700;
-              color: #fff;
-              margin: 16px 0;
-              text-align: center;
-              background: linear-gradient(135deg, #DC143C 0%, #9F1239 100%);
-              padding: 10px 14px;
-              border-radius: 6px;
-            }
-            .order-info {
-              display: grid;
-              grid-template-columns: 1fr 1fr 1fr;
-              gap: 12px;
-              margin-bottom: 18px;
-            }
-            .info-section {
-              padding: 10px 12px;
-              border: 1px solid #ccc;
-            }
-            .info-section h3 {
-              margin: 0 0 8px 0;
-              color: #000;
-              font-size: 11px;
-              font-weight: 700;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-              border-bottom: 1px solid #ccc;
-              padding-bottom: 4px;
-            }
-            .info-row {
-              display: flex;
-              justify-content: space-between;
-              margin-bottom: 2px;
-              padding: 2px 0;
-            }
-            .info-label {
-              font-weight: 600;
-              color: #333;
-              font-size: 10px;
-            }
-            .info-value {
-              font-weight: 400;
-              color: #000;
-              font-size: 10px;
-            }
-            .items-table {
-              width: 100%;
-              border-collapse: collapse;
-              margin-bottom: 16px;
-              border: 1px solid #ccc;
-            }
-            .items-table th {
-              background: #eee;
-              color: #000;
-              padding: 7px 8px;
-              text-align: left;
-              font-weight: 700;
-              font-size: 10px;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-              border-bottom: 2px solid #000;
-            }
-            .items-table td {
-              padding: 6px 8px;
-              border-bottom: 1px solid #ddd;
-              font-size: 10px;
-              vertical-align: middle;
-            }
-            .items-table tr:last-child td {
-              border-bottom: none;
-            }
-            .product-info {
-              display: flex;
-              align-items: center;
-              gap: 8px;
-            }
-            .product-image {
-              width: 36px;
-              height: 36px;
-              object-fit: contain;
-              border: 1px solid #ccc;
-              background: #fff;
-              padding: 1px;
-            }
-            .product-details h4 {
-              margin: 0 0 1px 0;
-              color: #000;
-              font-size: 11px;
-              font-weight: 600;
-            }
-            .product-details p {
-              margin: 0;
-              color: #555;
-              font-size: 10px;
-            }
-            .barcode-container {
-              display: flex;
-              align-items: center;
-              gap: 4px;
-              margin: 2px 0;
-            }
-            .barcode-item {
-              display: flex;
-              flex-direction: column;
-              align-items: center;
-              gap: 2px;
-            }
-            .barcode-label {
-              font-size: 8px;
-              color: #555;
-              font-weight: 600;
-            }
-            .qr-code {
-              width: 24px;
-              height: 24px;
-              border: 1px solid #ccc;
-            }
-            .barcode-svg {
-              height: 18px;
-              border: 1px solid #ccc;
-            }
-            .total-section {
-              border: 1.5px solid #000;
-              padding: 12px 16px;
-              margin-bottom: 16px;
-              width: 280px;
-              margin-left: auto;
-            }
-            .total-row {
-              display: flex;
-              justify-content: space-between;
-              margin-bottom: 3px;
-              font-size: 11px;
-              padding: 2px 0;
-            }
-            .total-final {
-              font-size: 14px;
-              font-weight: 700;
-              border-top: 2px solid #000;
-              padding-top: 6px;
-              margin-top: 3px;
-            }
-            .footer {
-              display: grid;
-              grid-template-columns: 1fr 1fr;
-              gap: 16px;
-              margin-top: 24px;
-            }
-            .signature-section {
-              text-align: center;
-              padding: 14px;
-              border: 1px dashed #999;
-            }
-            .signature-line {
-              width: 160px;
-              height: 1px;
-              background: #000;
-              margin: 14px auto 6px;
-            }
-            .signature-label {
-              font-weight: 600;
-              color: #000;
-              margin-bottom: 3px;
-              font-size: 11px;
-            }
-            .signature-name {
-              font-size: 10px;
-              color: #555;
-            }
-            .certification {
-              padding: 14px 16px;
-              border: 1px solid #ccc;
-            }
-            .certification h4 {
-              color: #000;
-              margin: 0 0 6px 0;
-              font-size: 12px;
-            }
-            .certification p {
-              margin: 3px 0;
-              font-size: 10px;
-              color: #333;
-            }
-            .copyright-section {
-              text-align: center;
-              margin-top: 18px;
-              padding-top: 10px;
-              border-top: 1px solid #ccc;
-            }
-            .copyright-section p {
-              color: #555;
-              font-size: 9px;
-              margin: 1px 0;
-            }
-          </style>
-        </head>
-        <body>
-
-          <div class="header">
-            ${printSettings.showLogo ? `
-              <img src="/logo.png" alt="BELORELLA" class="logo">
-            ` : ''}
-                         <div class="company-name">BELORELLA</div>
-             <p>Premium Fashion & Lifestyle</p>
-             <p>Order Invoice & Certificate</p>
-          </div>
-
-          <div class="order-title">
-            ORDER INVOICE — #${order.orderId}
-          </div>
-
-          <div class="order-info">
-            <div class="info-section">
-              <h3>Order Information</h3>
-              <div class="info-row">
-                <span class="info-label">Order ID:</span>
-                <span class="info-value">#${order.orderId}</span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Order Date:</span>
-                <span class="info-value">${formatDate(order.createdAt)}</span>
-              </div>
-                <div class="info-row">
-                  <span class="info-label">Order Status:</span>
-                  <span class="info-value">
-                   Delivered
-                 </span>
-                </div>
-                <div class="info-row">
-                  <span class="info-label">Payment Status:</span>
-                  <span class="info-value">
-                    Completed
-                  </span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Payment Method:</span>
-                <span class="info-value">${order.paymentMethod || 'N/A'}</span>
-              </div>
-            </div>
-
-            <div class="info-section">
-              <h3>Customer Information</h3>
-              ${order.shippingAddress ? `
-                <div class="info-row">
-                  <span class="info-label">Name:</span>
-                  <span class="info-value">${order.shippingAddress.fullName}</span>
-                </div>
-                <div class="info-row">
-                  <span class="info-label">Phone:</span>
-                  <span class="info-value">${order.shippingAddress.phone}</span>
-                </div>
-                                 <div class="info-row">
-                   <span class="info-label">Address:</span>
-                   <span class="info-value">${order.shippingAddress.address}</span>
-                 </div>
-                 <div class="info-row">
-                   <span class="info-label">City:</span>
-                   <span class="info-value">${order.shippingAddress.city}</span>
-                 </div>
-                 <div class="info-row">
-                   <span class="info-label">State:</span>
-                   <span class="info-value">${order.shippingAddress.state}</span>
-                 </div>
-              ` : `
-                <div class="info-row">
-                  <span class="info-label">User ID:</span>
-                  <span class="info-value">${order.userId}</span>
-                </div>
-              `}
-            </div>
-
-            <div class="info-section">
-              <h3>Shipping Information</h3>
-              ${order.shipping ? `
-                <div class="info-row">
-                  <span class="info-label">Shipping Method:</span>
-                  <span class="info-value">${order.shipping.name}</span>
-                </div>
-                <div class="info-row">
-                  <span class="info-label">Shipping Cost:</span>
-                  <span class="info-value">${formatCurrency(order.shipping.charge)}</span>
-                </div>
-                <div class="info-row">
-                  <span class="info-label">Estimated Delivery:</span>
-                  <span class="info-value">${order.shipping.estimatedDays} days</span>
-                </div>
-              ` : `
-                <div class="info-row">
-                  <span class="info-label">Shipping Method:</span>
-                  <span class="info-value">Standard Shipping</span>
-                </div>
-                <div class="info-row">
-                  <span class="info-label">Shipping Cost:</span>
-                  <span class="info-value">${formatCurrency(order.shippingCost || 0)}</span>
-                </div>
-              `}
-            </div>
-          </div>
-
-          <table class="items-table">
-            <thead>
-              <tr>
-                <th>Product</th>
-                <th>Details</th>
-                <th>Price</th>
-                <th>Qty</th>
-                <th>Total</th>
-                ${printSettings.includeQRCode || printSettings.includeBarcode ? '<th>Codes</th>' : ''}
-              </tr>
-            </thead>
-            <tbody>
-              ${order.items.map((item, idx) => `
-                <tr>
-                  <td>
-                    <div class="product-info">
-                      <img src="${item.mainImage}" alt="${item.name}" class="product-image">
-                      <div class="product-details">
-                        <h4>${item.name}</h4>
-                        <p>SKU: ${item.sku || item.productId}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td>
-                    <div>
-                      ${item.size ? `<p><strong>${formatMeasureLine(item)}</strong></p>` : ''}
-                      ${item.color ? `<p><strong>Color:</strong> ${item.color}</p>` : ''}
-                    </div>
-                  </td>
-                  <td>${formatCurrency(item.price)}</td>
-                  <td>${item.quantity}</td>
-                  <td><strong>${formatCurrency(item.price * item.quantity)}</strong></td>
-                  ${printSettings.includeQRCode || printSettings.includeBarcode ? `
-                    <td>
-                      ${item.assignedInventoryItems && item.assignedInventoryItems.length > 0 ? 
-                        item.assignedInventoryItems.map(inventoryId => `
-                          <div class="barcode-container">
-                            ${printSettings.includeBarcode ? `
-                              <div class="barcode-item">
-                                <div class="barcode-label">Barcode</div>
-                                <div class="barcode-svg" style="width: 80px;">
-                                  ${generateSVGBarcode(inventoryId)}
-                                </div>
-                              </div>
-                            ` : ''}
-                                                         ${printSettings.includeQRCode ? `
-                               <div class="barcode-item">
-                                 <div class="barcode-label">QR Code</div>
-                                 <div class="qr-code">
-                                   ${generateQRCodeSVG(inventoryId, 36)}
-                                 </div>
-                               </div>
-                             ` : ''}
-                          </div>
-                        `).join('') : 
-                        '<p style="color: #6c757d; font-size: 12px;">No inventory assigned</p>'
-                      }
-                    </td>
-                  ` : ''}
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-
-          <div class="total-section">
-            <div class="total-row">
-                              <span>Subtotal:</span>
-                <span>${formatCurrency(order.totalAmount)}</span>
-            </div>
-            ${order.discountAmount > 0 ? `
-              <div class="total-row">
-                <span>Discount:</span>
-                <span>-${formatCurrency(order.discountAmount)}</span>
-              </div>
-            ` : ''}
-            ${order.couponCode ? `
-              <div class="total-row">
-                <span>Coupon Applied:</span>
-                <span>${order.couponCode}</span>
-              </div>
-            ` : ''}
-            <div class="total-row">
-              <span>Shipping:</span>
-              <span>${formatCurrency(order.shippingCost || 0)}</span>
-            </div>
-            ${order.extraFeeTotal > 0 ? `
-              <div class="total-row">
-                <span>Extra Fees:</span>
-                <span>${formatCurrency(order.extraFeeTotal)}</span>
-              </div>
-            ` : ''}
-            <div class="total-row total-final">
-              <span>Total Amount:</span>
-              <span>${formatCurrency(order.grandTotal)}</span>
-            </div>
-          </div>
-
-                       <div class="footer">
-               ${printSettings.includeSignature ? `
-                 <div class="signature-section">
-                    <img src="/seal.png" alt="BELORELLA Seal" class="seal" style="display:block; margin:0 auto 8px;">
-                    <div class="signature-label">Authorized Signature</div>
-                    <div class="signature-line"></div>
-                    <img src="/sign.png" alt="Authorized Signature" class="sign" style="display:block; margin:0 auto 4px;">
-                    <div class="signature-name">BELORELLA Management</div>
-                    <div class="signature-name">Date: ${new Date().toLocaleDateString()}</div>
-                 </div>
-               ` : ''}
-               
-               <div class="certification">
-                 <h4>Quality Certification</h4>
-                 <p>• All products are genuine and authentic</p>
-                 <p>• Quality checked before dispatch</p>
-                 <p>• 7-day return policy applies</p>
-                 <p>• Customer satisfaction guaranteed</p>
-                             <p style="margin-top: 15px; font-weight: 600;">
-                  Thank you for choosing BELORELLA!
-                </p>
-               </div>
-             </div>
-
-             <div class="copyright-section">
-               <p>© ${new Date().getFullYear()} BELORELLA. All rights reserved. | Premium Fashion &amp; Lifestyle</p>
-               <p>This document is computer generated and does not require a physical signature.</p>
-             </div>
-        </body>
-      </html>
-    `;
-
-    if (!printDocument(html)) {
-      toast.error('Print window blocked - allow popups for this site');
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const temporaryInput = document.createElement('textarea');
+        temporaryInput.value = text;
+        temporaryInput.setAttribute('readonly', '');
+        temporaryInput.style.position = 'fixed';
+        temporaryInput.style.opacity = '0';
+        document.body.appendChild(temporaryInput);
+        temporaryInput.select();
+        const copied = document.execCommand('copy');
+        temporaryInput.remove();
+        if (!copied) throw new Error('Clipboard copy was not available');
+      }
+      toast.success(label + ' copied');
+    } catch {
+      toast.error('Could not copy ' + label.toLowerCase());
     }
   };
 
   const startEditing = (order) => {
-    setEditingOrder(order);
+    setEditingOrder({ ...order, isNewForAdmin: false });
     setRefundNoteInput('');
+    loadDigitalFulfillment(order);
+    if (order.isNewForAdmin) {
+      setOrders(prev => prev.map(item => item._id === order._id ? { ...item, isNewForAdmin: false } : item));
+      axios.patch(`${API_BASE_URL}/api/orders/${order._id}/mark-opened`, {}, {
+        headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` }
+      }).then(() => window.dispatchEvent(new Event('admin-orders-unread-change')))
+        .catch(error => {
+          console.error('Unable to mark order as opened:', error);
+          window.dispatchEvent(new Event('admin-orders-unread-change'));
+        });
+    }
   };
 
   const cancelEditing = () => {
     setEditingOrder(null);
+    setDigitalFulfillmentDrafts({});
     setRefundNoteInput('');
   };
 
@@ -1389,8 +958,11 @@ useEffect(() => {
     if (!editingOrder) return;
     try {
       setUpdatingOrderId(editingOrder._id);
-      const fresh = await axios.get(`${API_BASE_URL}/api/orders/${editingOrder.orderId}`);
+      const fresh = await axios.get(`${API_BASE_URL}/api/admin/orders/${editingOrder.orderId}`, {
+        headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` },
+      });
       setEditingOrder(fresh.data);
+      await loadDigitalFulfillment(fresh.data);
       toast.success(`Order #${editingOrder.orderId} refreshed`);
     } catch (err) {
       console.error(err);
@@ -1416,7 +988,7 @@ useEffect(() => {
   // 🔹 Fetch product stock information
   const [productStockData, setProductStockData] = useState({});
 
-  const fetchProductStock = async (productId) => {
+  const fetchProductStock = useCallback(async (productId) => {
     if (productStockData[productId]) return productStockData[productId];
     
     try {
@@ -1450,10 +1022,10 @@ useEffect(() => {
       console.error('Error fetching product stock:', error);
     }
     return null;
-  };
+  }, [productStockData]);
 
   // 🔹 Fetch all products for client-side filtering
-  const fetchAllProducts = async () => {
+  const fetchAllProducts = useCallback(async () => {
     setIsLoadingProducts(true);
     try {
       const response = await axios.get(
@@ -1479,16 +1051,16 @@ useEffect(() => {
     } finally {
       setIsLoadingProducts(false);
     }
-  };
+  }, []);
 
   // 🔹 Filter products client-side based on search query
-  const filterProducts = (query) => {
+  const filterProducts = useCallback((query) => {
     if (!query.trim()) {
-      setFilteredProducts(allProducts);
+      setFilteredProducts(allProductsRef.current);
       return;
     }
 
-    const filtered = allProducts.filter(product => {
+    const filtered = allProductsRef.current.filter(product => {
       const searchTerm = query.toLowerCase();
       return (
         product.name?.toLowerCase().includes(searchTerm) ||
@@ -1499,10 +1071,10 @@ useEffect(() => {
     });
     
     setFilteredProducts(filtered);
-  };
+  }, []);
 
   // 🔹 Fetch product stock information
-  const fetchProductStockForSelection = async (productId) => {
+  const fetchProductStockForSelection = useCallback(async (productId) => {
     try {
       const response = await axios.get(
         `${API_BASE_URL}/api/products/${productId}`,
@@ -1527,7 +1099,7 @@ useEffect(() => {
     } catch (error) {
       console.error('Error fetching product stock:', error);
     }
-  };
+  }, []);
 
   // 🔹 Get stock for specific variant and size
   const getVariantStock = (variantId, size) => {
@@ -1567,6 +1139,8 @@ useEffect(() => {
       const newItem = {
         productId: selectedProduct._id,
         variantId: selectedVariant._id,
+        regionId: selectedVariant.regionId?._id || selectedVariant.regionId || null,
+        regionName: selectedVariant.regionId?.name || '',
         name: selectedProduct.name,
         size: selectedSize,
         color: selectedVariant.colorName || selectedVariant.color?.name || '',
@@ -1695,7 +1269,7 @@ useEffect(() => {
   };
 
   // 🔹 Load existing discount when modal opens
-  const loadExistingDiscount = () => {
+  const loadExistingDiscount = useCallback(() => {
     if (editingOrder?.discountAmount && editingOrder?.discountAmount > 0) {
       // If there's an existing discount, try to determine the type
       if (editingOrder.discountPercentage) {
@@ -1717,7 +1291,7 @@ useEffect(() => {
       setDiscountType('percentage');
       setDiscountAmount(0);
     }
-  };
+  }, [editingOrder]);
 
   // 🔹 Update item quantity
   const handleUpdateItemQuantity = async (itemIndex, newQuantity) => {
@@ -1848,7 +1422,7 @@ useEffect(() => {
         fetchProductStock(item.productId);
       });
     }
-  }, [editingOrder]);
+  }, [editingOrder, fetchProductStock]);
 
   // 🔹 Reset search when add product modal is opened
   useEffect(() => {
@@ -1859,7 +1433,7 @@ useEffect(() => {
       setSelectedSize('');
       setSelectedQuantity(1);
       setSelectedProductStock({});
-      setFilteredProducts(allProducts);
+      setFilteredProducts(allProductsRef.current);
     }
   }, [showAddProductModal]);
 
@@ -1868,7 +1442,7 @@ useEffect(() => {
     if (showAddProductModal && allProducts.length === 0) {
       fetchAllProducts();
     }
-  }, [showAddProductModal]);
+  }, [showAddProductModal, allProducts.length, fetchAllProducts]);
 
   // 🔹 Filter products when query changes
   useEffect(() => {
@@ -1877,21 +1451,21 @@ useEffect(() => {
     }, 300); // Debounce search
 
     return () => clearTimeout(timeoutId);
-  }, [productSearchQuery, allProducts]);
+  }, [productSearchQuery, filterProducts]);
 
   // 🔹 Load existing discount when discount modal opens
   useEffect(() => {
     if (showDiscountModal && editingOrder) {
       loadExistingDiscount();
     }
-  }, [showDiscountModal, editingOrder]);
+  }, [showDiscountModal, editingOrder, loadExistingDiscount]);
 
   // 🔹 Fetch stock when product is selected
   useEffect(() => {
     if (selectedProduct) {
       fetchProductStockForSelection(selectedProduct._id);
     }
-  }, [selectedProduct]);
+  }, [selectedProduct, fetchProductStockForSelection]);
 
   if (authLoading) {
     return (
@@ -2396,9 +1970,10 @@ useEffect(() => {
               </div>
             </div>
 
-            {/* Courier Service Section */}
-            <div className="border border-[#F4F4F4] rounded-lg p-4 mb-4">
+            {/* Digital-only orders are fulfilled online and must never enter courier dispatch. */}
+            {(editingOrder.items || []).some((item) => !item.isDigitalProduct) && <div className="border border-[#F4F4F4] rounded-lg p-4 mb-4">
               <h3 className="text-sm font-semibold text-[#1B1B1B] mb-3">Ship with Courier</h3>
+              {(editingOrder.items || []).some((item) => item.isDigitalProduct) && <p className="mb-3 text-xs text-gray-500">Only physical items from this order are included in the courier parcel.</p>}
               {editingOrder?.courier?.service ? (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -2447,9 +2022,9 @@ useEffect(() => {
                   </button>
                 </div>
               )}
-            </div>
+            </div>}
 
-                          <div className="mb-8">
+            <div className="mb-8">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="text-xl font-semibold">Order Items ({(editingOrder.items || []).length})</h3>
                   <div className="flex space-x-2">
@@ -2502,8 +2077,10 @@ useEffect(() => {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-900">
-                            {item.size && <span>{formatMeasureLine(item)}</span>}
+                            {item.isPreOrder && <span className="mr-2 font-semibold text-maybelline-pink">Pre-order{item.preOrderEstimatedDate ? ` · Est. ${new Date(item.preOrderEstimatedDate).toLocaleDateString()}` : ' · ETA to be confirmed'}</span>}
+                            {formatMeasureLine(item) && <span>{formatMeasureLine(item)}</span>}
                             {item.color && <span className="ml-2">Color: {item.color}</span>}
+                            {(item.regionName || item.regionId?.name || item.configuration?.regionName) && <span className="ml-2">Region: {item.regionName || item.regionId?.name || item.configuration?.regionName}</span>}
                           </div>
                           
                           {/* Show stock information */}
@@ -2578,17 +2155,35 @@ useEffect(() => {
                                                              {/* 🔹 Assigned Inventory Items List */}
                                {item.assignedInventoryItems && item.assignedInventoryItems.length > 0 && (
                                  <div className="mt-2 w-full max-w-xs">
-                                   <div className="bg-gray-50 border border-gray-200 rounded-lg p-2 max-h-32 overflow-y-auto">
+                                   <div className="bg-gray-50 border border-gray-200 rounded-lg p-2 max-h-64 overflow-y-auto">
                                      <div className="text-xs font-medium text-gray-700 mb-1">Assigned Items:</div>
-                                     {item.assignedInventoryItems.map((inventoryId, invIdx) => (
-                                       <div key={invIdx} className="flex items-center justify-between bg-white rounded p-1 mb-1 text-xs">
+                                     {item.assignedInventoryItems.map((inventoryItem, invIdx) => {
+                                       const inventoryId = inventoryItem?._id || inventoryItem;
+                                       const inventorySnapshot = item.assignedInventorySnapshots?.find((entry) => String(entry.inventoryId) === String(inventoryId)) || {};
+                                       const myBarcode = inventoryItem?.barcode || inventorySnapshot.barcode || '';
+                                       const productBarcode = inventoryItem?.realBarcode || inventorySnapshot.realBarcode || '';
+                                       const qrCode = inventoryItem?.qrCode || inventorySnapshot.qrCode || myBarcode || String(inventoryId);
+                                       const regionName = inventoryItem?.regionId?.name || inventoryItem?.regionName || inventorySnapshot.regionName || item.regionName || item.configuration?.regionName;
+                                       const colorName = inventoryItem?.color?.name || inventoryItem?.color || inventorySnapshot.color || item.color || item.configuration?.color;
+                                       const assignedSize = inventoryItem?.size || inventorySnapshot.size || item.size || item.configuration?.size;
+                                       return (
+                                       <div key={String(inventoryId) || invIdx} className="flex items-start justify-between gap-2 bg-white rounded-lg border border-gray-200 p-2 mb-2 text-xs shadow-sm">
                                          <div className="flex items-center space-x-2">
-                                           <span className="text-gray-600 truncate">
-                                             {inventoryId}
-                                           </span>
+                                           <div className="min-w-0 flex-1">
+                                             <div className="font-semibold text-gray-800">{item.name || inventoryItem?.productId?.name || 'Assigned product'}</div>
+                                             <div className="mt-0.5 flex flex-wrap gap-1 text-[10px]">
+                                               {regionName && <span className="rounded-full bg-rose-50 px-2 py-0.5 text-rose-700">{regionName}</span>}
+                                               {colorName && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-gray-700">{colorName}</span>}
+                                               {assignedSize && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-gray-700">{formatMeasureLine({ ...item, size: assignedSize }) || assignedSize}</span>}
+                                             </div>
+                                             <div className="mt-1 font-mono text-[10px] leading-4">
+                                               <div><span className="font-sans text-gray-500">My barcode:</span> <span className="break-all">{myBarcode || '—'}</span></div>
+                                               <div><span className="font-sans text-gray-500">Product barcode:</span> <span className="break-all">{productBarcode || '—'}</span></div>
+                                             </div>
+                                           </div>
                                            <div className="flex space-x-1">
-                                             <div className="w-4 h-4 bg-gray-100 border border-gray-300 rounded flex items-center justify-center">
-                                               <QRCodeSVG value={inventoryId} size={12} />
+                                             <div className="w-11 h-11 bg-white border border-gray-200 rounded flex items-center justify-center">
+                                               <QRCodeSVG value={qrCode} size={40} />
                                              </div>
                                            </div>
                                          </div>
@@ -2614,7 +2209,8 @@ useEffect(() => {
                                            </button>
                                          </div>
                                        </div>
-                                     ))}
+                                       );
+                                     })}
                                    </div>
                                  </div>
                                )}
@@ -2679,6 +2275,82 @@ useEffect(() => {
               </div>
             </div>
 
+            {(editingOrder.items || []).some((item) => item.isDigitalProduct) && (
+              <section className="mb-8 rounded-xl border border-rose-200 bg-rose-50/40 p-5">
+                <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900">Digital product delivery</h3>
+                    <p className="mt-1 text-sm text-gray-600">Enter codes, account IDs, usernames, passwords, PINs, or other instructions. Details are encrypted and emailed only when you choose.</p>
+                  </div>
+                  {digitalFulfillmentLoading && <span className="text-sm text-gray-500">Loading saved details…</span>}
+                </div>
+                <div className="space-y-4">
+                  {(editingOrder.items || []).filter((item) => item.isDigitalProduct).map((item, itemIndex) => {
+                    const itemId = String(item._id || itemIndex);
+                    const draft = digitalFulfillmentDrafts[itemId] || {};
+                    const details = draft.details || {};
+                    const fields = [
+                      ['code', 'Redemption code / license key', 'textarea'],
+                      ['loginId', 'Account ID / login', 'text'],
+                      ['username', 'Username / email', 'text'],
+                      ['password', 'Password', 'text'],
+                      ['pin', 'PIN', 'text'],
+                      ['accessUrl', 'Access / redemption URL', 'text'],
+                      ['expiry', 'Expiry date / period', 'text'],
+                      ['serialNumber', 'Serial number', 'text'],
+                    ];
+                    return (
+                      <div key={itemId} className="rounded-lg border border-gray-200 bg-white p-4">
+                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <h4 className="font-semibold text-gray-900">{item.name}</h4>
+                            <p className="text-xs text-gray-500">{[item.variantName, item.color, item.size].filter(Boolean).join(' · ') || 'Default variant'} · Qty {item.quantity}</p>
+                          </div>
+                          {draft.sentAt ? <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">Emailed {new Date(draft.sentAt).toLocaleString()}</span> : <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800">Not emailed</span>}
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                          {fields.map(([field, label, type]) => (
+                            <div key={field} className="text-xs font-medium text-gray-600">
+                              <div className="mb-1 flex items-center justify-between gap-2">
+                                <span>{label}</span>
+                                <button type="button" onClick={() => copyDigitalFulfillmentField(label, details[field])} disabled={!String(details[field] || '').trim()} className="shrink-0 rounded-md border border-gray-200 px-2 py-1 text-[11px] font-semibold text-[#B1123B] hover:bg-rose-50 disabled:cursor-not-allowed disabled:text-gray-400 disabled:hover:bg-white" title={'Copy ' + label}>
+                                  Copy
+                                </button>
+                              </div>
+                              {type === 'textarea'
+                                ? <textarea rows={2} autoComplete="off" value={details[field] || ''} onChange={(event) => updateDigitalFulfillmentField(itemId, field, event.target.value)} placeholder="One code per unit; separate with new lines" className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900" />
+                                : <input type={type} autoComplete="off" value={details[field] || ''} onChange={(event) => updateDigitalFulfillmentField(itemId, field, event.target.value)} placeholder={'Enter ' + label.toLowerCase()} className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900" />}
+                            </div>
+                          ))}
+                        </div>
+                        <div className="mt-3 grid gap-3 md:grid-cols-2">
+                          <div className="text-xs font-medium text-gray-600">
+                            <div className="mb-1 flex items-center justify-between gap-2">
+                              <span>How to use / activation instructions</span>
+                              <button type="button" onClick={() => copyDigitalFulfillmentField('Activation instructions', details.instructions)} disabled={!String(details.instructions || '').trim()} className="shrink-0 rounded-md border border-gray-200 px-2 py-1 text-[11px] font-semibold text-[#B1123B] hover:bg-rose-50 disabled:cursor-not-allowed disabled:text-gray-400 disabled:hover:bg-white" title="Copy activation instructions">Copy</button>
+                            </div>
+                            <textarea rows={3} value={details.instructions || ''} onChange={(event) => updateDigitalFulfillmentField(itemId, 'instructions', event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900" placeholder="Explain how the customer redeems or signs in." />
+                          </div>
+                          <div className="text-xs font-medium text-gray-600">
+                            <div className="mb-1 flex items-center justify-between gap-2">
+                              <span>Other details (URL, expiry, recovery info, etc.)</span>
+                              <button type="button" onClick={() => copyDigitalFulfillmentField('Other details', details.additionalDetails)} disabled={!String(details.additionalDetails || '').trim()} className="shrink-0 rounded-md border border-gray-200 px-2 py-1 text-[11px] font-semibold text-[#B1123B] hover:bg-rose-50 disabled:cursor-not-allowed disabled:text-gray-400 disabled:hover:bg-white" title="Copy other details">Copy</button>
+                            </div>
+                            <textarea rows={3} value={details.additionalDetails || ''} onChange={(event) => updateDigitalFulfillmentField(itemId, 'additionalDetails', event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900" placeholder="Add any other delivery information." />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="mt-4 flex flex-wrap justify-end gap-2">
+                  <button type="button" onClick={() => saveDigitalFulfillment(false)} disabled={digitalFulfillmentSaving || digitalFulfillmentLoading} className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 disabled:opacity-50">{digitalFulfillmentSaving ? 'Saving…' : 'Save details'}</button>
+                  <button type="button" onClick={() => saveDigitalFulfillment(true)} disabled={digitalFulfillmentSaving || digitalFulfillmentLoading || editingOrder.paymentStatus !== 'completed'} title={editingOrder.paymentStatus !== 'completed' ? 'Confirm payment before emailing digital access details' : 'Save and email digital fulfillment'} className="inline-flex items-center gap-2 rounded-lg bg-[#B1123B] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><FaEnvelope /> {digitalFulfillmentSaving ? 'Working…' : 'Save & email customer'}</button>
+                </div>
+                {editingOrder.paymentStatus !== 'completed' && <p className="mt-2 text-right text-xs text-amber-800">Payment must be marked completed before sending digital access details.</p>}
+              </section>
+            )}
+
             <div className="flex flex-wrap gap-4 justify-end border-t pt-6">
               {editingOrder.paymentStatus === 'completed' && editingOrder.orderStatus !== 'cancelled' && (
                 <button
@@ -2698,19 +2370,21 @@ useEffect(() => {
                   Send Finalization Email
                 </button>
               )}
-              {editingOrder.orderStatus !== 'delivered' && editingOrder.orderStatus !== 'cancelled' && (
-                <button
-                  disabled={updatingOrderId === editingOrder._id}
-                  onClick={() => {
-                    setSelectedOrderForPrint(editingOrder);
-                    handleSendPdfDeliveredPaid();
-                  }}
-                  className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 disabled:opacity-50 flex items-center gap-2"
-                >
-                  <FaDownload />
-                  Send PDF (Delivered + Paid)
-                </button>
-              )}
+              <button
+                onClick={() => handleOpenInvoicePdf(editingOrder)}
+                className="px-4 py-2 rounded-md text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 flex items-center gap-2"
+              >
+                <FaPrint />
+                Print PDF
+              </button>
+              <button
+                onClick={() => handleSendInvoicePdf(editingOrder)}
+                disabled={sendingPdf}
+                className="px-4 py-2 rounded-md text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                <FaEnvelope />
+                {sendingPdf ? 'Sending PDF…' : 'Email PDF'}
+              </button>
               <button
                 disabled={updatingOrderId === editingOrder._id}
                 onClick={() => handleCancelOrder(editingOrder._id)}
@@ -2783,7 +2457,10 @@ useEffect(() => {
                   currentOrders.map((order) => (
                     <tr key={order._id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                        #{order.orderId}
+                        <span className="inline-flex items-center gap-2">
+                          #{order.orderId}
+                          {order.isNewForAdmin && <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[10px] font-bold uppercase tracking-wide">New</span>}
+                        </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-900">{order.shippingAddress?.fullName || 'N/A'}</div>
@@ -2880,7 +2557,7 @@ useEffect(() => {
                 <div key={order._id} className="p-4 hover:bg-gray-50">
                   <div className="flex items-start justify-between mb-2">
                     <div>
-                      <p className="font-semibold text-gray-900">#{order.orderId}</p>
+                      <p className="font-semibold text-gray-900 flex items-center gap-2">#{order.orderId}{order.isNewForAdmin && <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[10px] font-bold uppercase tracking-wide">New</span>}</p>
                       <p className="text-sm text-gray-500">{formatDate(order.createdAt)}</p>
                     </div>
                     <div className="flex flex-col items-end gap-1">
@@ -3100,7 +2777,7 @@ useEffect(() => {
                         <span>Loading products...</span>
                       </div>
                     ) : productSearchQuery.trim() ? (
-                      <span>No products found matching "{productSearchQuery}"</span>
+                       <span>No products found matching &quot;{productSearchQuery}&quot;</span>
                     ) : (
                       <span>Start typing to search products</span>
                     )}
@@ -3438,127 +3115,9 @@ useEffect(() => {
             </div>
 
             <div className="space-y-4">
-              {Array.isArray(inventoryDetails) ? (
-                inventoryDetails.map((inventory, index) => (
-                  <div key={inventory._id} className="border border-gray-200 rounded-lg p-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <h4 className="font-medium text-gray-900 mb-2">Inventory Item #{index + 1}</h4>
-                        <div className="space-y-2 text-sm">
-                          <div className="flex justify-between">
-                            <span className="text-gray-600">ID:</span>
-                            <span className="font-mono text-gray-800">{inventory._id}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-600">QR Code:</span>
-                            <span className="font-mono text-gray-800">{inventory.qrCode}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-600">Barcode:</span>
-                            <span className="font-mono text-gray-800">{inventory.barcode}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-600">Status:</span>
-                            <span className={`px-2 py-1 rounded text-xs font-semibold ${
-                              inventory.status === 'active' ? 'bg-green-100 text-green-800' :
-                              inventory.status === 'out_of_stock' ? 'bg-red-100 text-red-800' :
-                              'bg-gray-100 text-gray-800'
-                            }`}>
-                              {inventory.status}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-600">Size:</span>
-                            <span className="text-gray-800">{formatMeasureLine(inventory) || inventory.size || '—'}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-600">Price:</span>
-                            <span className="text-gray-800">{formatBDT(inventory.price)}</span>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div>
-                        <h4 className="font-medium text-gray-900 mb-2">Product Information</h4>
-                        <div className="space-y-2 text-sm">
-                          {inventory.productId && (
-                            <>
-                              <div className="flex justify-between">
-                                <span className="text-gray-600">Product Name:</span>
-                                <span className="text-gray-800">{inventory.productId.name}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-gray-600">Product ID:</span>
-                                <span className="font-mono text-gray-800">{inventory.productId._id}</span>
-                              </div>
-                            </>
-                          )}
-                          <div className="flex justify-between">
-                            <span className="text-gray-600">Variant ID:</span>
-                            <span className="font-mono text-gray-800">{inventory.variantId}</span>
-                          </div>
-                          {inventory.color && (
-                            <div className="flex justify-between">
-                              <span className="text-gray-600">Color:</span>
-                              <span className="text-gray-800">{inventory.color.name}</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="border border-gray-200 rounded-lg p-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <h4 className="font-medium text-gray-900 mb-2">Inventory Item</h4>
-                      <div className="space-y-2 text-sm">
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">ID:</span>
-                          <span className="font-mono text-gray-800">{inventoryDetails._id}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">QR Code:</span>
-                          <span className="font-mono text-gray-800">{inventoryDetails.qrCode}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Barcode:</span>
-                          <span className="font-mono text-gray-800">{inventoryDetails.barcode}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Status:</span>
-                          <span className={`px-2 py-1 rounded text-xs font-semibold ${
-                            inventoryDetails.status === 'active' ? 'bg-green-100 text-green-800' :
-                            inventoryDetails.status === 'out_of_stock' ? 'bg-red-100 text-red-800' :
-                            'bg-gray-100 text-gray-800'
-                          }`}>
-                            {inventoryDetails.status}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div>
-                      <h4 className="font-medium text-gray-900 mb-2">Product Information</h4>
-                      <div className="space-y-2 text-sm">
-                        {inventoryDetails.productId && (
-                          <>
-                            <div className="flex justify-between">
-                              <span className="text-gray-600">Product Name:</span>
-                              <span className="text-gray-800">{inventoryDetails.productId.name}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-gray-600">Product ID:</span>
-                              <span className="font-mono text-gray-800">{inventoryDetails.productId._id}</span>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
+              {(Array.isArray(inventoryDetails) ? inventoryDetails : [inventoryDetails]).map((inventory, index) => (
+                <InventoryDetailCard key={inventory?._id || index} inventory={inventory} index={index} />
+              ))}
             </div>
 
             <div className="mt-6 flex justify-end">
@@ -3689,8 +3248,8 @@ useEffect(() => {
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-gray-600">Status:</span>
-                    <span className="px-2 py-1 rounded text-xs font-semibold bg-green-100 text-green-800">
-                      Delivered
+                    <span className="px-2 py-1 rounded text-xs font-semibold bg-gray-100 text-gray-800">
+                      {selectedOrderForPrint.orderStatus || 'pending'}
                     </span>
                   </div>
                 </div>
@@ -3719,26 +3278,20 @@ useEffect(() => {
               >
                 Cancel
               </button>
-              {selectedOrderForPrint.orderStatus !== 'delivered' && selectedOrderForPrint.orderStatus !== 'cancelled' && (
-                <button
-                  onClick={handleSendPdfDeliveredPaid}
-                  disabled={sendingPdf}
-                  className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition flex items-center space-x-2 disabled:opacity-50"
-                >
-                  {sendingPdf ? (
-                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                  ) : (
-                    <FaDownload />
-                  )}
-                  <span>{sendingPdf ? 'Sending...' : 'Send PDF (Delivered + Paid)'}</span>
-                </button>
-              )}
               <button
-                onClick={printOrder}
+                onClick={() => handleSendInvoicePdf()}
+                disabled={sendingPdf}
+                className="px-5 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition flex items-center gap-2 disabled:opacity-50"
+              >
+                <FaEnvelope />
+                <span>{sendingPdf ? 'Sending…' : 'Email PDF'}</span>
+              </button>
+              <button
+                onClick={() => handleOpenInvoicePdf()}
                 className="px-6 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition flex items-center space-x-2"
               >
                 <FaPrint />
-                <span>Print Order</span>
+                <span>Print PDF</span>
               </button>
             </div>
           </div>

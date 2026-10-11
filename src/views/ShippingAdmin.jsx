@@ -1,6 +1,6 @@
 'use client'
 import { getStorage, setStorage, removeStorage } from "../lib/storage"
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { FaPlus, FaEdit, FaTrash, FaArrowLeft, FaSearch, FaTruck } from 'react-icons/fa';
 import { useRouter } from "next/navigation";
@@ -18,10 +18,12 @@ const ShippingAdmin = () => {
   const router = useRouter();
   const API = process.env.NEXT_PUBLIC_API_URI;
 
-  const token = getStorage('adminAccessToken') || getStorage('adminToken') || getStorage('adminRefreshToken') || getStorage('accessToken');
-  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  const headers = useMemo(() => {
+    const token = getStorage('adminAccessToken') || getStorage('adminToken');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }, []);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       setLoading(true);
       const res = await axios.get(`${API}/api/shipping`);
@@ -37,7 +39,7 @@ const ShippingAdmin = () => {
     } catch (error) {
       console.error('Error loading delivery phone:', error);
     }
-  };
+  }, [API]);
 
   const saveDeliveryPhone = async () => {
     try {
@@ -55,13 +57,13 @@ const ShippingAdmin = () => {
 
   useEffect(() => { 
     load(); 
-  }, []);
+  }, [load]);
 
   useEffect(() => {
     const onStore = () => load();
     window.addEventListener('storeChanged', onStore);
     return () => window.removeEventListener('storeChanged', onStore);
-  }, []);
+  }, [load]);
 
   const submit = async (e) => {
     e.preventDefault();

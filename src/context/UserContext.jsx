@@ -1,33 +1,41 @@
 'use client'
 import { getStorage, setStorage, removeStorage } from "../lib/storage"
-import React, { createContext, useState, useEffect } from 'react';
+import React, { createContext, useEffect, useRef, useState } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
 import { useRouter } from "next/navigation";
 import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
 import { withDevice } from '../lib/device';
+import { authActions } from '../store/slices/authSlice';
+import { wishlistActions } from '../store/slices/wishlistSlice';
 
 export const UserContext = createContext();
 
 export const UserProvider = ({ children }) => {
   const router = useRouter();
   const API = process.env.NEXT_PUBLIC_API_URI;
+  const dispatch = useDispatch();
+  const auth = useSelector((state) => state.auth);
+  const user = auth.user;
+  const isLoggedIn = auth.isLoggedIn;
+  const [loyaltyBalance, setLoyaltyBalance] = useState(null);
+  const address = user?.address || null;
+  const paymentMethods = user?.paymentMethods || [];
+  const defaultPaymentMethod = paymentMethods.find((method) => method.isDefault) || paymentMethods[0] || null;
+  const redirectPath = auth.redirectPath;
+  const errorMessage = auth.errorMessage;
+  const wishlist = useSelector((state) => state.wishlist.items);
+  const userHydrated = auth.hydrated;
+  const mustSetPassword = auth.mustSetPassword;
+  const logoutRef = useRef(null);
 
-  // Start in guest mode on both server and client first render (hydration-safe),
-  // then restore the cached session in the mount effect below.
-  const [user, setUser] = useState(null);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [address, setAddress] = useState(null);
-  const [paymentMethods, setPaymentMethods] = useState([]);
-  const [defaultPaymentMethod, setDefaultPaymentMethod] = useState(null);
-  const [redirectPath, setRedirectPath] = useState(null);
-  const [errorMessage, setErrorMessage] = useState('');
-  const [wishlist, setWishlist] = useState([]);
-  const [userHydrated, setUserHydrated] = useState(false);
-  // Google sign-ups have no real password yet -> force the user to choose one
-  const [mustSetPassword, setMustSetPassword] = useState(false);
-
-  const pickDefaultPaymentMethod = (methods = []) =>
-    methods.find((m) => m.isDefault) || methods[0] || null;
+  const setUser = (value) => dispatch(authActions.userUpdated(value));
+  const setIsLoggedIn = (value) => { if (!value) dispatch(authActions.sessionCleared()); };
+  const setRedirectPath = (value) => dispatch(authActions.redirectChanged(value));
+  const setErrorMessage = (value) => dispatch(authActions.errorChanged(value));
+  const setWishlist = (value) => dispatch(wishlistActions.wishlistReplaced(value));
+  const setUserHydrated = () => dispatch(authActions.sessionHydrated());
+  const setMustSetPassword = (value) => dispatch(authActions.passwordSetupRequired(value));
 
   const isTokenExpired = (token) => {
     try {
@@ -39,13 +47,8 @@ export const UserProvider = ({ children }) => {
   };
 
   const clearLocalSession = () => {
-    setUser(null);
-    setIsLoggedIn(false);
-    setAddress(null);
-    setPaymentMethods([]);
-    setDefaultPaymentMethod(null);
-    setWishlist([]);
-    setMustSetPassword(false);
+    dispatch(authActions.sessionCleared());
+    dispatch(wishlistActions.wishlistReplaced([]));
     removeStorage('user');
     removeStorage('accessToken');
     removeStorage('refreshToken');
@@ -152,13 +155,6 @@ export const UserProvider = ({ children }) => {
       const freshUser = await authRequest(`${API}/api/user/profile`, { method: 'GET' });
       setUser(freshUser);
       setIsLoggedIn(true);
-
-      const addr = freshUser.address || null;
-      const methods = freshUser.paymentMethods || [];
-
-      setAddress(addr);
-      setPaymentMethods(methods);
-      setDefaultPaymentMethod(pickDefaultPaymentMethod(methods));
       fetchWishlist();
       setStorage('user', JSON.stringify(freshUser));
     } catch (error) {
@@ -181,10 +177,6 @@ export const UserProvider = ({ children }) => {
       if (cached) {
         setUser(cached);
         setIsLoggedIn(true);
-        setAddress(cached.address || null);
-        const methods = cached.paymentMethods || [];
-        setPaymentMethods(methods);
-        setDefaultPaymentMethod(pickDefaultPaymentMethod(methods));
       }
     } catch { /* ignore corrupt cache */ }
 
@@ -201,17 +193,50 @@ export const UserProvider = ({ children }) => {
   }, [user, userHydrated]);
 
   useEffect(() => {
+    let active = true;
+    const loadLoyaltyBalance = async () => {
+      const token = getStorage('accessToken');
+      if (!isLoggedIn || !token) {
+        if (active) setLoyaltyBalance(null);
+        return;
+      }
+      try {
+        const response = await fetch(`${API}/api/loyalty/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (active) setLoyaltyBalance(Number(data?.balanceBDT) || 0);
+      } catch {
+        // Loyalty balance is supplementary navigation data; keep the rest of
+        // the account and storefront usable if the endpoint is unavailable.
+      }
+    };
+
+    loadLoyaltyBalance();
+    const refresh = () => loadLoyaltyBalance();
+    window.addEventListener('loyalty-balance-updated', refresh);
+    const interval = window.setInterval(loadLoyaltyBalance, 60000);
+    return () => {
+      active = false;
+      window.removeEventListener('loyalty-balance-updated', refresh);
+      window.clearInterval(interval);
+    };
+  }, [API, isLoggedIn, user?._id]);
+
+  useEffect(() => {
     if (redirectPath) {
       router.push(redirectPath);
-      setRedirectPath(null);
+      dispatch(authActions.redirectChanged(null));
     }
-  }, [redirectPath, router]);
+  }, [redirectPath, router, dispatch]);
 
   useEffect(() => {
     const interval = setInterval(() => {
       const token = getStorage('accessToken');
       if (token && isTokenExpired(token)) {
-        logout();
+        logoutRef.current?.();
       }
     }, 60000);
     return () => clearInterval(interval);
@@ -220,13 +245,6 @@ export const UserProvider = ({ children }) => {
   const applySession = (loggedInUser, accessToken, refreshToken) => {
     setUser(loggedInUser);
     setIsLoggedIn(true);
-
-    const addr = loggedInUser.address || null;
-    const methods = loggedInUser.paymentMethods || [];
-
-    setAddress(addr);
-    setPaymentMethods(methods);
-    setDefaultPaymentMethod(pickDefaultPaymentMethod(methods));
 
     setStorage('user', JSON.stringify(loggedInUser));
     setStorage('accessToken', accessToken);
@@ -245,7 +263,6 @@ export const UserProvider = ({ children }) => {
       const { data } = await axios.put(`${API}/api/auth/set-password`, { password, ...extras });
       const updatedUser = { ...(user || {}), ...(data.user || {}), mustSetPassword: false };
       setUser(updatedUser);
-      setAddress(updatedUser.address || null);
       setStorage('user', JSON.stringify(updatedUser));
       setMustSetPassword(false);
       setRedirectPath('/');
@@ -292,9 +309,7 @@ export const UserProvider = ({ children }) => {
         // This is a post-registration login, not a new registration
         setUser(registerData.user);
         setIsLoggedIn(true);
-        setAddress(registerData.user.address || null);
-        setPaymentMethods(registerData.user.paymentMethods || []);
-        setDefaultPaymentMethod(registerData.user.paymentMethods?.find(pm => pm.isDefault) || null);
+        setMustSetPassword(Boolean(registerData.user.mustSetPassword));
         
         setStorage('user', JSON.stringify(registerData.user));
         setStorage('accessToken', registerData.accessToken);
@@ -331,6 +346,15 @@ export const UserProvider = ({ children }) => {
 
     clearLocalSession();
     setRedirectPath('/login');
+  };
+  logoutRef.current = logout;
+
+  const deleteAccount = async () => {
+    const result = await authRequest(`${API}/api/profile`, { method: 'DELETE' });
+    clearLocalSession();
+    dispatch(authActions.redirectChanged(null));
+    router.replace('/');
+    return result;
   };
 
   const updateProfile = async (newData) => {
@@ -388,6 +412,7 @@ export const UserProvider = ({ children }) => {
       value={{
         user,
         isLoggedIn,
+        loyaltyBalance,
         userHydrated,
         address,
         paymentMethods,
@@ -398,6 +423,7 @@ export const UserProvider = ({ children }) => {
         setPassword,
         mustSetPassword,
         logout,
+        deleteAccount,
         invalidateSession,
         register,
         authRequest,

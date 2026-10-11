@@ -1,8 +1,10 @@
 'use client'
 import React, { useState, useEffect } from 'react';
 import { FiChevronUp, FiChevronDown } from 'react-icons/fi';
+import useFloatingPanelVisibility from '../hooks/useFloatingPanelVisibility';
 
 export default function ScrollToTop() {
+  const floatingPanelOpen = useFloatingPanelVisibility();
   const [scrollY, setScrollY] = useState(0);
 
   useEffect(() => {
@@ -20,6 +22,8 @@ export default function ScrollToTop() {
   };
 
   const isNearTop = scrollY <= 200;
+
+  if (floatingPanelOpen) return null;
 
   return (
     <button

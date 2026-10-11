@@ -5,6 +5,8 @@
 export const BRAND = Object.freeze({
   NAME: 'BELORELLA',
   TAGLINE: 'Premium Fashion & Lifestyle',
+  ICON_URL: 'https://lh3.googleusercontent.com/pw/AP1GczO_CK4GD4Ulx1zmv_Zpm9X1Wnfh3pmlFEqstk7sSRGmQV_fiEiPxdGK-GGCAKIM7TNsB_bcuCgakfTZLuA_l9GHbvHINoCF4smZCtpCAyAoC92jjg=s512',
+  EMAIL_LOGO_URL: 'https://lh3.googleusercontent.com/pw/AP1GczO_CK4GD4Ulx1zmv_Zpm9X1Wnfh3pmlFEqstk7sSRGmQV_fiEiPxdGK-GGCAKIM7TNsB_bcuCgakfTZLuA_l9GHbvHINoCF4smZCtpCAyAoC92jjg=s512',
   CURRENCY: 'BDT',
   SUPPORT_EMAIL: 'notify.belorella@gmail.com'
 });

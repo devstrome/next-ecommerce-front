@@ -1,14 +1,70 @@
 'use client'
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import axios from 'axios'
 import { getStorage } from '../../../../src/lib/storage'
+import SEOSharePreview from '../../../../src/components/SEOSharePreview'
+import { BRAND } from '../../../../src/config/brand'
 import {
   FiSearch, FiRefreshCw, FiZap, FiCheck, FiAlertCircle,
   FiDatabase, FiChevronDown, FiChevronUp, FiFileText, FiLayers, FiTrash2
 } from 'react-icons/fi'
 
-function SeoEditFields({ editSeo, setEditSeo }) {
+const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000'
+const getAuthHeader = () => ({
+  headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` }
+})
+const extractArray = (response) => {
+  if (!response) return []
+  const d = response.data
+  if (Array.isArray(d)) return d
+  if (Array.isArray(d?.blogs)) return d.blogs
+  if (Array.isArray(d?.data)) return d.data
+  if (Array.isArray(d?.pages)) return d.pages
+  if (Array.isArray(d?.staticPages)) return d.staticPages
+  if (Array.isArray(d?.items)) return d.items
+  if (Array.isArray(d?.results)) return d.results
+  return []
+}
+
+const regionLabel = (region) => typeof region === 'string'
+  ? region.trim()
+  : String(region?.name || region?.slug || '').trim()
+
+const resolveRegionLabel = (product, reference, fallback = '') => {
+  if (reference && typeof reference === 'object') return regionLabel(reference) || fallback
+  const id = String(reference || '')
+  const known = [...(product?.regions || []), product?.regionId].find((region) => String(region?._id || region || '') === id)
+  return regionLabel(known) || fallback || id
+}
+
+const variantRegionLabel = (product, variant) => {
+  return resolveRegionLabel(product, variant?.regionId, String(variant?.regionName || '').trim())
+}
+
+const productRegions = (product) => [...new Set([
+  resolveRegionLabel(product, product?.regionId),
+  ...(Array.isArray(product?.regions) ? product.regions.map(regionLabel) : []),
+  ...(Array.isArray(product?.variants) ? product.variants.map((variant) => variantRegionLabel(product, variant)) : []),
+].filter(Boolean))]
+
+const productSearchText = (product) => [
+  product?.name,
+  product?.brand,
+  product?.sku,
+  product?.gender,
+  ...(Array.isArray(product?.categories) ? product.categories.flat(Infinity) : []),
+  ...productRegions(product),
+  ...(Array.isArray(product?.variants) ? product.variants.flatMap((variant) => [
+    variant?.colorName,
+    variantRegionLabel(product, variant),
+    ...(Array.isArray(variant?.options) ? variant.options.flatMap((option) => [option?.size, option?.measureType, option?.unitName]) : []),
+    ...(Array.isArray(variant?.sizes) ? variant.sizes : []),
+  ]) : []),
+].filter(Boolean).join(' ').toLocaleLowerCase()
+
+function SeoEditFields({ editSeo, setEditSeo, title, url, product, variant }) {
   return (
+    <>
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
       <div>
         <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Meta Title</label>
@@ -33,11 +89,14 @@ function SeoEditFields({ editSeo, setEditSeo }) {
           className="w-full text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 focus:outline-none focus:border-[#DC143C] transition" />
       </div>
     </div>
+    <SEOSharePreview seo={editSeo} title={title} url={url} product={product} variant={variant} />
+    </>
   )
 }
 
-function SeoViewFields({ seo }) {
+function SeoViewFields({ seo, title, url, product, variant }) {
   return (
+    <>
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
       <div>
         <label className="block text-xs font-semibold text-[#6B7280] uppercase tracking-wide mb-1">Meta Title</label>
@@ -56,6 +115,8 @@ function SeoViewFields({ seo }) {
         <p className="text-sm text-[#1A1A1A] bg-white border border-[#E5E7EB] rounded-lg px-3 py-2 truncate">{seo?.ogImage || '—'}</p>
       </div>
     </div>
+    <SEOSharePreview seo={seo} title={title} url={url} product={product} variant={variant} />
+    </>
   )
 }
 
@@ -66,7 +127,6 @@ export default function PageClient() {
   const [staticPages, setStaticPages] = useState([])
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
-  const [forceGenerating, setForceGenerating] = useState(false)
   const [expandedItem, setExpandedItem] = useState(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [activeTab, setActiveTab] = useState('products')
@@ -74,26 +134,7 @@ export default function PageClient() {
   const [editSeo, setEditSeo] = useState({})
   const [saving, setSaving] = useState(false)
 
-  const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000'
-
-  const getAuthHeader = () => ({
-    headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` }
-  })
-
-  const extractArray = (response) => {
-    if (!response) return []
-    const d = response.data
-    if (Array.isArray(d)) return d
-    if (Array.isArray(d?.blogs)) return d.blogs
-    if (Array.isArray(d?.data)) return d.data
-    if (Array.isArray(d?.pages)) return d.pages
-    if (Array.isArray(d?.staticPages)) return d.staticPages
-    if (Array.isArray(d?.items)) return d.items
-    if (Array.isArray(d?.results)) return d.results
-    return []
-  }
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true)
       const [statsRes, productsRes, blogsRes, staticRes] = await Promise.allSettled([
@@ -111,9 +152,9 @@ export default function PageClient() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
-  useEffect(() => { fetchData() }, [])
+  useEffect(() => { fetchData() }, [fetchData])
 
   const handleGeneratePending = async () => {
     try {
@@ -124,18 +165,6 @@ export default function PageClient() {
       console.error('Failed to generate pending SEO:', err)
     } finally {
       setGenerating(false)
-    }
-  }
-
-  const handleForceRegenerate = async () => {
-    try {
-      setForceGenerating(true)
-      await axios.post(`${API_URI}/api/seo/force`, {}, getAuthHeader())
-      await fetchData()
-    } catch (err) {
-      console.error('Failed to force regenerate:', err)
-    } finally {
-      setForceGenerating(false)
     }
   }
 
@@ -157,7 +186,7 @@ export default function PageClient() {
         metaTitle: `${page.title} | BELORELLA`,
         metaDescription: `Visit the ${page.title} page at BELORELLA. Premium Fashion & Lifestyle.`,
         metaKeywords: `${page.title}, BELORELLA, Bangladesh`,
-        ogImage: '/logo.png',
+        ogImage: BRAND.EMAIL_LOGO_URL,
         autoGenerated: true,
         lastGenerated: new Date(),
       }
@@ -229,7 +258,7 @@ export default function PageClient() {
     }
   }
 
-  const filteredProducts = products.filter(p => p.name?.toLowerCase().includes(searchTerm.toLowerCase()))
+  const filteredProducts = products.filter((product) => productSearchText(product).includes(searchTerm.trim().toLocaleLowerCase()))
   const filteredBlogs = blogs.filter(b => b.title?.toLowerCase().includes(searchTerm.toLowerCase()))
   const filteredPages = staticPages.filter(p => p.title?.toLowerCase().includes(searchTerm.toLowerCase()) || p.slug?.toLowerCase().includes(searchTerm.toLowerCase()))
 
@@ -246,6 +275,15 @@ export default function PageClient() {
             Monitor and optimize SEO data for all products and blog posts
           </p>
         </div>
+
+        <section className="mb-8 flex flex-col gap-4 rounded-xl border border-[#E5E7EB] bg-[#FAFAFA] p-4 sm:flex-row sm:items-center sm:p-5" aria-label="Website and search brand icon">
+          <img src={BRAND.EMAIL_LOGO_URL} alt="BELORELLA search and social logo preview" className="h-20 w-20 rounded-xl border border-[#E5E7EB] bg-white object-contain p-1" />
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold text-[#1A1A1A]">BELORELLA search and social logo</h2>
+            <p className="mt-1 text-xs text-[#6B7280]">This public logo is used in browser tabs, search previews, organization metadata, and default share cards.</p>
+            <p className="mt-2 break-all text-xs text-[#9CA3AF]">{BRAND.EMAIL_LOGO_URL}</p>
+          </div>
+        </section>
 
         {/* Stats Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
@@ -323,18 +361,6 @@ export default function PageClient() {
             {generating ? 'Generating...' : 'Generate Pending SEO'}
           </button>
 
-          <button
-            onClick={handleForceRegenerate}
-            disabled={forceGenerating}
-            className={`flex items-center justify-center gap-2 px-5 py-3 rounded-lg font-semibold text-sm transition-all duration-200
-              ${forceGenerating
-                ? 'bg-gray-200 text-gray-500 cursor-not-allowed opacity-60'
-                : 'bg-[#1A1A1A] text-white hover:bg-[#DC143C]'
-              }`}
-          >
-            {forceGenerating ? <span className="animate-spin"><FiRefreshCw size={16} /></span> : <FiRefreshCw size={16} />}
-            {forceGenerating ? 'Regenerating...' : 'Force Regenerate All'}
-          </button>
         </div>
 
         {/* Tab Toggle + Search */}
@@ -417,9 +443,17 @@ export default function PageClient() {
                     </button>
                     {isExpanded && (
                       <div className="px-4 pb-4 pt-1 border-t border-[#F3F4F6] bg-[#FAFAFA]">
+                        <section className="mb-4 grid grid-cols-1 gap-3 rounded-lg border border-[#E5E7EB] bg-white p-4 text-sm sm:grid-cols-2" aria-label="Product search context">
+                          <p><span className="font-semibold text-[#4B5563]">Brand:</span> {product.brand || 'Not set'}</p>
+                          <p><span className="font-semibold text-[#4B5563]">SKU:</span> {product.sku || 'Not set'}</p>
+                          <p><span className="font-semibold text-[#4B5563]">Category:</span> {product.categories?.[0] || 'Not set'}</p>
+                          <p><span className="font-semibold text-[#4B5563]">Subcategory:</span> {product.categories?.[1] || 'Not set'}</p>
+                          <p className="sm:col-span-2"><span className="font-semibold text-[#4B5563]">Regions:</span> {productRegions(product).join(', ') || 'Not set'}</p>
+                          <p className="sm:col-span-2"><span className="font-semibold text-[#4B5563]">Variants:</span> {product.variants?.length || 0} color/region variants with {product.variants?.reduce((count, variant) => count + (variant.options?.length || variant.sizes?.length || 0), 0)} size or measure options</p>
+                        </section>
                         {editingItem === `p-${product._id}` ? (
                           <>
-                            <SeoEditFields editSeo={editSeo} setEditSeo={setEditSeo} />
+                            <SeoEditFields editSeo={editSeo} setEditSeo={setEditSeo} title={product.name} url={`/products/${product._id}`} product={product} />
                             <div className="flex justify-end gap-2">
                               <button onClick={cancelEditing} className="px-4 py-2 border border-[#E5E7EB] text-[#6B7280] text-sm font-semibold rounded-lg hover:bg-[#F9FAFB] transition">Cancel</button>
                               <button onClick={() => handleSaveSeo('product', product._id)} disabled={saving}
@@ -430,7 +464,7 @@ export default function PageClient() {
                           </>
                         ) : (
                           <>
-                            <SeoViewFields seo={product.seo} />
+                            <SeoViewFields seo={product.seo} title={product.name} url={`/products/${product._id}`} product={product} />
                             <div className="flex justify-end gap-2">
                               <button onClick={() => startEditing(`p-${product._id}`, product.seo)}
                                 className="flex items-center gap-2 px-4 py-2 border border-[#E5E7EB] text-[#1A1A1A] text-sm font-semibold rounded-lg hover:bg-[#F9FAFB] transition">
@@ -457,16 +491,31 @@ export default function PageClient() {
                                 const hasCustom = !!vSeo?.metaTitle
                                 const vKey = `v-${product._id}:${variant._id}`
                                 const vEditing = editingItem === vKey
-                                const prices = (variant.prices || []).filter(p => typeof p === 'number')
+                                const variantOptions = Array.isArray(variant.options) && variant.options.length
+                                  ? variant.options
+                                  : (variant.sizes || []).map((size, index) => ({ size, measureType: variant.measureType, unitName: variant.unitName, price: variant.prices?.[index], discountPrice: variant.discountPrices?.[index] }))
+                                const prices = variantOptions.map((option) => {
+                                  const price = Number(option.discountPrice) > 0 && Number(option.discountPrice) < Number(option.price)
+                                    ? Number(option.discountPrice)
+                                    : Number(option.price)
+                                  return Number.isFinite(price) && price > 0 ? price : null
+                                }).filter((price) => price !== null)
                                 const priceLabel = prices.length === 0 ? ''
                                   : prices.length === 1 ? `BDT ${prices[0]}`
                                   : `BDT ${Math.min(...prices)}–${Math.max(...prices)}`
-                                const vLabel = [variant.colorName, ...(variant.sizes || [])].filter(Boolean).join(' · ') || 'Variant'
+                                const optionLabels = variantOptions.map((option) => {
+                                  const size = String(option.size || '').trim()
+                                  const unit = String(option.unitName || '').trim()
+                                  return size ? `${size}${unit && !size.toLowerCase().includes(unit.toLowerCase()) ? ` ${unit}` : ''}` : [option.measureType, unit].filter(Boolean).join(' ')
+                                }).filter(Boolean)
+                                const vLabel = [variant.colorName, ...optionLabels].filter(Boolean).join(' · ') || 'Variant'
+                                const vRegion = variantRegionLabel(product, variant)
                                 return (
                                   <div key={variant._id} className="bg-white border border-[#E5E7EB] rounded-lg px-4 py-3">
                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                       <div className="flex items-center gap-3 min-w-0">
                                         <p className="text-sm font-semibold text-[#1A1A1A] truncate">{vLabel}</p>
+                                        {vRegion && <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700">📍 {vRegion}</span>}
                                         {priceLabel && <span className="text-xs text-[#6B7280] shrink-0">{priceLabel}</span>}
                                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${hasCustom ? 'bg-[#D1FAE5] text-[#059669]' : 'bg-[#F3F4F6] text-[#6B7280]'}`}>
                                           {hasCustom ? <FiCheck size={11} /> : <FiAlertCircle size={11} />}
@@ -495,7 +544,7 @@ export default function PageClient() {
                                     </div>
                                     {vEditing && (
                                       <div className="mt-3 pt-3 border-t border-[#F3F4F6]">
-                                        <SeoEditFields editSeo={editSeo} setEditSeo={setEditSeo} />
+                                        <SeoEditFields editSeo={editSeo} setEditSeo={setEditSeo} title={`${product.name} ${vLabel}${vRegion ? ` ${vRegion}` : ''}`} url={`/products/${product._id}?variant=${variant._id}`} product={product} variant={variant} />
                                         <div className="flex justify-end gap-2">
                                           <button onClick={cancelEditing} className="px-4 py-2 border border-[#E5E7EB] text-[#6B7280] text-sm font-semibold rounded-lg hover:bg-[#F9FAFB] transition">Cancel</button>
                                           <button onClick={() => handleSaveSeo('variant', product._id, variant._id)} disabled={saving}
@@ -575,7 +624,7 @@ export default function PageClient() {
                       <div className="px-4 pb-4 pt-1 border-t border-[#F3F4F6] bg-[#FAFAFA]">
                         {editingItem === `b-${blog._id}` ? (
                           <>
-                            <SeoEditFields editSeo={editSeo} setEditSeo={setEditSeo} />
+                            <SeoEditFields editSeo={editSeo} setEditSeo={setEditSeo} title={blog.title} url={`/blog/${encodeURIComponent(blog.slug || blog._id)}`} />
                             <div className="flex justify-end gap-2">
                               <button onClick={cancelEditing} className="px-4 py-2 border border-[#E5E7EB] text-[#6B7280] text-sm font-semibold rounded-lg hover:bg-[#F9FAFB] transition">Cancel</button>
                               <button onClick={() => handleSaveSeo('blog', blog._id)} disabled={saving}
@@ -586,7 +635,7 @@ export default function PageClient() {
                           </>
                         ) : (
                           <>
-                            <SeoViewFields seo={blog.seo} />
+                            <SeoViewFields seo={blog.seo} title={blog.title} url={`/blog/${encodeURIComponent(blog.slug || blog._id)}`} />
                             <div className="flex justify-end gap-2">
                               <button onClick={() => startEditing(`b-${blog._id}`, blog.seo)}
                                 className="flex items-center gap-2 px-4 py-2 border border-[#E5E7EB] text-[#1A1A1A] text-sm font-semibold rounded-lg hover:bg-[#F9FAFB] transition">
@@ -646,7 +695,7 @@ export default function PageClient() {
                       <div className="px-4 pb-4 pt-1 border-t border-[#F3F4F6] bg-[#FAFAFA]">
                         {editingItem === `static-${page.slug}` ? (
                           <>
-                            <SeoEditFields editSeo={editSeo} setEditSeo={setEditSeo} />
+                            <SeoEditFields editSeo={editSeo} setEditSeo={setEditSeo} title={page.title} url={page.slug === 'home' ? '/' : `/${page.slug}`} />
                             <div className="flex justify-end gap-2">
                               <button onClick={cancelEditing} className="px-4 py-2 border border-[#E5E7EB] text-[#6B7280] text-sm font-semibold rounded-lg hover:bg-[#F9FAFB] transition">Cancel</button>
                               <button onClick={() => handleSaveSeo('static', page.slug)} disabled={saving}
@@ -657,7 +706,7 @@ export default function PageClient() {
                           </>
                         ) : (
                           <>
-                            <SeoViewFields seo={page.seo} />
+                            <SeoViewFields seo={page.seo} title={page.title} url={page.slug === 'home' ? '/' : `/${page.slug}`} />
                             <div className="flex justify-end gap-2">
                               <button onClick={() => startEditing(`static-${page.slug}`, page.seo)}
                                 className="flex items-center gap-2 px-4 py-2 border border-[#E5E7EB] text-[#1A1A1A] text-sm font-semibold rounded-lg hover:bg-[#F9FAFB] transition">

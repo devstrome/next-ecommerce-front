@@ -1,3 +1,7 @@
 'use client'
 import Wishlist from '../../../src/views/WishlistPage'
-export default function WishlistPageClient() { return <Wishlist /> }
+import AccountAreaLayout from '../../../src/components/AccountAreaLayout'
+
+export default function WishlistPageClient() {
+  return <AccountAreaLayout><Wishlist /></AccountAreaLayout>
+}

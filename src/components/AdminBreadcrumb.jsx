@@ -25,6 +25,7 @@ const AdminBreadcrumb = () => {
       'measure-type': 'Measure Types',
       'badges': 'Badges',
       'profile': 'Profile',
+      'settings': 'Settings',
       'admins': 'Admin Management',
       'createproducts': 'Create Product',
       'related': 'Related Products',

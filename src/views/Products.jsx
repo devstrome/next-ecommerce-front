@@ -1,11 +1,15 @@
 'use client'
 import { useEffect, useState, useDeferredValue, useMemo, useCallback, useRef } from "react";
+import { useDispatch, useSelector } from 'react-redux';
 import axios from "axios";
 import ProductCard from "../components/ProductCard";
 import ProductCartModal from "../components/ProductCartModal";
 import Link from "next/link"
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { FaFilter, FaTimes, FaSearch, FaSort, FaTh, FaListUl, FaChevronDown, FaChevronUp } from "react-icons/fa";
+import { fetchProducts, productActions, selectProducts } from '../store/slices/productSlice';
+import { fetchRegions, selectActiveRegions } from '../store/slices/regionSlice';
+import { getProductPriceOptions, getProductPriceSummary } from '../lib/productPricing';
 
 const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
 
@@ -141,29 +145,55 @@ const PriceRangeFilter = ({ idPrefix = "pf", maxPrice, priceRange, onPriceChange
 
 function Products() {
   const searchParams = useSearchParams();
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const pathname = usePathname();
+  const router = useRouter();
+  const dispatch = useDispatch();
+  const products = useSelector(selectProducts);
+  const filters = useSelector((state) => state.products.filters);
+  const regions = useSelector(selectActiveRegions);
+  const productStatus = useSelector((state) => state.products.status);
+  const loading = productStatus === 'idle' || productStatus === 'loading';
   const [categories, setCategories] = useState([]);
   const [brands, setBrands] = useState([]);
   const [genders, setGenders] = useState([]);
-  const [selectedCategories, setSelectedCategories] = useState([]);
-  const [selectedBrands, setSelectedBrands] = useState([]);
-  const [selectedGenders, setSelectedGenders] = useState([]);
+  const selectedCategories = filters.categories;
+  const selectedBrands = filters.brands;
+  const selectedGenders = filters.genders;
+  const selectedRegions = filters.regions;
+  const appliedPrice = filters.appliedPrice;
+  const sortBy = filters.sortBy;
+  const filtersRef = useRef(filters);
+  filtersRef.current = filters;
+  const updateFilter = useCallback((key, valueOrUpdater, fallback) => {
+    const currentValue = filtersRef.current[key] ?? fallback;
+    const nextValue = typeof valueOrUpdater === 'function' ? valueOrUpdater(currentValue) : valueOrUpdater;
+    const valuesMatch = Array.isArray(currentValue) && Array.isArray(nextValue)
+      ? currentValue.length === nextValue.length && currentValue.every((item, index) => item === nextValue[index])
+      : currentValue && nextValue && typeof currentValue === 'object' && typeof nextValue === 'object'
+        ? Object.keys(currentValue).length === Object.keys(nextValue).length && Object.keys(currentValue).every((field) => currentValue[field] === nextValue[field])
+        : currentValue === nextValue;
+    if (!valuesMatch) dispatch(productActions.filtersChanged({ [key]: nextValue }));
+  }, [dispatch]);
+  const setSelectedCategories = useCallback((value) => updateFilter('categories', value, []), [updateFilter]);
+  const setSelectedBrands = useCallback((value) => updateFilter('brands', value, []), [updateFilter]);
+  const setSelectedGenders = useCallback((value) => updateFilter('genders', value, []), [updateFilter]);
+  const setSelectedRegions = useCallback((value) => updateFilter('regions', value, []), [updateFilter]);
+  const setAppliedPrice = useCallback((value) => updateFilter('appliedPrice', value, { min: '', max: '' }), [updateFilter]);
+  const setSortBy = useCallback((value) => updateFilter('sortBy', value, 'name'), [updateFilter]);
   const [filteredProducts, setFilteredProducts] = useState([]);
   const [showFilters, setShowFilters] = useState(false);
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '');
   const deferredSearch = useDeferredValue(searchQuery);
-  const [sortBy, setSortBy] = useState(searchParams.get('sort') || "name");
   const [viewMode, setViewMode] = useState("grid");
   const [priceRange, setPriceRange] = useState({ min: "", max: "" });
-  const [appliedPrice, setAppliedPrice] = useState({ min: "", max: "" });
   const maxPrice = 1000000;
   const [expandedSections, setExpandedSections] = useState({
     price: true,
     sort: true,
     category: true,
     brand: true,
-    gender: true
+    gender: true,
+    region: true,
   });
   const [cartModalProductId, setCartModalProductId] = useState(null);
   const urlParamsApplied = useRef(false);
@@ -177,26 +207,16 @@ function Products() {
 
   // Fetch products with query params for server-side filtering
   const getProducts = useCallback(async (query, category, brand) => {
-    setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (query) params.set('q', query);
-      if (category) params.set('category', category);
-      if (brand) params.set('brand', brand);
-      params.set('limit', '500');
-      const url = `${API_URI}/api/products?${params.toString()}`;
-      const { data } = await axios.get(url);
-      const list = Array.isArray(data) ? data : (data.products || []);
-      setProducts(list);
-      setFilteredProducts(list);
+      dispatch(productActions.filtersChanged({ query, category, brand }));
+      await dispatch(fetchProducts({ q: query || undefined, category: category || undefined, brand: brand || undefined, limit: 500 })).unwrap();
     } catch (error) {
       console.error("Error fetching products", error);
     }
-    setLoading(false);
-  }, []);
+  }, [dispatch]);
 
   // Fetch categories (tree hierarchy)
-  const getCategories = async () => {
+  const getCategories = useCallback(async () => {
     try {
       const { data } = await axios.get(`${API_URI}/api/categories/tree`);
       setCategories(data);
@@ -204,43 +224,31 @@ function Products() {
     } catch (error) {
       console.error("Error fetching categories", error);
     }
-  };
+  }, []);
 
-  // Compute brands from selected subcategories only
-  const updateBrandsFromSelection = (selectedCats) => {
-    const subcategoryNames = [];
-    for (const cat of categories) {
-      if (cat.children) {
-        for (const sub of cat.children) {
-          if (selectedCats.includes(sub.name)) {
-            subcategoryNames.push(sub.name);
-          }
-        }
-      }
-    }
-    if (subcategoryNames.length === 0) {
-      setBrands([]);
-      return;
-    }
+  // Show brands for the selected category tree, or all brands when no category
+  // filter is active so customers can start a search by brand.
+  const updateBrandsFromSelection = useCallback((selectedCats) => {
+    const hasCategorySelection = selectedCats.length > 0;
     const filteredBrands = [...new Set(
       categories.flatMap(cat =>
         (cat.children || [])
-          .filter(sub => subcategoryNames.includes(sub.name))
+          .filter(sub => !hasCategorySelection || selectedCats.includes(cat.name) || selectedCats.includes(sub.name))
           .flatMap(sub => sub.brands || [])
       )
     )].sort();
     setBrands(filteredBrands);
-  };
+  }, [categories]);
 
   // Fetch genders
-  const getGenders = async () => {
+  const getGenders = useCallback(async () => {
     try {
       const { data } = await axios.get(`${API_URI}/api/genders`);
       setGenders(data);
     } catch (error) {
       console.error("Error fetching genders", error);
     }
-  };
+  }, []);
 
   // Handle category checkbox change
   const handleCategoryChange = (categoryName) => {
@@ -259,6 +267,12 @@ function Products() {
         ? prevSelected.filter((g) => g !== genderName)
         : [...prevSelected, genderName]
     );
+  };
+
+  const handleRegionChange = (regionId) => {
+    setSelectedRegions((current) => current.includes(regionId)
+      ? current.filter((value) => value !== regionId)
+      : [...current, regionId]);
   };
 
   const handlePriceChange = (field, value) => {
@@ -291,6 +305,10 @@ function Products() {
       ...prev,
       [section]: !prev[section]
     }));
+  };
+
+  const closeAllSections = () => {
+    setExpandedSections((previous) => Object.fromEntries(Object.keys(previous).map((section) => [section, false])));
   };
 
   // Apply URL params after categories are loaded
@@ -348,21 +366,24 @@ function Products() {
       }
       setSelectedBrands([urlBrandParam]);
     }
-  }, [categories, searchParams]);
+  }, [categories, searchParams, setSelectedBrands, setSelectedCategories, setSortBy]);
 
   // Update brands when selected categories change
   useEffect(() => {
     updateBrandsFromSelection(selectedCategories);
-    // Don't clear selected brands if URL brand was set
+    // Only clear selected brands when the category changes, not when the brand
+    // setter itself changes. Keeping the setter stable prevents a selection from
+    // immediately clearing itself on the next render.
     const urlBrandParam = searchParams.get('brand');
     if (!urlBrandParam) {
       setSelectedBrands([]);
     }
-  }, [selectedCategories, categories]);
+  }, [selectedCategories, categories, searchParams, setSelectedBrands, updateBrandsFromSelection]);
 
   // Apply filtering and sorting
   useEffect(() => {
-    let filtered = products;
+    // Redux state is frozen in development; always sort a local copy.
+    let filtered = [...(Array.isArray(products) ? products : [])];
 
     if (deferredSearch.trim()) {
       filtered = filtered.filter((product) =>
@@ -409,23 +430,36 @@ function Products() {
       );
     }
 
+    if (selectedRegions.length > 0) {
+      filtered = filtered.filter((product) => {
+        const productRegionIds = [
+          ...(Array.isArray(product.regions) ? product.regions : []),
+          product.regionId,
+          ...(product.variants || []).map((variant) => variant.regionId).filter(Boolean),
+        ].map((region) => String(region?._id || region));
+        return selectedRegions.some((regionId) => productRegionIds.includes(regionId));
+      });
+    }
+
     if (appliedPrice.min !== "" || appliedPrice.max !== "") {
       filtered = filtered.filter((product) => {
-        const price = product.discountPrice || product.mainPrice;
+        const prices = getProductPriceOptions(product, selectedRegions).map((option) => option.price);
         const min = appliedPrice.min !== "" ? parseFloat(appliedPrice.min) : 0;
         const max = appliedPrice.max !== "" ? parseFloat(appliedPrice.max) : Infinity;
-        return price >= min && price <= max;
+        return prices.some((price) => price >= min && price <= max);
       });
     }
 
     filtered.sort((a, b) => {
+      const aPrice = getProductPriceSummary(a, selectedRegions).price;
+      const bPrice = getProductPriceSummary(b, selectedRegions).price;
       switch (sortBy) {
         case "name":
           return a.name.localeCompare(b.name);
         case "price-low":
-          return (a.discountPrice || a.mainPrice) - (b.discountPrice || b.mainPrice);
+          return aPrice - bPrice;
         case "price-high":
-          return (b.discountPrice || b.mainPrice) - (a.discountPrice || a.mainPrice);
+          return bPrice - aPrice;
         case "newest":
           return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
         default:
@@ -434,14 +468,14 @@ function Products() {
     });
 
     setFilteredProducts(filtered);
-  }, [selectedCategories, selectedBrands, selectedGenders, products, deferredSearch, sortBy, appliedPrice]);
+  }, [selectedCategories, selectedBrands, selectedGenders, selectedRegions, products, deferredSearch, sortBy, appliedPrice]);
 
   // Fetch data on mount
   useEffect(() => {
     getCategories();
     getGenders();
-    getProducts(urlSearch, urlCategory, urlBrand);
-  }, []);
+    dispatch(fetchRegions());
+  }, [dispatch, getCategories, getGenders]);
 
   // Sync URL search param changes
   useEffect(() => {
@@ -450,24 +484,33 @@ function Products() {
     const urlCat = searchParams.get('category') || '';
     const urlBrandParam = searchParams.get('brand') || '';
     getProducts(urlSearch, urlCat, urlBrandParam);
-  }, [searchParams]);
+  }, [getProducts, searchParams]);
 
   const clearAllFilters = () => {
+    const hadUrlParams = searchParams.toString().length > 0;
     setSelectedCategories([]);
     setSelectedBrands([]);
     setSelectedGenders([]);
+    setSelectedRegions([]);
     setSearchQuery("");
     setPriceRange({ min: "", max: "" });
     setAppliedPrice({ min: "", max: "" });
     setSortBy("name");
     urlParamsApplied.current = false;
-    getProducts();
+
+    // Clear the query string as well as the visible filters so a refresh or
+    // copied URL cannot restore the filters that were just cleared.
+    if (hadUrlParams) {
+      router.replace(pathname || "/products", { scroll: false });
+    } else {
+      getProducts();
+    }
   };
 
   const activeFiltersCount = selectedCategories.filter(c => {
     const cat = categories.find(ct => ct.name === c);
     return cat && cat.children; // only count subcategories, not parents
-  }).length + selectedBrands.length + selectedGenders.length + 
+  }).length + selectedBrands.length + selectedGenders.length + selectedRegions.length +
     (appliedPrice.min !== "" ? 1 : 0) + (appliedPrice.max !== "" ? 1 : 0) + 
     (deferredSearch.trim() !== "" ? 1 : 0);
 
@@ -549,12 +592,16 @@ function Products() {
                   <div className="sticky top-0 bg-white border-b border-gray-200 p-4 sm:p-6">
                     <div className="flex justify-between items-center">
                       <h2 className="text-2xl font-bold text-gray-900">Filters</h2>
-                      <button
-                        className="p-2 rounded-full hover:bg-gray-100 transition-colors duration-200"
-                        onClick={() => setShowFilters(false)}
-                      >
-                        <FaTimes size={20} />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button type="button" onClick={closeAllSections} className="px-2 py-1 text-xs font-semibold text-dark-gray border border-gray-200 rounded hover:bg-gray-50">Close All</button>
+                        <button
+                          type="button"
+                          className="p-2 rounded-full hover:bg-gray-100 transition-colors duration-200"
+                          onClick={() => setShowFilters(false)}
+                        >
+                          <FaTimes size={20} />
+                        </button>
+                      </div>
                     </div>
                     {activeFiltersCount > 0 && (
                       <button
@@ -650,6 +697,18 @@ function Products() {
                       </div>
                     </FilterSection>
 
+                    <FilterSection {...sectionProps} title="Region" section="region" icon={<span className="text-maybelline-pink">📍</span>}>
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {regions.map((region) => (
+                          <label key={region._id} className="flex items-center cursor-pointer hover:bg-gray-50 p-2 rounded-lg">
+                            <input type="checkbox" checked={selectedRegions.includes(region._id)} onChange={() => handleRegionChange(region._id)} className="mr-3 accent-maybelline-pink" />
+                            <span className="text-gray-700">{region.name}</span>
+                          </label>
+                        ))}
+                        {regions.length === 0 && <p className="text-sm text-gray-400">No regions available</p>}
+                      </div>
+                    </FilterSection>
+
                     <FilterSection {...sectionProps} title="Gender" section="gender" icon={<span className="text-pink-500">👥</span>}>
                       <div className="space-y-2">
                         {genders.length > 0 ? (
@@ -680,14 +739,18 @@ function Products() {
               <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-4 sm:p-6 sticky top-24">
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="text-2xl font-bold text-gray-900">Filters</h2>
-                  {activeFiltersCount > 0 && (
-                    <button
-                    onClick={clearAllFilters}
-                    className="px-3 py-1 bg-gradient-to-r from-maybelline-pink to-maybelline-magenta text-pure-white rounded-full text-sm font-semibold hover:from-maybelline-magenta hover:to-maybelline-rose transition-all duration-200 transform hover:scale-105"
-                    >
-                      Clear ({activeFiltersCount})
-                    </button>
-                  )}
+                  <div className="flex items-center gap-2">
+                    <button type="button" onClick={closeAllSections} className="px-2 py-1 text-xs font-semibold text-dark-gray border border-gray-200 rounded hover:bg-gray-50">Close All</button>
+                    {activeFiltersCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={clearAllFilters}
+                        className="px-3 py-1 bg-gradient-to-r from-maybelline-pink to-maybelline-magenta text-pure-white rounded-full text-sm font-semibold hover:from-maybelline-magenta hover:to-maybelline-rose transition-all duration-200 transform hover:scale-105"
+                      >
+                        Clear ({activeFiltersCount})
+                      </button>
+                    )}
+                  </div>
                 </div>
                 
                 <FilterSection {...sectionProps} title="Price Range" section="price" icon={<span className="text-green-500">💰</span>}>
@@ -772,6 +835,18 @@ function Products() {
                         )}
                       </div>
                     </FilterSection>
+
+                <FilterSection {...sectionProps} title="Region" section="region" icon={<span className="text-maybelline-pink">📍</span>}>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {regions.map((region) => (
+                      <label key={region._id} className="flex items-center cursor-pointer hover:bg-gray-50 p-2 rounded-lg">
+                        <input type="checkbox" checked={selectedRegions.includes(region._id)} onChange={() => handleRegionChange(region._id)} className="mr-3 accent-maybelline-pink" />
+                        <span className="text-gray-700">{region.name}</span>
+                      </label>
+                    ))}
+                    {regions.length === 0 && <p className="text-sm text-gray-400">No regions available</p>}
+                  </div>
+                </FilterSection>
 
                 <FilterSection {...sectionProps} title="Gender" section="gender" icon={<span className="text-pink-500">👥</span>}>
                   <div className="space-y-2">
@@ -861,7 +936,13 @@ function Products() {
               }`}>
                 {filteredProducts.map((info) => (
                   <div key={info._id} className={viewMode === "list" ? "bg-white rounded-xl shadow-sm hover:shadow-lg transition-all duration-300" : ""}>
-                    <ProductCard Data={info} viewMode={viewMode} onAddToCart={(id) => { setCartModalProductId(id); }} />
+                    <ProductCard
+                      Data={info}
+                      viewMode={viewMode}
+                      selectedRegions={selectedRegions}
+                      onAddToCart={(id) => setCartModalProductId(id)}
+                      onBuyNow={(id) => setCartModalProductId(id)}
+                    />
                   </div>
                 ))}
               </div>

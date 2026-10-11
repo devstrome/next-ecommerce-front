@@ -5,10 +5,12 @@ import { useUserChat } from "../context/UserChatContext";
 import { UserContext } from "../context/UserContext";
 import EmojiPicker from "./EmojiPicker";
 import { getStorage } from "../lib/storage";
+import useFloatingPanelVisibility from "../hooks/useFloatingPanelVisibility";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URI;
 
 const ChatDrawer = () => {
+  const floatingPanelOpen = useFloatingPanelVisibility();
   const { user } = useContext(UserContext);
   const {
     isOpen,
@@ -148,7 +150,7 @@ const ChatDrawer = () => {
         />
       )}
       
-      <div className={`${isOpen && isMobile() ? 'fixed inset-0 z-[60]' : 'fixed top-1/2 -translate-y-1/2 right-4 z-50'}`}>
+      <div className={`${floatingPanelOpen && !isOpen ? 'invisible pointer-events-none' : ''} ${isOpen && isMobile() ? 'fixed inset-0 z-[60]' : 'fixed top-1/2 -translate-y-1/2 right-4 z-50'}`}>
         {!isOpen ? (
           <div className="relative">
             <button
@@ -240,7 +242,7 @@ const ChatDrawer = () => {
                     </svg>
                 </div>
                 <h4 className="text-sm font-semibold text-gray-900">Start a Conversation</h4>
-                <p className="text-xs text-gray-500 mt-1">Leave your details and we'll get back to you.</p>
+                <p className="text-xs text-gray-500 mt-1">Leave your details and we&apos;ll get back to you.</p>
               </div>
               <input
                 type="text"
@@ -298,7 +300,7 @@ const ChatDrawer = () => {
             ) : messages.length === 0 ? (
               <div className="text-center text-gray-500 mt-10">
                 <p>Start a conversation with our support team</p>
-                <p className="text-sm mt-1">We're here to help!</p>
+                <p className="text-sm mt-1">We&apos;re here to help!</p>
               </div>
             ) : (
               messages.map((msg, idx) => {
@@ -461,8 +463,9 @@ const ChatDrawer = () => {
                     onChange={handleImageSelect}
                     className="hidden"
                   />
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
                     disabled={!isConnected || uploadingImage}
                     className="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-300 text-gray-500 hover:text-maybelline-pink hover:border-maybelline-pink transition shrink-0 disabled:opacity-50"
                     title={uploadingImage ? "Uploading..." : "Attach image"}
@@ -480,15 +483,16 @@ const ChatDrawer = () => {
                   ✕
                 </button>
               )}
-              <input
-                type="text"
+              <textarea
+                rows={1}
                 value={inputMessage}
                 onChange={(e) => {
                   setInputMessage(e.target.value);
                   handleTyping();
                 }}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
                     if (editingMsgId && inputMessage.trim()) {
                       editMessage(editingMsgId, inputMessage.trim());
                       setEditingMsgId(null);
@@ -500,10 +504,11 @@ const ChatDrawer = () => {
                 }}
                 placeholder={editingMsgId ? "Editing message..." : activePlaceholder}
                 disabled={!isConnected}
-                className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-maybelline-pink disabled:opacity-50"
+                className="flex-1 min-h-10 max-h-28 resize-y px-3 py-2 text-sm border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-maybelline-pink disabled:opacity-50"
               />
               {editingMsgId ? (
                 <button
+                  type="button"
                   onClick={() => {
                     if (inputMessage.trim()) {
                       editMessage(editingMsgId, inputMessage.trim());
@@ -522,6 +527,7 @@ const ChatDrawer = () => {
                 </button>
               ) : (
                 <button
+                  type="button"
                   onClick={handleSend}
                   disabled={!canSend}
                   className={`px-4 py-2 rounded-xl text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed ${

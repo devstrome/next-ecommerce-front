@@ -44,7 +44,7 @@ const TransferModal = ({ isOpen, onClose, onTransfer }) => {
   const fetchAdmins = async (query) => {
     try {
       setLoading(true);
-      const token = getStorage("adminAccessToken") || getStorage("adminToken") || getStorage("accessToken");
+    const token = getStorage("adminAccessToken") || getStorage("adminToken");
       if (!token) return;
 
       const res = await fetch(`${API_URI}/api/admins/search?q=${encodeURIComponent(query)}`, {

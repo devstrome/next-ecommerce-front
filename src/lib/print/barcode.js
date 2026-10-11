@@ -27,5 +27,8 @@ export const barcodeDataUri = (text, options = {}) => {
 export const barcodeImg = (text, style = 'max-width:60mm;height:auto;', options = {}) => {
   const uri = barcodeDataUri(text, options);
   if (!uri) return '';
-  return `<img src="${uri}" alt="${text}" style="${style}" />`;
+  const safeAlt = String(text).replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[character]));
+  return `<img src="${uri}" alt="${safeAlt}" style="${style}" />`;
 };

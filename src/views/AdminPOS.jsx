@@ -1,5 +1,6 @@
 'use client'
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { toast } from 'react-toastify';
 import { 
   FaBarcode, 
   FaSearch, 
@@ -20,7 +21,7 @@ import {
 import { useRouter } from "next/navigation";
 import { usePOS } from '../context/POSContext';
 import { formatBDT } from '../config/brand';
-import { formatMeasureLine, formatMeasure } from '../lib/measure';
+import { formatMeasureLine } from '../lib/measure';
 import { getStorage, setStorage } from '../lib/storage';
 
 const AdminPOS = () => {
@@ -28,6 +29,11 @@ const AdminPOS = () => {
   const {
     cart,
     customer,
+    loyaltyCustomer,
+    loyaltyRequested,
+    posGiftCode,
+    posGiftCodeDetails,
+    posGiftCodeLoading,
     searchQuery,
     scannedBarcode,
     searchResults,
@@ -42,6 +48,9 @@ const AdminPOS = () => {
     barcodeInputRef,
     
     setCustomer,
+    setLoyaltyRequested,
+    setPOSGiftCode,
+    clearPOSGiftCode,
     setSearchQuery,
     setScannedBarcode,
     setPaymentMethod,
@@ -56,10 +65,66 @@ const AdminPOS = () => {
     removeFromCart,
     clearCart,
     calculateTotals,
-    processOrder
+    processOrder,
+    lookupLoyaltyCustomer,
+    validatePOSGiftCode,
+    clearLoyaltyCustomer
   } = usePOS();
 
   const { subtotal, taxAmount, discountAmount, total } = calculateTotals();
+  const [loyaltySearch, setLoyaltySearch] = useState('');
+  const [loyaltySearchLoading, setLoyaltySearchLoading] = useState(false);
+  const [loyaltyLookupMessage, setLoyaltyLookupMessage] = useState('');
+  const loyaltyCap = loyaltyCustomer?.enabled ? total * Math.min(100, Math.max(0, Number(loyaltyCustomer.maxRedeemPercent) || 0)) / 100 : 0;
+  const loyaltyApplied = loyaltyCustomer
+    ? Math.round(Math.min(Math.max(0, Number(loyaltyRequested) || 0), Number(loyaltyCustomer.balanceBDT) || 0, loyaltyCap, total) * 100) / 100
+    : 0;
+  const giftCodeApplied = posGiftCodeDetails
+    ? Math.round(Math.min(Number(posGiftCodeDetails.amountBDT) || 0, Math.max(0, total - loyaltyApplied)) * 100) / 100
+    : 0;
+  const amountDue = Math.max(0, Math.round((total - loyaltyApplied - giftCodeApplied) * 100) / 100);
+
+  const handleApplyGiftCode = async () => {
+    try {
+      const gift = await validatePOSGiftCode();
+      toast.success(`Gift code validated · ${formatBDT(Number(gift.amountBDT) || 0)} available`);
+    } catch (error) {
+      toast.error(error.response?.data?.message || error.message || 'Gift code could not be validated');
+    }
+  };
+
+  const handleLoyaltyLookup = async () => {
+    const searchValue = loyaltySearch || customer.email || customer.phone;
+    setLoyaltyLookupMessage('');
+    setLoyaltySearchLoading(true);
+    try {
+      const linked = await lookupLoyaltyCustomer(searchValue);
+      setLoyaltySearch(linked.email || linked.phone || '');
+    } catch (error) {
+      // A failed lookup must never leave a previously selected member attached to
+      // this sale. Clearing loyalty-only values lets the cashier proceed as a
+      // regular walk-in/customer sale without rewards or redemption.
+      if (loyaltyCustomer) {
+        const isEmail = String(searchValue || '').includes('@');
+        setCustomer((current) => ({
+          ...current,
+          name: '',
+          email: isEmail ? searchValue : '',
+          phone: isEmail ? '' : searchValue,
+        }));
+      }
+      clearLoyaltyCustomer();
+      const notFound = error.response?.status === 404;
+      const message = notFound
+        ? 'No loyalty account found. You can continue this sale normally without loyalty.'
+        : 'Loyalty lookup failed. You can continue this sale normally or try the lookup again.';
+      setLoyaltyLookupMessage(message);
+      if (notFound) toast.info(message);
+      else toast.error(error.response?.data?.message || error.message || message);
+    } finally {
+      setLoyaltySearchLoading(false);
+    }
+  };
 
   // Mirror of the barcode field for the global (non-input) key handler
   const barcodeValueRef = useRef(scannedBarcode);
@@ -103,8 +168,11 @@ const AdminPOS = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanBarcode]);
 
-  const resultMeasure = (item) =>
-    formatMeasure({ measureType: item.variantId?.measureType, unitName: item.variantId?.unitName, size: item.size });
+  const resultMeasure = (item) => formatMeasureLine({
+    ...item,
+    measureType: item.measureType || item.variantId?.measureType,
+    unitName: item.unitName || item.variantId?.unitName,
+  });
 
   return (
     <div className="flex flex-col items-center justify-start min-h-screen bg-[#FAF8F6] p-4 sm:p-6">
@@ -271,7 +339,10 @@ const AdminPOS = () => {
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-[#1B1B1B] truncate">{item.productId.name}</p>
                           <p className="text-sm text-[#4A4A4A]">
-                            {[resultMeasure(item), item.color?.name].filter(Boolean).join(' • ')} • {formatBDT(item.price)}
+                            {[resultMeasure(item), item.color?.name, item.regionName && `Region: ${item.regionName}`].filter(Boolean).join(' • ')} • {formatBDT(item.price)}
+                          </p>
+                          <p className="text-xs text-[#6B7280] font-mono break-all">
+                            My barcode: {item.barcode || '—'}{item.realBarcode ? ` · Product barcode: ${item.realBarcode}` : ''}
                           </p>
                           <p className="text-xs text-[#4A4A4A]">Available: {item.availableQuantity}</p>
                         </div>
@@ -320,7 +391,11 @@ const AdminPOS = () => {
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-[#1B1B1B] truncate">{item.productName}</p>
                           <p className="text-sm text-[#4A4A4A]">
-                            {[formatMeasureLine(item.variantInfo), item.variantInfo.color].filter(Boolean).join(' • ')}
+                            {[formatMeasureLine(item.variantInfo), item.variantInfo.color, item.variantInfo.regionName && `Region: ${item.variantInfo.regionName}`].filter(Boolean).join(' • ')}
+                          </p>
+                          <p className="text-[11px] text-[#6B7280] font-mono mt-1 break-all">
+                            My barcode: {item.variantInfo.barcode || '—'}
+                            {item.variantInfo.realBarcode ? ` · Product barcode: ${item.variantInfo.realBarcode}` : ''}
                           </p>
                           <p className="text-xs text-[#4A4A4A] font-medium mt-1">{formatBDT(item.totalPrice)}</p>
                         </div>
@@ -345,17 +420,43 @@ const AdminPOS = () => {
             <div className="bg-white border border-[#BDBDBD] p-4 sm:p-6">
               <h3 className="text-lg font-semibold mb-4 flex items-center text-[#1B1B1B]">
                 <FaUser className="mr-2 text-[#B1123B]" />
-                Customer Information
+                Customer Information (Optional)
               </h3>
+              <p className="mb-3 text-sm text-[#6B7280]">Leave these fields blank for a walk-in sale. A customer account is not required.</p>
               <div className="space-y-3">
+                <div className="rounded border border-[#E8C4CE] bg-[#FFF8FA] p-3">
+                  <label className="block text-sm font-medium text-[#4A4A4A] mb-1">Find loyalty account by phone or email</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Phone number or email"
+                      value={loyaltySearch}
+                      onChange={(event) => setLoyaltySearch(event.target.value)}
+                      className="min-w-0 flex-1 px-3 py-2 border border-[#BDBDBD] bg-white text-[#1B1B1B] min-h-[44px]"
+                    />
+                    <button type="button" onClick={handleLoyaltyLookup} disabled={loyaltySearchLoading} className="px-3 bg-[#B1123B] text-white disabled:opacity-60">
+                      {loyaltySearchLoading ? 'Finding…' : 'Find'}
+                    </button>
+                  </div>
+                  {loyaltyLookupMessage && !loyaltyCustomer && (
+                    <p className="mt-2 text-xs text-[#6B7280]" role="status">{loyaltyLookupMessage}</p>
+                  )}
+                  {loyaltyCustomer && (
+                    <div className="mt-2 flex items-center justify-between gap-3 text-sm">
+                      <span className="text-green-700">{loyaltyCustomer.name} · Balance {formatBDT(Number(loyaltyCustomer.balanceBDT || 0))}{loyaltyCustomer.tierName ? ` · ${loyaltyCustomer.tierName} (${Number(loyaltyCustomer.earnRatePercent || 0)}% back)` : ''}</span>
+                      <button type="button" onClick={() => { clearLoyaltyCustomer(); setLoyaltyLookupMessage('Loyalty unlinked. You can continue this sale normally.'); }} className="text-[#B1123B] underline">Unlink</button>
+                    </div>
+                  )}
+                </div>
                 <div>
-                  <label className="block text-sm font-medium text-[#4A4A4A] mb-1">Name *</label>
+                  <label className="block text-sm font-medium text-[#4A4A4A] mb-1">Name (optional)</label>
                   <input
                     type="text"
                     placeholder="Customer Name"
                     value={customer.name}
+                    disabled={Boolean(loyaltyCustomer)}
                     onChange={(e) => setCustomer({ ...customer, name: e.target.value })}
-                    className="w-full px-3 py-2 border border-[#BDBDBD] focus:outline-none focus:ring-2 focus:ring-[#B1123B] bg-white text-[#1B1B1B] min-h-[44px]"
+                    className="w-full px-3 py-2 border border-[#BDBDBD] focus:outline-none focus:ring-2 focus:ring-[#B1123B] bg-white text-[#1B1B1B] min-h-[44px] disabled:bg-gray-100"
                   />
                 </div>
                 <div>
@@ -364,8 +465,9 @@ const AdminPOS = () => {
                     type="tel"
                     placeholder="Phone Number"
                     value={customer.phone}
+                    disabled={Boolean(loyaltyCustomer)}
                     onChange={(e) => setCustomer({ ...customer, phone: e.target.value })}
-                    className="w-full px-3 py-2 border border-[#BDBDBD] focus:outline-none focus:ring-2 focus:ring-[#B1123B] bg-white text-[#1B1B1B] min-h-[44px]"
+                    className="w-full px-3 py-2 border border-[#BDBDBD] focus:outline-none focus:ring-2 focus:ring-[#B1123B] bg-white text-[#1B1B1B] min-h-[44px] disabled:bg-gray-100"
                   />
                 </div>
                 <div>
@@ -374,8 +476,9 @@ const AdminPOS = () => {
                     type="email"
                     placeholder="Email"
                     value={customer.email}
+                    disabled={Boolean(loyaltyCustomer)}
                     onChange={(e) => setCustomer({ ...customer, email: e.target.value })}
-                    className="w-full px-3 py-2 border border-[#BDBDBD] focus:outline-none focus:ring-2 focus:ring-[#B1123B] bg-white text-[#1B1B1B] min-h-[44px]"
+                    className="w-full px-3 py-2 border border-[#BDBDBD] focus:outline-none focus:ring-2 focus:ring-[#B1123B] bg-white text-[#1B1B1B] min-h-[44px] disabled:bg-gray-100"
                   />
                 </div>
                 <div>
@@ -452,9 +555,69 @@ const AdminPOS = () => {
                   <span>{formatBDT(discountAmount)}</span>
                 </div>
                 <div className="border-t border-[#BDBDBD] pt-2">
+                  {loyaltyCustomer && (
+                    <div className="mb-3 rounded border border-[#E8C4CE] bg-[#FFF8FA] p-3">
+                      <div className="flex items-center justify-between gap-3 mb-2">
+                        <label htmlFor="pos-loyalty-amount" className="text-sm font-medium text-[#1B1B1B]">Apply loyalty BDT</label>
+                        <span className="text-xs text-[#4A4A4A]">Max {formatBDT(Math.min(Number(loyaltyCustomer.balanceBDT || 0), loyaltyCap))}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <input
+                          id="pos-loyalty-amount"
+                          type="number"
+                          min="0"
+                          max={Math.min(Number(loyaltyCustomer.balanceBDT || 0), loyaltyCap)}
+                          step="0.01"
+                          value={loyaltyRequested}
+                          onChange={(event) => setLoyaltyRequested(event.target.value)}
+                          className="min-w-0 flex-1 px-3 py-2 border border-[#BDBDBD] bg-white text-[#1B1B1B]"
+                        />
+                        <button type="button" onClick={() => setLoyaltyRequested(String(Math.round(Math.min(Number(loyaltyCustomer.balanceBDT || 0), loyaltyCap) * 100) / 100))} className="px-3 border border-[#BDBDBD]">Use max</button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="mt-3 rounded border border-[#E8C4CE] bg-white p-3">
+                    <label htmlFor="pos-gift-code" className="mb-2 block text-sm font-medium text-[#1B1B1B]">Redeem a gift code</label>
+                    <div className="flex gap-2">
+                      <input
+                        id="pos-gift-code"
+                        type="text"
+                        autoComplete="off"
+                        placeholder="Enter redeem code"
+                        value={posGiftCode}
+                        onChange={(event) => setPOSGiftCode(event.target.value)}
+                        disabled={!loyaltyCustomer}
+                        className="min-w-0 flex-1 border border-[#BDBDBD] bg-white px-3 py-2 text-[#1B1B1B] disabled:bg-gray-100"
+                      />
+                      {posGiftCodeDetails ? (
+                        <button type="button" onClick={clearPOSGiftCode} className="border border-[#BDBDBD] px-3">Clear</button>
+                      ) : (
+                        <button type="button" onClick={handleApplyGiftCode} disabled={!loyaltyCustomer || !posGiftCode.trim() || posGiftCodeLoading} className="bg-[#1B1B1B] px-3 text-white disabled:opacity-50">
+                          {posGiftCodeLoading ? 'Checking…' : 'Apply'}
+                        </button>
+                      )}
+                    </div>
+                    {posGiftCodeDetails && (
+                      <p className="mt-2 text-xs text-green-700">
+                        Applied code ••••-{posGiftCodeDetails.codeSuffix} · {formatBDT(giftCodeApplied)} used
+                        {Number(posGiftCodeDetails.amountBDT) > giftCodeApplied ? ` · ${formatBDT(Number(posGiftCodeDetails.amountBDT) - giftCodeApplied)} unused value will be credited to this customer` : ''}
+                      </p>
+                    )}
+                    {!loyaltyCustomer && <p className="mt-2 text-xs text-[#6B7280]">Find a loyalty customer above before redeeming a code.</p>}
+                  </div>
+                  {loyaltyApplied > 0 && (
+                    <div className="flex justify-between text-sm text-green-700 mb-2">
+                      <span>Loyalty applied</span><span>- {formatBDT(loyaltyApplied)}</span>
+                    </div>
+                  )}
+                  {giftCodeApplied > 0 && (
+                    <div className="mb-2 flex justify-between text-sm text-green-700">
+                      <span>Gift code ••••-{posGiftCodeDetails.codeSuffix}</span><span>- {formatBDT(giftCodeApplied)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between font-semibold text-lg text-[#1B1B1B]">
-                    <span>Total:</span>
-                    <span>{formatBDT(total)}</span>
+                    <span>{loyaltyApplied > 0 || giftCodeApplied > 0 ? 'Amount due:' : 'Total:'}</span>
+                    <span>{formatBDT(amountDue)}</span>
                   </div>
                 </div>
               </div>
@@ -498,7 +661,7 @@ const AdminPOS = () => {
                 ) : (
                   <>
                     <FaCashRegister className="mr-2" />
-                    Complete Sale - {formatBDT(total)}
+                    Complete Sale - {formatBDT(amountDue)}
                   </>
                 )}
               </button>

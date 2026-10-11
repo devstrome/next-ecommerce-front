@@ -73,7 +73,7 @@ const AdminList = ({ admins, onEdit, onDelete, onBan, currentAdminId }) => {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center space-x-2">
-                      {admin.superAdmin ? (
+                      {admin.superAdmin || admin.role === 'super_admin' ? (
                         <>
                           <FaUserShield className="text-red-500" />
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
@@ -84,11 +84,14 @@ const AdminList = ({ admins, onEdit, onDelete, onBan, currentAdminId }) => {
                         <>
                           <FaUserCog className="text-maybelline-pink" />
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-maybelline-light text-maybelline-magenta">
-                            Admin
+                            {admin.role === 'custom' ? (admin.roleName || 'Custom role') : 'Legacy admin · assign sections'}
                           </span>
                         </>
                       )}
                     </div>
+                    {!admin.superAdmin && (
+                      <div className="mt-1 text-xs text-gray-500">{(admin.permissions || []).length} sidebar section(s)</div>
+                    )}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-500">
                     {new Date(admin.createdAt).toLocaleDateString('en-US', {

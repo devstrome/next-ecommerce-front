@@ -1,9 +1,10 @@
 'use client'
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { getStorage } from '../../../../src/lib/storage';
 import { toast } from 'react-toastify';
 import { printDocument } from '../../../../src/lib/print';
+import { formatMeasureLine } from '../../../../src/lib/measure';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { FiPlus, FiTrash2, FiEdit2, FiDownload, FiCalendar, FiDollarSign, FiTrendingUp, FiShoppingBag, FiFilter, FiX } from 'react-icons/fi';
 
@@ -27,11 +28,50 @@ function saveExpenseCategories(cats) {
 }
 
 function formatDate(d) {
-  return new Date(d).toISOString().split('T')[0];
+  const date = new Date(d);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function toBDT(n) {
   return `৳${Number(n || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[character]);
+}
+
+function renderVariantSalesSection(variants = []) {
+  if (!variants.length) return '';
+  const rows = variants.map((variant, index) => {
+    const variantLabel = variant.variantName || [variant.color, variant.size].filter(Boolean).join(' / ') || 'Base product';
+    const measurement = escapeHtml(formatMeasureLine(variant));
+    const categories = (variant.categories || []).map((category) => typeof category === 'string' ? category : category?.name).filter(Boolean);
+    const catalogDetails = [variant.brand, ...categories].filter(Boolean).join(' · ');
+    const cost = variant.missingCostQuantity ? `Partial · ${toBDT(variant.knownCost)}` : toBDT(variant.knownCost);
+    const profit = variant.profit === null || variant.profit === undefined ? `Est. ${toBDT(variant.estimatedProfit)}` : toBDT(variant.profit);
+    const barcode = variant.barcode ? `<div style="font-size:7px;color:#777">${escapeHtml(variant.barcode)}</div>` : '';
+    const rowColor = index % 2 === 0 ? '#fff' : '#FFF8FA';
+    return `<tr style="background:${rowColor}">
+      <td><strong>${escapeHtml(variant.productName || 'Product')}</strong><div style="font-size:7px;color:#555">${escapeHtml(variantLabel)}</div>${measurement ? `<div style="font-size:7px;color:#777">${measurement}</div>` : ''}${catalogDetails ? `<div style="font-size:7px;color:#888">${escapeHtml(catalogDetails)}</div>` : ''}</td>
+      <td>${escapeHtml(variant.regionName || '—')}</td>
+      <td>${escapeHtml(variant.sku || '—')}${barcode}</td>
+      <td class="number">${Number(variant.totalSold) || 0}</td>
+      <td class="number">${toBDT(variant.revenue)}</td>
+      <td class="number">${cost}</td>
+      <td class="number">${profit}</td>
+      <td class="number">${toBDT(variant.discounts)}<div style="font-size:7px;color:#777">Returns ${toBDT(variant.returns)}</div></td>
+    </tr>`;
+  }).join('');
+
+  return `<div style="margin-bottom:28px">
+    <div class="section"><div class="bar"></div><h2 style="font-size:15px;font-weight:700;color:#1a1a1a">Variant Sales, Region &amp; SKU Details (${variants.length})</h2></div>
+    <table class="variant-report-table"><thead><tr><th>Product / variant</th><th>Region</th><th>SKU / barcode</th><th class="number">Qty</th><th class="number">Revenue</th><th class="number">Known cost</th><th class="number">Profit</th><th class="number">Discounts / returns</th></tr></thead><tbody>${rows}</tbody></table>
+  </div>`;
 }
 
 export default function FinancePageClient() {
@@ -41,6 +81,8 @@ export default function FinancePageClient() {
   const [startDate, setStartDate] = useState(formatDate(firstOfMonth));
   const [endDate, setEndDate] = useState(formatDate(today));
   const [overview, setOverview] = useState(null);
+  const [financeTransactions, setFinanceTransactions] = useState([]);
+  const [transactionPagination, setTransactionPagination] = useState({ page: 1, pages: 1, total: 0 });
   const [expenses, setExpenses] = useState([]);
   const [expensePage, setExpensePage] = useState(1);
   const [expenseTotalPages, setExpenseTotalPages] = useState(1);
@@ -59,6 +101,14 @@ export default function FinancePageClient() {
   const [productCategory, setProductCategory] = useState('');
   const [productBrand, setProductBrand] = useState('');
   const [categoryTree, setCategoryTree] = useState([]);
+  const [financeFilters, setFinanceFilters] = useState({
+    search: '', product: '', variant: '', sku: '', barcode: '', orderId: '', customer: '',
+    paymentStatus: '', orderStatus: '', courier: '', profitable: '',
+  });
+  const [productMetric, setProductMetric] = useState('topSellingProducts');
+  const [variantMetric, setVariantMetric] = useState('topVariants');
+  const financeRequestStateRef = useRef(null);
+  financeRequestStateRef.current = { productCategory, productBrand, financeFilters, expensePage, expenseSearch, expenseCategory };
 
   useEffect(() => { setExpenseCategories(getExpenseCategories()); fetchCategoryTree(); }, []);
 
@@ -109,12 +159,13 @@ export default function FinancePageClient() {
     saveExpenseCategories(updated);
   };
 
-  const fetchOverview = async (start = startDate, end = endDate, cat = productCategory, brand = productBrand) => {
+  const fetchOverview = useCallback(async (start, end, cat, brand, filters) => {
     setLoading(true);
     try {
       const params = new URLSearchParams({ startDate: start, endDate: end });
       if (cat) params.append('productCategory', cat);
       if (brand) params.append('productBrand', brand);
+      Object.entries(filters || {}).forEach(([key, value]) => { if (value) params.append(key, value); });
       const res = await axios.get(`${API_URI}/api/admin/finance/overview?${params}`, authHeaders());
       setOverview(res.data.overview || res.data);
     } catch (err) {
@@ -122,16 +173,31 @@ export default function FinancePageClient() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const fetchExpenses = async (start = startDate, end = endDate) => {
+  const fetchTransactions = useCallback(async (start, end, cat, brand, filters, page = 1) => {
+    try {
+      const params = new URLSearchParams({ startDate: start, endDate: end, page: String(page), limit: '25' });
+      if (cat) params.append('productCategory', cat);
+      if (brand) params.append('productBrand', brand);
+      Object.entries(filters || {}).forEach(([key, value]) => { if (value) params.append(key, value); });
+      const res = await axios.get(`${API_URI}/api/admin/finance/transactions?${params}`, authHeaders());
+      setFinanceTransactions(res.data.transactions || []);
+      setTransactionPagination(res.data.pagination || { page: 1, pages: 1, total: 0 });
+    } catch (err) {
+      console.error('Failed to fetch finance transactions', err);
+      toast.error(err.response?.data?.message || 'Unable to load finance transactions');
+    }
+  }, []);
+
+  const fetchExpenses = useCallback(async (start, end, page, search, category) => {
     setExpenseLoading(true);
     try {
       const params = new URLSearchParams({
-        page: expensePage,
+        page,
         limit: 20,
-        search: expenseSearch,
-        category: expenseCategory,
+        search,
+        category,
         startDate: start,
         endDate: end,
       });
@@ -144,15 +210,43 @@ export default function FinancePageClient() {
     } finally {
       setExpenseLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { fetchOverview(); fetchExpenses(); }, [startDate, endDate]);
-  useEffect(() => { fetchExpenses(); }, [expensePage, expenseCategory]);
+  useEffect(() => {
+    const current = financeRequestStateRef.current;
+    fetchOverview(startDate, endDate, current.productCategory, current.productBrand, current.financeFilters);
+    fetchTransactions(startDate, endDate, current.productCategory, current.productBrand, current.financeFilters, 1);
+  }, [startDate, endDate, fetchOverview, fetchTransactions]);
+  useEffect(() => {
+    const current = financeRequestStateRef.current;
+    fetchExpenses(startDate, endDate, expensePage, current.expenseSearch, expenseCategory);
+  }, [expensePage, expenseCategory, startDate, endDate, fetchExpenses]);
 
   const applyDateFilter = () => {
     setExpensePage(1);
-    fetchOverview();
-    fetchExpenses();
+    fetchOverview(startDate, endDate, productCategory, productBrand, financeFilters);
+    fetchTransactions(startDate, endDate, productCategory, productBrand, financeFilters, 1);
+    fetchExpenses(startDate, endDate, 1, expenseSearch, expenseCategory);
+  };
+
+  const downloadTransactionsCsv = async () => {
+    try {
+      const params = new URLSearchParams({ startDate, endDate, productCategory, productBrand });
+      Object.entries(financeFilters).forEach(([key, value]) => { if (value) params.append(key, value); });
+      const response = await axios.get(`${API_URI}/api/admin/finance/transactions.csv?${params}`, {
+        ...authHeaders(), responseType: 'blob',
+      });
+      const url = URL.createObjectURL(response.data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'belorella-finance-transactions.csv';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Unable to export finance transactions');
+    }
   };
 
   const setPreset = (preset) => {
@@ -182,8 +276,9 @@ export default function FinancePageClient() {
     setStartDate(s);
     setEndDate(e);
     setExpensePage(1);
-    fetchOverview(s, e);
-    fetchExpenses(s, e);
+    fetchOverview(s, e, productCategory, productBrand, financeFilters);
+    fetchTransactions(s, e, productCategory, productBrand, financeFilters, 1);
+    fetchExpenses(s, e, 1, expenseSearch, expenseCategory);
   };
 
   const handleExpenseSubmit = async (e) => {
@@ -198,8 +293,8 @@ export default function FinancePageClient() {
       setShowExpenseModal(false);
       setEditingExpense(null);
       setExpenseForm({ title: '', category: 'Miscellaneous', amount: '', date: formatDate(today), notes: '' });
-      fetchExpenses();
-      fetchOverview();
+      fetchExpenses(startDate, endDate, expensePage, expenseSearch, expenseCategory);
+      fetchOverview(startDate, endDate, productCategory, productBrand, financeFilters);
     } catch (err) {
       console.error('Failed to save expense', err);
     }
@@ -221,8 +316,8 @@ export default function FinancePageClient() {
     if (!confirm('Delete this expense?')) return;
     try {
       await axios.delete(`${API_URI}/api/admin/finance/expenses/${id}`, authHeaders());
-      fetchExpenses();
-      fetchOverview();
+      fetchExpenses(startDate, endDate, expensePage, expenseSearch, expenseCategory);
+      fetchOverview(startDate, endDate, productCategory, productBrand, financeFilters);
     } catch (err) {
       console.error('Failed to delete expense', err);
     }
@@ -255,7 +350,20 @@ export default function FinancePageClient() {
     return data.map(c => ({ name: c._id || c.category, value: c.total || c.amount || 0 }));
   }, [overview]);
 
-  const netProfit = (overview?.totalRevenue || 0) - (overview?.totalExpenses || 0);
+  const netProfit = overview?.profit ?? overview?.estimatedProfit ?? 0;
+  const profitLabel = overview?.profitBasis === 'gross_before_overhead'
+    ? `${overview?.profitIsEstimated ? 'Estimated ' : ''}gross profit (before overhead)`
+    : `${overview?.profitIsEstimated ? 'Estimated ' : ''}profit`;
+  const productMetricOptions = [
+    ['topSellingProducts', 'Best selling'], ['topRevenueProducts', 'Highest revenue'], ['topProfitProducts', 'Highest profit'],
+    ['lowPerformingProducts', 'Low performing'], ['mostDiscountedProducts', 'Most discounted'], ['returnHeavyProducts', 'Return heavy'],
+  ];
+  const productRows = overview?.[productMetric] || [];
+  const variantMetricOptions = [
+    ['topSellingVariants', 'Best selling'], ['topVariants', 'Highest revenue'], ['topProfitVariants', 'Highest profit'],
+    ['lowPerformingVariants', 'Low performing'], ['mostDiscountedVariants', 'Most discounted'], ['returnHeavyVariants', 'Return heavy'],
+  ];
+  const variantRows = overview?.[variantMetric] || [];
 
   const commonCSS = `
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -283,6 +391,10 @@ export default function FinancePageClient() {
     table { width: 100%; border-collapse: collapse; font-size: 12px; }
     th { text-align: left; padding: 10px 12px; border-bottom: 2px solid #FECDD3; color: #DC143C; font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; background: #FFF1F2; }
     th:last-child, td:last-child { text-align: right; }
+    .variant-report-table { table-layout: fixed; font-size: 8px; }
+    .variant-report-table th { padding: 5px 5px; font-size: 7px; }
+    .variant-report-table td { padding: 5px; border-bottom: 1px solid #eee; vertical-align: top; overflow-wrap: anywhere; }
+    .variant-report-table th.number, .variant-report-table td.number { text-align: right; white-space: nowrap; }
     .auth-section { padding: 16px 0; display: flex; justify-content: space-between; align-items: flex-end; border-top: 1px solid #FECDD3; break-inside: avoid; }
     .auth-box { text-align: center; }
     .auth-box img { max-height: 80px; object-fit: contain; }
@@ -313,7 +425,7 @@ export default function FinancePageClient() {
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title><style>${commonCSS}</style></head><body>
       <div class="page">
         <div class="header">
-          ${logo ? `<img src="${logo}" alt="BELORELLA" style="border-radius: 10px;height:60px;object-fit:contain;" />` : `<div style="font-size:36px;font-weight:900;color:white;letter-spacing:8px">B</div>`}
+          ${logo ? `<img src="${logo}" alt="BELORELLA" style="width:60px;height:60px;padding:3px;box-sizing:border-box;border-radius:12px;background-color:#fff;object-fit:contain;" />` : `<div style="font-size:36px;font-weight:900;color:white;letter-spacing:8px">B</div>`}
           <div class="brand">BELORELLA</div>
           <div class="sub">Premium Fashion &amp; Lifestyle</div>
         </div>
@@ -365,6 +477,8 @@ export default function FinancePageClient() {
   };
 
   const handleExportPDF = async () => {
+    const reportVariants = overview?.allVariants?.length ? overview.allVariants : overview?.topVariants || [];
+    const variantSalesSection = renderVariantSalesSection(reportVariants);
     const topProductsRows = (overview?.topProducts || []).map((p, i) =>
       `<tr style="background:${i % 2 === 0 ? '#fff' : '#FFF8FA'}"><td style="padding:8px 12px;border-bottom:1px solid #F3F4F6;color:#999;font-weight:600">${i + 1}</td><td style="padding:8px 12px;border-bottom:1px solid #F3F4F6;font-weight:600;color:#1a1a1a">${p.name || p._id}</td><td style="text-align:right;padding:8px 12px;border-bottom:1px solid #F3F4F6">${p.totalSold}</td><td style="text-align:right;padding:8px 12px;border-bottom:1px solid #F3F4F6;font-weight:600;color:#DC143C">${toBDT(p.revenue)}</td></tr>`
     ).join('');
@@ -378,7 +492,7 @@ export default function FinancePageClient() {
     const summaryCards = `<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:28px">
       <div style="background:#FFF1F2;border:1px solid #FECDD3;border-radius:10px;padding:16px;text-align:center"><div style="font-size:9px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px">REVENUE</div><div style="font-size:20px;font-weight:800;color:#DC143C">${toBDT(overview?.totalRevenue)}</div></div>
       <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:10px;padding:16px;text-align:center"><div style="font-size:9px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px">EXPENSES</div><div style="font-size:20px;font-weight:800;color:#EF4444">${toBDT(overview?.totalExpenses)}</div></div>
-      <div style="background:${netProfit >= 0 ? '#F0FDF4' : '#FEF2F2'};border:1px solid ${netProfit >= 0 ? '#BBF7D0' : '#FECACA'};border-radius:10px;padding:16px;text-align:center"><div style="font-size:9px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px">NET PROFIT</div><div style="font-size:20px;font-weight:800;color:${netProfit >= 0 ? '#16A34A' : '#EF4444'}">${toBDT(netProfit)}</div></div>
+              <div style="background:${netProfit >= 0 ? '#F0FDF4' : '#FEF2F2'};border:1px solid ${netProfit >= 0 ? '#BBF7D0' : '#FECACA'};border-radius:10px;padding:16px;text-align:center"><div style="font-size:9px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px">${profitLabel.toUpperCase()}</div><div style="font-size:20px;font-weight:800;color:${netProfit >= 0 ? '#16A34A' : '#EF4444'}">${toBDT(netProfit)}</div></div>
       <div style="background:#FFF1F2;border:1px solid #FECDD3;border-radius:10px;padding:16px;text-align:center"><div style="font-size:9px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px">ORDERS</div><div style="font-size:20px;font-weight:800;color:#DC143C">${overview?.orderCount || 0}</div></div>
     </div>`;
 
@@ -388,6 +502,7 @@ export default function FinancePageClient() {
 
     let body = summaryCards;
     if (topProductsRows) body += `<div style="margin-bottom:28px"><div class="section"><div class="bar"></div><h2 style="font-size:15px;font-weight:700;color:#1a1a1a">Top Selling Products</h2></div><table><thead><tr><th>#</th><th>Product</th><th style="text-align:right">Qty</th><th style="text-align:right">Revenue</th></tr></thead><tbody>${topProductsRows}</tbody></table></div>`;
+    if (variantSalesSection) body += variantSalesSection;
     if (expenseDetailRows) body += `<div style="margin-bottom:28px"><div class="section"><div class="bar"></div><h2 style="font-size:15px;font-weight:700;color:#1a1a1a">Expense Details</h2></div><table><thead><tr><th>Title</th><th>Category</th><th style="text-align:right">Amount</th><th>Date</th><th>Notes</th></tr></thead><tbody>${expenseDetailRows}</tbody></table></div>`;
     if (expenseCatRows) body += `<div style="margin-bottom:28px"><div class="section"><div class="bar"></div><h2 style="font-size:15px;font-weight:700;color:#1a1a1a">Expenses by Category</h2></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">${expenseCatRows}</div></div>`;
     if (orderStatusRows) body += `<div style="margin-bottom:20px"><div class="section"><div class="bar"></div><h2 style="font-size:15px;font-weight:700;color:#1a1a1a">Order Status</h2></div><div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">${orderStatusRows}</div></div>`;
@@ -396,6 +511,8 @@ export default function FinancePageClient() {
   };
 
   const handleExportIncome = async () => {
+    const reportVariants = overview?.allVariants?.length ? overview.allVariants : overview?.topVariants || [];
+    const variantSalesSection = renderVariantSalesSection(reportVariants);
     const orderRows = (overview?.dailyRevenue || []).map((d, i) =>
       `<tr style="background:${i % 2 === 0 ? '#fff' : '#FFF8FA'}"><td style="padding:8px 12px;border-bottom:1px solid #F3F4F6;color:#999">${d._id || d.date}</td><td style="text-align:right;padding:8px 12px;border-bottom:1px solid #F3F4F6;font-weight:600;color:#16A34A">${toBDT(d.total || d.revenue || 0)}</td></tr>`
     ).join('');
@@ -412,11 +529,12 @@ export default function FinancePageClient() {
 
     let body = `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:28px">
       <div style="background:#FFF1F2;border:1px solid #FECDD3;border-radius:10px;padding:16px;text-align:center"><div style="font-size:9px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px">TOTAL REVENUE</div><div style="font-size:22px;font-weight:800;color:#DC143C">${toBDT(overview?.totalRevenue)}</div></div>
-      <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;padding:16px;text-align:center"><div style="font-size:9px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px">NET PROFIT</div><div style="font-size:22px;font-weight:800;color:#16A34A">${toBDT(netProfit)}</div></div>
+      <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;padding:16px;text-align:center"><div style="font-size:9px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px">${profitLabel.toUpperCase()}</div><div style="font-size:22px;font-weight:800;color:#16A34A">${toBDT(netProfit)}</div></div>
       <div style="background:#FFF1F2;border:1px solid #FECDD3;border-radius:10px;padding:16px;text-align:center"><div style="font-size:9px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px">ORDERS</div><div style="font-size:22px;font-weight:800;color:#DC143C">${overview?.orderCount || 0}</div></div>
     </div>`;
     if (orderRows) body += `<div style="margin-bottom:28px"><div class="section"><div class="bar"></div><h2 style="font-size:15px;font-weight:700;color:#1a1a1a">Daily Revenue Breakdown</h2></div><table><thead><tr><th>Date</th><th style="text-align:right">Revenue</th></tr></thead><tbody>${orderRows}</tbody></table></div>`;
     if (topProductsRows) body += `<div style="margin-bottom:28px"><div class="section"><div class="bar"></div><h2 style="font-size:15px;font-weight:700;color:#1a1a1a">Top Selling Products</h2></div><table><thead><tr><th>#</th><th>Product</th><th style="text-align:right">Qty</th><th style="text-align:right">Revenue</th></tr></thead><tbody>${topProductsRows}</tbody></table></div>`;
+    if (variantSalesSection) body += variantSalesSection;
     if (expenseDetailRows) body += `<div style="margin-bottom:28px"><div class="section"><div class="bar"></div><h2 style="font-size:15px;font-weight:700;color:#1a1a1a">Expense Details</h2></div><table><thead><tr><th>Title</th><th>Category</th><th style="text-align:right">Amount</th><th>Date</th><th>Notes</th></tr></thead><tbody>${expenseDetailRows}</tbody></table></div>`;
     if (orderStatusRows) body += `<div style="margin-bottom:20px"><div class="section"><div class="bar"></div><h2 style="font-size:15px;font-weight:700;color:#1a1a1a">Order Status</h2></div><div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">${orderStatusRows}</div></div>`;
 
@@ -481,6 +599,12 @@ export default function FinancePageClient() {
           >
             <FiDownload size={16} /> Full Report
           </button>
+          <button
+            onClick={downloadTransactionsCsv}
+            className="flex items-center gap-2 border border-gray-300 bg-white text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition text-sm"
+          >
+            <FiDownload size={16} /> Transactions CSV
+          </button>
         </div>
       </div>
 
@@ -517,6 +641,50 @@ export default function FinancePageClient() {
         </div>
       </div>
 
+      <form
+        onSubmit={(event) => { event.preventDefault(); fetchOverview(startDate, endDate, productCategory, productBrand, financeFilters); fetchTransactions(startDate, endDate, productCategory, productBrand, financeFilters, 1); }}
+        className="bg-white rounded-xl border border-gray-200 p-4 mb-6 no-print"
+      >
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <h2 className="font-semibold text-gray-900">Product and transaction filters</h2>
+          <button type="submit" className="flex items-center gap-1 bg-maybelline-pink text-white px-4 py-2 rounded-lg hover:bg-maybelline-magenta text-sm font-medium">
+            <FiFilter size={14} /> Apply filters
+          </button>
+          <button type="button" onClick={() => {
+            const cleared = { search: '', product: '', variant: '', sku: '', barcode: '', orderId: '', customer: '', paymentStatus: '', orderStatus: '', courier: '', profitable: '' };
+            setFinanceFilters(cleared);
+            setProductCategory('');
+            setProductBrand('');
+            fetchOverview(startDate, endDate, '', '', cleared);
+            fetchTransactions(startDate, endDate, '', '', cleared, 1);
+          }} className="border border-gray-300 px-4 py-2 rounded-lg text-sm text-gray-700 hover:bg-gray-50">
+            Clear filters
+          </button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {[
+            ['search', 'Search product, variant, SKU, order or customer'],
+            ['product', 'Product name'], ['variant', 'Variant name / color / size'],
+            ['sku', 'SKU'], ['barcode', 'Barcode'], ['orderId', 'Order number'], ['customer', 'Customer'],
+          ].map(([key, placeholder]) => (
+            <input key={key} value={financeFilters[key]} onChange={(event) => setFinanceFilters((current) => ({ ...current, [key]: event.target.value }))}
+              placeholder={placeholder} className="min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-maybelline-pink" />
+          ))}
+          <select value={financeFilters.paymentStatus} onChange={(event) => setFinanceFilters((current) => ({ ...current, paymentStatus: event.target.value }))} className="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <option value="">All payment statuses</option><option value="pending">Pending</option><option value="completed">Completed</option><option value="failed">Failed</option><option value="refunded">Refunded</option>
+          </select>
+          <select value={financeFilters.orderStatus} onChange={(event) => setFinanceFilters((current) => ({ ...current, orderStatus: event.target.value }))} className="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <option value="">All order statuses</option><option value="pending">Pending</option><option value="processing">Processing</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option><option value="refunded">Refunded</option>
+          </select>
+          <select value={financeFilters.courier} onChange={(event) => setFinanceFilters((current) => ({ ...current, courier: event.target.value }))} className="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <option value="">All couriers</option><option value="pathao">Pathao</option><option value="steadfast">Steadfast</option><option value="manual">Manual</option>
+          </select>
+          <select value={financeFilters.profitable} onChange={(event) => setFinanceFilters((current) => ({ ...current, profitable: event.target.value }))} className="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <option value="">Any profitability</option><option value="yes">Known profit above zero</option><option value="no">Known break-even or loss</option>
+          </select>
+        </div>
+      </form>
+
       {loading ? (
         <div className="text-center py-16 text-gray-500">Loading finance data...</div>
       ) : (
@@ -546,9 +714,10 @@ export default function FinancePageClient() {
                 <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center ${netProfit >= 0 ? 'bg-green-50' : 'bg-red-50'}`}>
                   <FiTrendingUp className={netProfit >= 0 ? 'text-green-600' : 'text-red-600'} size={18} />
                 </div>
-                <span className="text-xs sm:text-sm font-medium text-gray-600">Profit</span>
+                <span className="text-xs sm:text-sm font-medium text-gray-600">{profitLabel}</span>
               </div>
               <p className={`text-lg sm:text-2xl font-bold truncate ${netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>{toBDT(netProfit)}</p>
+              {(overview?.profitIsEstimated || overview?.profitBasis === 'gross_before_overhead') && <p className="mt-1 text-xs text-gray-500">{overview?.profitBasis === 'gross_before_overhead' ? 'Filtered product profit does not allocate general expenses.' : `Product cost coverage: ${overview?.costCoveragePercent || 0}%`}</p>}
             </div>
             <div className="bg-white border border-gray-200 rounded-xl p-3 sm:p-5">
               <div className="flex items-center gap-2 sm:gap-3 mb-2">
@@ -559,6 +728,19 @@ export default function FinancePageClient() {
               </div>
               <p className="text-lg sm:text-2xl font-bold text-black">{overview?.orderCount || 0}</p>
             </div>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 mb-6">
+            {[
+              ['Gross sales', overview?.grossSales], ['Net sales', overview?.netSales],
+              ['Discounts', overview?.discounts], ['Refunds', overview?.refunds], ['Returns', overview?.returns],
+              ['Shipping revenue', overview?.shippingRevenue], ['Shipping expenses', overview?.shippingExpenses],
+              ['Other expenses', overview?.otherExpenses],
+            ].map(([label, value]) => (
+              <div key={label} className="bg-white border border-gray-200 rounded-lg px-3 py-3">
+                <p className="text-xs text-gray-500">{label}</p><p className="mt-1 text-sm font-semibold text-gray-900">{toBDT(value)}</p>
+              </div>
+            ))}
           </div>
 
           {/* Charts Row */}
@@ -645,7 +827,7 @@ export default function FinancePageClient() {
                   placeholder="Search expenses..."
                   value={expenseSearch}
                   onChange={e => setExpenseSearch(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && fetchExpenses()}
+                  onKeyDown={e => e.key === 'Enter' && fetchExpenses(startDate, endDate, 1, expenseSearch, expenseCategory)}
                   className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-maybelline-pink focus:border-transparent w-full sm:w-48"
                 />
                 <select
@@ -821,15 +1003,15 @@ export default function FinancePageClient() {
             )}
           </div>
 
-          {/* Top Selling Products */}
+          {/* Product-level analytics */}
           {overview?.topProducts && (
             <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 mb-6">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
-                <h2 className="text-lg font-semibold text-black">Top Selling Products</h2>
+                <h2 className="text-lg font-semibold text-black">Product-level analytics</h2>
                 <div className="flex flex-wrap items-center gap-2">
                   <select
                     value={productCategory}
-                    onChange={e => { setProductCategory(e.target.value); fetchOverview(startDate, endDate, e.target.value, productBrand); }}
+                    onChange={e => { setProductCategory(e.target.value); fetchOverview(startDate, endDate, e.target.value, productBrand, financeFilters); fetchTransactions(startDate, endDate, e.target.value, productBrand, financeFilters, 1); }}
                     className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-maybelline-pink"
                   >
                     <option value="">All Categories</option>
@@ -839,7 +1021,7 @@ export default function FinancePageClient() {
                   </select>
                   <select
                     value={productBrand}
-                    onChange={e => { setProductBrand(e.target.value); fetchOverview(startDate, endDate, productCategory, e.target.value); }}
+                    onChange={e => { setProductBrand(e.target.value); fetchOverview(startDate, endDate, productCategory, e.target.value, financeFilters); fetchTransactions(startDate, endDate, productCategory, e.target.value, financeFilters, 1); }}
                     className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-maybelline-pink"
                   >
                     <option value="">All Brands</option>
@@ -849,8 +1031,16 @@ export default function FinancePageClient() {
                   </select>
                 </div>
               </div>
-              {overview.topProducts.length === 0 ? (
-                <p className="text-gray-400 text-sm py-8 text-center">No products found</p>
+              <div className="flex flex-wrap gap-2 mb-4 no-print">
+                {productMetricOptions.map(([key, label]) => (
+                  <button key={key} type="button" onClick={() => setProductMetric(key)}
+                    className={`px-3 py-1.5 rounded-full border text-xs ${productMetric === key ? 'border-maybelline-pink bg-maybelline-light text-maybelline-magenta font-semibold' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {!productRows.length ? (
+                <p className="text-gray-400 text-sm py-8 text-center">{productMetric === 'topProfitProducts' ? 'No fully costed product sales are available for profit ranking.' : 'No products found'}</p>
               ) : (
                 <>
                   {/* Desktop table */}
@@ -864,17 +1054,21 @@ export default function FinancePageClient() {
                           <th className="text-left py-3 px-3 font-medium text-gray-600">Brand</th>
                           <th className="text-right py-3 px-3 font-medium text-gray-600">Units Sold</th>
                           <th className="text-right py-3 px-3 font-medium text-gray-600">Revenue</th>
+                          <th className="text-right py-3 px-3 font-medium text-gray-600">Gross profit</th>
+                          <th className="text-right py-3 px-3 font-medium text-gray-600">Discounts / returns</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {overview.topProducts.map((p, i) => (
+                        {productRows.map((p, i) => (
                           <tr key={p._id || i} className="border-b border-gray-100 hover:bg-gray-50">
                             <td className="py-3 px-3 text-gray-500">{i + 1}</td>
                             <td className="py-3 px-3 text-black font-medium">{p.name || 'Unknown'}</td>
-                            <td className="py-3 px-3 text-gray-500">{Array.isArray(p.categories) ? p.categories.join(', ') : '-'}</td>
+                            <td className="py-3 px-3 text-gray-500">{Array.isArray(p.categories) ? p.categories.map(category => typeof category === 'string' ? category : category?.name).filter(Boolean).join(', ') : '-'}</td>
                             <td className="py-3 px-3 text-gray-500">{p.brand || '-'}</td>
                             <td className="py-3 px-3 text-right text-black">{p.totalSold || p.totalQuantity || 0}</td>
                             <td className="py-3 px-3 text-right text-black">{toBDT(p.revenue || p.totalRevenue || 0)}</td>
+                            <td className="py-3 px-3 text-right text-gray-700">{p.profit === null ? 'Unknown cost' : toBDT(p.profit)}</td>
+                            <td className="py-3 px-3 text-right text-gray-600">{toBDT(p.discounts)} / {toBDT(p.returns)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -882,17 +1076,17 @@ export default function FinancePageClient() {
                   </div>
                   {/* Mobile cards */}
                   <div className="sm:hidden space-y-2">
-                    {overview.topProducts.map((p, i) => (
+                    {productRows.map((p, i) => (
                       <div key={p._id || i} className="bg-gray-50 rounded-lg px-3 py-2.5">
                         <div className="flex items-center justify-between mb-1">
                           <div className="flex items-center gap-2 min-w-0">
                             <span className="text-xs font-bold text-maybelline-pink w-5">{i + 1}.</span>
                             <span className="text-sm font-medium text-black truncate">{p.name || 'Unknown'}</span>
                           </div>
-                          <span className="font-semibold text-black text-sm">{toBDT(p.revenue || p.totalRevenue || 0)}</span>
+                          <span className="font-semibold text-black text-sm">{productMetric === 'topProfitProducts' && p.profit !== null ? toBDT(p.profit) : toBDT(p.revenue || p.totalRevenue || 0)}</span>
                         </div>
                         <div className="flex items-center gap-3 text-xs text-gray-500 ml-7">
-                          <span>{Array.isArray(p.categories) ? p.categories[0] : 'N/A'}</span>
+                          <span>{Array.isArray(p.categories) ? (typeof p.categories[0] === 'string' ? p.categories[0] : p.categories[0]?.name) : 'N/A'}</span>
                           {p.brand && <span>• {p.brand}</span>}
                           <span>• {p.totalSold || p.totalQuantity || 0} sold</span>
                         </div>
@@ -904,28 +1098,88 @@ export default function FinancePageClient() {
             </div>
           )}
 
+          {overview?.topVariants && (
+            <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 mb-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                <div>
+                  <h2 className="text-lg font-semibold text-black">Variant-level sales</h2>
+                  <p className="text-xs text-gray-500">Sales are derived from saved order-item snapshots; missing cost data is left unreported as actual profit.</p>
+                </div>
+                {overview?.profitIsEstimated && <span className="text-xs rounded-full bg-amber-50 text-amber-800 px-3 py-1">Cost coverage {overview.costCoveragePercent || 0}% · estimate excludes unknown costs</span>}
+              </div>
+              <div className="flex flex-wrap gap-2 mb-4 no-print">
+                {variantMetricOptions.map(([key, label]) => (
+                  <button key={key} type="button" onClick={() => setVariantMetric(key)}
+                    className={`px-3 py-1.5 rounded-full border text-xs ${variantMetric === key ? 'border-maybelline-pink bg-maybelline-light text-maybelline-magenta font-semibold' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {!variantRows.length ? (
+                <p className="text-gray-400 text-sm py-8 text-center">No variant sales match these filters.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[1050px] text-sm">
+                    <thead><tr className="border-b border-gray-200 text-left text-xs text-gray-500">
+                      <th className="py-3 px-3">Product / variant</th><th className="py-3 px-3">Region</th><th className="py-3 px-3">Brand / category</th>
+                      <th className="py-3 px-3">SKU / barcode</th><th className="py-3 px-3 text-right">Qty</th><th className="py-3 px-3 text-right">Revenue</th>
+                      <th className="py-3 px-3 text-right">Known cost</th><th className="py-3 px-3 text-right">Profit</th><th className="py-3 px-3 text-right">Discounts / returns</th>
+                    </tr></thead>
+                    <tbody>{variantRows.map((variant) => (
+                      <tr key={variant._id} className="border-b border-gray-100 align-top hover:bg-gray-50">
+                        <td className="py-3 px-3"><div className="font-medium text-gray-900">{variant.productName || 'Product'}</div><div className="text-xs text-gray-500">{variant.variantName || [variant.color, variant.size].filter(Boolean).join(' / ') || 'Base product'}</div>
+                          {formatMeasureLine(variant) && <div className="text-xs text-gray-500">{formatMeasureLine(variant)}</div>}
+                        </td>
+                        <td className="py-3 px-3 text-gray-600">{variant.regionName || '—'}</td>
+                        <td className="py-3 px-3 text-gray-600">{[variant.brand, ...(variant.categories || [])].filter(Boolean).join(' · ') || '—'}</td>
+                        <td className="py-3 px-3 text-gray-600"><div>{variant.sku || '—'}</div><div className="text-xs text-gray-400">{variant.barcode || ''}</div></td>
+                        <td className="py-3 px-3 text-right text-gray-900">{variant.totalSold || 0}</td>
+                        <td className="py-3 px-3 text-right font-medium text-gray-900">{toBDT(variant.revenue)}</td>
+                        <td className="py-3 px-3 text-right text-gray-600">{variant.missingCostQuantity ? `Partial · ${toBDT(variant.knownCost)}` : toBDT(variant.knownCost)}</td>
+                        <td className="py-3 px-3 text-right">{variant.profit === null ? <span className="text-amber-700">Est. {toBDT(variant.estimatedProfit)}</span> : <span className={variant.profit >= 0 ? 'text-green-700' : 'text-red-700'}>{toBDT(variant.profit)}</span>}</td>
+                        <td className="py-3 px-3 text-right text-gray-600">{toBDT(variant.discounts)}<div className="text-xs text-gray-400">Returns {toBDT(variant.returns)}</div></td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 mb-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+              <div><h2 className="text-lg font-semibold text-black">Order item transactions</h2><p className="text-xs text-gray-500">{transactionPagination.total || 0} matching order items · original order and variant snapshots</p></div>
+              <div className="flex gap-2 no-print">
+                <button disabled={transactionPagination.page <= 1} onClick={() => fetchTransactions(startDate, endDate, productCategory, productBrand, financeFilters, transactionPagination.page - 1)} className="border rounded px-3 py-1.5 text-sm disabled:opacity-40">Previous</button>
+                <span className="px-2 py-1.5 text-sm text-gray-500">Page {transactionPagination.page || 1} of {transactionPagination.pages || 1}</span>
+                <button disabled={transactionPagination.page >= transactionPagination.pages} onClick={() => fetchTransactions(startDate, endDate, productCategory, productBrand, financeFilters, transactionPagination.page + 1)} className="border rounded px-3 py-1.5 text-sm disabled:opacity-40">Next</button>
+              </div>
+            </div>
+            {financeTransactions.length === 0 ? <p className="text-center text-sm text-gray-400 py-8">No order items match these filters.</p> : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[1100px] text-sm">
+                  <thead><tr className="border-b border-gray-200 text-left text-xs text-gray-500"><th className="py-3 px-3">Date / Order</th><th className="py-3 px-3">Customer</th><th className="py-3 px-3">Product / exact variant</th><th className="py-3 px-3">SKU / barcode</th><th className="py-3 px-3 text-right">Qty</th><th className="py-3 px-3 text-right">Final unit</th><th className="py-3 px-3 text-right">Revenue</th><th className="py-3 px-3 text-right">Cost / profit</th><th className="py-3 px-3">Status / courier</th></tr></thead>
+                  <tbody>{financeTransactions.map((row) => (
+                    <tr key={`${row.source}:${row.itemId || row.sourceId}`} className="border-b border-gray-100 align-top hover:bg-gray-50">
+                      <td className="py-3 px-3"><div className="text-xs text-gray-500">{formatDate(row.orderDate)}</div><a href="/admin/dashboard/orders" className="font-medium text-maybelline-magenta hover:underline">#{row.orderId}</a><div className="text-[11px] text-gray-400 uppercase">{row.source}</div></td>
+                      <td className="py-3 px-3 text-gray-700">{row.customer || 'Customer'}<div className="text-xs text-gray-400">{row.customerEmail || ''}</div></td>
+                      <td className="py-3 px-3"><div className="font-medium text-gray-900">{row.productName}</div><div className="text-xs text-gray-500">{row.variantName || 'Base product'}{row.regionName ? ` · ${row.regionName}` : ''}</div>{formatMeasureLine(row) && <div className="text-xs text-gray-400">{formatMeasureLine(row)}</div>}</td>
+                      <td className="py-3 px-3 text-gray-600"><div>{row.sku || '—'}</div><div className="text-xs text-gray-400">{row.barcode || ''}</div></td>
+                      <td className="py-3 px-3 text-right">{row.quantity}</td><td className="py-3 px-3 text-right">{toBDT(row.saleUnitPrice)}</td>
+                      <td className="py-3 px-3 text-right font-medium">{row.isSale ? toBDT(row.lineRevenue) : '—'}{row.refundAmount > 0 && <div className="text-xs text-red-600">Refund {toBDT(row.refundAmount)}</div>}{row.returnAmount > 0 && <div className="text-xs text-amber-700">Return {toBDT(row.returnAmount)}</div>}</td>
+                      <td className="py-3 px-3 text-right">{row.costPrice === null ? <span className="text-gray-400">Cost missing</span> : <><div>{toBDT(row.costAmount)}</div>{row.isSale && <div className={row.profit >= 0 ? 'text-xs text-green-700' : 'text-xs text-red-700'}>{toBDT(row.profit)} gross profit</div>}</>}</td>
+                      <td className="py-3 px-3 text-gray-600"><div className="capitalize">{row.orderStatus} / {row.paymentStatus}</div><div className="text-xs text-gray-400">{row.courier || 'In-store / no courier'}</div></td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
           {/* Order Status Breakdown */}
           {overview?.orderStatus && overview.orderStatus.length > 0 && (
             <div className="bg-white border border-gray-200 rounded-xl p-5 mb-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-black">Order Status Breakdown</h2>
-                <button
-                  onClick={async () => {
-                    if (!confirm('Force generate income? This will mark delivered orders with completed payment.')) return;
-                    try {
-                      await axios.post(`${API_URI}/api/admin/finance/generate-income`, {}, authHeaders());
-                      fetchOverview();
-                      alert('Income regenerated successfully!');
-                    } catch (err) {
-                      console.error('Failed to generate income', err);
-                      alert(err.response?.data?.message || 'Failed to generate income');
-                    }
-                  }}
-                  className="flex items-center gap-2 bg-maybelline-pink text-pure-white px-4 py-2 rounded-lg hover:bg-maybelline-magenta transition text-sm font-medium"
-                >
-                  <FiDollarSign size={14} /> Force Generate Income
-                </button>
-              </div>
+              <h2 className="text-lg font-semibold text-black mb-4">Order Status Breakdown</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {overview.orderStatus.map(s => (
                   <div key={s._id || s.status} className="flex items-center justify-between bg-gray-50 rounded-lg px-4 py-3">

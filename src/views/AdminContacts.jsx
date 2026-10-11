@@ -1,6 +1,6 @@
 'use client'
 import { getStorage, setStorage, removeStorage } from "../lib/storage"
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import { 
@@ -51,7 +51,7 @@ const AdminContacts = () => {
   });
   const router = useRouter();
 
-  const fetchContacts = async () => {
+  const fetchContacts = useCallback(async () => {
     try {
       setLoading(true);
       const params = new URLSearchParams({
@@ -74,9 +74,9 @@ const AdminContacts = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filters, pagination.page, pagination.limit]);
 
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/contact/admin/stats`, {
         headers: {
@@ -87,12 +87,12 @@ const AdminContacts = () => {
     } catch (error) {
       console.error('Error fetching stats:', error);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchContacts();
     fetchStats();
-  }, [pagination.page, filters]);
+  }, [fetchContacts, fetchStats]);
 
   const handleStatusUpdate = async (contactId, status, priority, adminNotes) => {
     try {
@@ -271,7 +271,7 @@ const AdminContacts = () => {
           <div className="bg-white border border-[#F4F4F4] rounded-lg p-6 shadow-sm">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-[#4A4A4A]">Today's Messages</p>
+                <p className="text-sm font-medium text-[#4A4A4A]">Today&apos;s Messages</p>
                 <p className="text-2xl font-bold text-[#1B1B1B]">{stats.today || 0}</p>
               </div>
               <div className="w-12 h-12 bg-[#F4F4F4] rounded-full flex items-center justify-center">
@@ -664,7 +664,7 @@ const AdminContacts = () => {
                 />
               </div>
               <p className="text-xs text-[#888888]">
-                This email is sent through BELORELLA's server email account and recorded on the contact.
+                This email is sent through BELORELLA&apos;s server email account and recorded on the contact.
               </p>
             </div>
 

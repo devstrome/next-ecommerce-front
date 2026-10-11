@@ -22,11 +22,15 @@ export const buildThermalReceiptHTML = (receipt, { width = 80 } = {}) => {
   const w = Number(width) === 58 ? 58 : 80;
   const bodyWidth = w - 4; // 2mm padding each side
   const fontPx = w === 58 ? 7.5 : 8.5;
+  const logoUrl = typeof window !== 'undefined' ? `${window.location.origin}/logo.png` : '/logo.png';
   const items = Array.isArray(receipt?.items) ? receipt.items : [];
   const cashier = receipt?.cashier
     ? `${receipt.cashier.firstName || ''} ${receipt.cashier.lastName || ''}`.trim()
     : '';
   const orderBarcode = barcodeDataUri(receipt?.orderNumber, { height: 34, width: 1.6 });
+  const loyaltyApplied = Number(receipt?.loyaltyAmountUsed) || 0;
+  const giftApplied = Number(receipt?.giftCodeAmountUsed) || 0;
+  const hasAppliedBalance = loyaltyApplied > 0 || giftApplied > 0;
 
   return `<!DOCTYPE html>
 <html>
@@ -50,6 +54,7 @@ export const buildThermalReceiptHTML = (receipt, { width = 80 } = {}) => {
     overflow-wrap: anywhere;
   }
   .center { text-align: center; }
+  .brand-logo { display: block; width: 8mm; height: 8mm; object-fit: contain; margin: 0 auto 1mm; }
   .brand { text-align: center; font-weight: bold; font-size: ${fontPx + 3}px; letter-spacing: 1px; margin-bottom: 1mm; }
   .tagline { text-align: center; font-size: ${fontPx - 1.5}px; margin-bottom: 2mm; }
   .divider { text-align: center; margin: 1.5mm 0; font-size: ${fontPx - 1}px; color: #000; }
@@ -74,6 +79,7 @@ export const buildThermalReceiptHTML = (receipt, { width = 80 } = {}) => {
 </style>
 </head>
 <body>
+  <img class="brand-logo" src="${esc(logoUrl)}" alt="${esc(BRAND.NAME)}" />
   <div class="brand">${BRAND.NAME}</div>
   <div class="tagline">${BRAND.TAGLINE}</div>
 
@@ -103,6 +109,7 @@ export const buildThermalReceiptHTML = (receipt, { width = 80 } = {}) => {
     <div class="item-name">${esc(item?.productName)}</div>
     ${measure ? `<div class="muted">${esc(measure)}</div>` : ''}
     ${v.color ? `<div class="muted">Color: ${esc(v.color)}</div>` : ''}
+    ${v.regionName ? `<div class="muted">Region: ${esc(v.regionName)}</div>` : ''}
     <div class="item-line"><span>${item?.quantity || 1} x ${formatBDT(item?.unitPrice)}</span><span>${formatBDT(item?.totalPrice)}</span></div>
     ${hasDiscount ? `<div class="muted">Was: ${formatBDT(item.unitPrice)}</div>` : ''}
   </div>`;
@@ -113,7 +120,10 @@ export const buildThermalReceiptHTML = (receipt, { width = 80 } = {}) => {
     <div class="total-row"><span>Subtotal</span><span>${formatBDT(receipt?.subtotal)}</span></div>
     ${(Number(receipt?.tax) || 0) > 0 ? `<div class="total-row"><span>Tax</span><span>${formatBDT(receipt.tax)}</span></div>` : ''}
     ${(Number(receipt?.discount) || 0) > 0 ? `<div class="total-row"><span>Discount</span><span>-${formatBDT(receipt.discount)}</span></div>` : ''}
-    <div class="total-row grand"><span>TOTAL</span><span>${formatBDT(receipt?.total)}</span></div>
+    ${hasAppliedBalance ? `<div class="total-row"><span>Order total</span><span>${formatBDT(receipt.total)}</span></div>` : ''}
+    ${loyaltyApplied > 0 ? `<div class="total-row"><span>Loyalty balance</span><span>-${formatBDT(loyaltyApplied)}</span></div>` : ''}
+    ${(Array.isArray(receipt?.giftCodeRedemptions) ? receipt.giftCodeRedemptions : []).filter((entry) => Number(entry?.appliedBDT) > 0).map((entry) => `<div class="total-row"><span>Gift ••••-${esc(entry.codeSuffix)}</span><span>-${formatBDT(entry.appliedBDT)}</span></div>`).join('')}
+    <div class="total-row grand"><span>${hasAppliedBalance ? 'AMOUNT DUE' : 'TOTAL'}</span><span>${formatBDT(Number.isFinite(Number(receipt?.amountDue)) ? receipt.amountDue : receipt?.total)}</span></div>
     <div class="total-row"><span>Payment</span><span>${esc(String(receipt?.paymentMethod || '').toUpperCase())}</span></div>
   </div>
 
@@ -139,12 +149,13 @@ export const printThermalReceipt = (receipt, options = {}) =>
 
 // ---------------------------------------------------------------------------
 // Thermal barcode labels — dedicated label geometry (NOT A4)
-// label: { barcode, productName, colorName, hexCode, size, measureType,
-//          unitName, price, discountPrice, qrDataUri? }
+// label: { barcode (Belorella generated), realBarcode (manufacturer), productName, colorName, hexCode, size, measureType,
+//          unitName, regionName, price, discountPrice, qrDataUri? }
 // ---------------------------------------------------------------------------
 export const buildThermalLabelsHTML = (labels, { paperWidth = 50, labelHeight = 30 } = {}) => {
   const pw = Number(paperWidth) || 50;
   const lh = Number(labelHeight) || 30;
+  const compactLabel = lh <= 25;
 
   const rows = (Array.isArray(labels) ? labels : [])
     .map((l) => {
@@ -160,12 +171,16 @@ export const buildThermalLabelsHTML = (labels, { paperWidth = 50, labelHeight = 
       const barcode = l?.barcode ? barcodeImg(l.barcode, 'width:100%;height:7mm;', { height: 26, width: 1.2 }) : '';
       const qr = l?.qrDataUri ? `<img src="${l.qrDataUri}" alt="QR" style="height:9mm;width:9mm;" />` : '';
       return `
-<div class="label">
-  <div class="lbl-name">${esc(l?.productName || '')}</div>
-  ${color}
-  ${(measure || price) ? `<div class="lbl-row"><span>${esc(measure)}</span><span class="lbl-price">${price}</span></div>` : ''}
-  <div class="lbl-barcode">${barcode}${qr}</div>
-  ${l?.barcode ? `<div class="lbl-code">${esc(l.barcode)}</div>` : ''}
+<div class="label${compactLabel ? ' label-compact' : ''}">
+  <div class="lbl-head"><div class="lbl-name">${esc(l?.productName || '')}</div><div class="lbl-brand">${BRAND.NAME}</div></div>
+  <div class="lbl-attributes">${color}${l?.regionName ? `<span class="lbl-region">REGION · ${esc(l.regionName)}</span>` : ''}</div>
+  ${(measure || price) ? `<div class="lbl-row"><span class="lbl-measure">${esc(measure)}</span><span class="lbl-price">${price}</span></div>` : ''}
+  <div class="lbl-codes">
+    ${barcode ? `<div class="lbl-barcode"><span class="lbl-code-label">MY BARCODE</span>${barcode}<span class="lbl-code">${esc(l.barcode)}</span></div>` : ''}
+    ${qr ? `<div class="lbl-qr"><span class="lbl-code-label">SCAN</span>${qr}</div>` : ''}
+    ${!barcode && !qr ? '<div class="lbl-no-code">No print code available</div>' : ''}
+  </div>
+  ${l?.realBarcode ? `<div class="lbl-real-code">Product barcode: ${esc(l.realBarcode)}</div>` : ''}
 </div>`;
     })
     .join('');
@@ -182,23 +197,47 @@ export const buildThermalLabelsHTML = (labels, { paperWidth = 50, labelHeight = 
   .label {
     width: ${pw}mm;
     height: ${lh}mm;
-    padding: 1.5mm 2mm;
+    padding: 1.3mm 1.8mm;
     overflow: hidden;
     break-after: page;
     page-break-after: always;
     display: flex;
     flex-direction: column;
+    gap: 0.35mm;
+    border-top: 0.5mm solid #B1123B;
   }
   .label:last-child { break-after: auto; page-break-after: auto; }
-  .lbl-name { font-weight: 700; font-size: 7.5pt; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .lbl-color { font-size: 6pt; color: #333; display: flex; align-items: center; gap: 1mm; margin-top: 0.3mm; }
-  .swatch { display: inline-block; width: 2.2mm; height: 2.2mm; border: 0.3px solid #999; }
-  .lbl-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 6.5pt; margin-top: 0.3mm; }
-  .lbl-price { font-weight: 700; }
-  .old { text-decoration: line-through; color: #777; font-weight: 400; margin-right: 1mm; }
-  .lbl-barcode { flex: 1; display: flex; align-items: center; justify-content: center; gap: 1.5mm; min-height: 0; }
-  .lbl-barcode img { max-width: 100%; max-height: 100%; }
-  .lbl-code { text-align: center; font-family: 'Courier New', monospace; font-size: 5.5pt; letter-spacing: 0.3px; }
+  .lbl-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1mm; }
+  .lbl-brand { color: #B1123B; font-size: 4.4pt; font-weight: 800; letter-spacing: 0.7px; line-height: 1; white-space: nowrap; padding-top: 0.3mm; }
+  .lbl-name { flex: 1; min-width: 0; font-weight: 750; font-size: 7.2pt; line-height: 1.08; max-height: 7.8mm; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+  .lbl-attributes { min-height: 2.4mm; display: flex; align-items: center; gap: 2mm; overflow: hidden; color: #4B5563; font-size: 5.5pt; white-space: nowrap; }
+  .lbl-color { min-width: 0; font-size: 5.5pt; display: inline-flex; align-items: center; gap: 0.8mm; overflow: hidden; text-overflow: ellipsis; }
+  .lbl-region { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .swatch { flex: none; display: inline-block; width: 2mm; height: 2mm; border: 0.3px solid #9CA3AF; border-radius: 50%; }
+  .lbl-row { display: flex; justify-content: space-between; align-items: baseline; gap: 1mm; font-size: 5.8pt; border-top: 0.2mm solid #E5E7EB; padding-top: 0.4mm; }
+  .lbl-measure { color: #4B5563; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lbl-price { font-weight: 800; color: #B1123B; white-space: nowrap; }
+  .old { text-decoration: line-through; color: #777; font-weight: 400; margin-right: 0.8mm; font-size: 5pt; }
+  .lbl-codes { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 1mm; }
+  .lbl-barcode { min-width: 0; display: flex; flex-direction: column; align-items: stretch; justify-content: center; gap: 0.2mm; }
+  .lbl-barcode img { display: block; width: 100%; max-height: 6.8mm; object-fit: contain; }
+  .lbl-qr { display: flex; flex-direction: column; align-items: center; gap: 0.2mm; }
+  .lbl-qr img { display: block; width: 8.8mm !important; height: 8.8mm !important; object-fit: contain; }
+  .lbl-code-label { color: #6B7280; font-size: 3.8pt; font-weight: 700; letter-spacing: 0.4px; }
+  .lbl-code { text-align: center; font-family: 'Courier New', monospace; font-size: 4.6pt; line-height: 1; overflow-wrap: anywhere; }
+  .lbl-no-code { color: #6B7280; font-size: 5pt; }
+  .lbl-real-code { color: #6B7280; font-size: 4.2pt; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .label-compact { padding: 0.9mm 1.5mm; gap: 0.2mm; }
+  .label-compact .lbl-brand { font-size: 3.8pt; }
+  .label-compact .lbl-name { font-size: 6.3pt; max-height: 3.3mm; -webkit-line-clamp: 1; }
+  .label-compact .lbl-attributes { min-height: 1.9mm; font-size: 4.8pt; }
+  .label-compact .lbl-color, .label-compact .lbl-region { font-size: 4.8pt; }
+  .label-compact .lbl-row { font-size: 5.1pt; padding-top: 0.2mm; }
+  .label-compact .lbl-barcode img { max-height: 4.8mm; }
+  .label-compact .lbl-qr img { width: 6.8mm !important; height: 6.8mm !important; }
+  .label-compact .lbl-code-label { font-size: 3.2pt; }
+  .label-compact .lbl-code { font-size: 3.8pt; }
+  .label-compact .lbl-real-code { font-size: 3.5pt; }
   @media print { * { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
 </style>
 </head>

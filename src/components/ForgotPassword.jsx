@@ -201,7 +201,7 @@ function ForgotPassword({ embedded = false }) {
             {step === 1 && (
               <div className="space-y-4">
                 <p className="text-[#4A4A4A] text-center">
-                  Enter your email address and we'll send you a verification code to reset your password.
+                  Enter your email address and we&apos;ll send you a verification code to reset your password.
                 </p>
                 <div>
                   <label htmlFor="email" className="block mb-2 text-sm font-medium text-[#1B1B1B]">
@@ -234,7 +234,7 @@ function ForgotPassword({ embedded = false }) {
             {step === 2 && (
               <div className="space-y-4">
                 <p className="text-[#4A4A4A] text-center">
-                  We've sent a 6-digit verification code to <strong>{email}</strong>
+                  We&apos;ve sent a 6-digit verification code to <strong>{email}</strong>
                 </p>
                 <div>
                   <label htmlFor="otp" className="block mb-2 text-sm font-medium text-[#1B1B1B]">

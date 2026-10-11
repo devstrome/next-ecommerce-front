@@ -12,9 +12,9 @@ import { useAdminProduct } from '../context/AdminProductContext';
 
 const ProductCreate = () => {
   const {
-    categoryTree, colors, sizes, genders, badges, measureTypes, shippingTypes,
+    categoryTree, colors, sizes, genders, badges, measureTypes, shippingTypes, regions,
     createCategory, createBrand, createColor, createSize, createGender, createBadge,
-    createMeasureType, findCategoryByName,
+    createMeasureType, createRegion, findCategoryByName,
   } = useAdminProduct();
   const [selectedCategoryObj, setSelectedCategoryObj] = useState(null);
   const [selectedSubcategoryObj, setSelectedSubcategoryObj] = useState(null);
@@ -31,6 +31,7 @@ const ProductCreate = () => {
     gender: '',
     measureType: '',
     unitName: '',
+    isDigitalProduct: false,
     isPreOrder: false,
     preOrderEstimatedDate: '',
     broadcast: false,
@@ -51,6 +52,7 @@ const ProductCreate = () => {
   const [variant, setVariant] = useState({
     selectedColor: '',
     selectedColorHex: '',
+    regionId: '',
     sizes: [],
     prices: [],
     discountPrices: [],
@@ -67,6 +69,7 @@ const ProductCreate = () => {
   const [successMessage, setSuccessMessage] = useState('');
   const [isVariantVisible, setIsVariantVisible] = useState(false);
   const [variantCount, setVariantCount] = useState(0);
+  const [creatingRegion, setCreatingRegion] = useState(false);
 
   const router = useRouter();
 
@@ -83,6 +86,7 @@ const ProductCreate = () => {
     unitName: m.unitName,
   }));
   const shippingOptions = shippingTypes.map(s => ({ value: s._id, label: `${s.name} (BDT ${Number(s.charge).toFixed(2)}, ${s.estimatedDays}d)` }));
+  const regionOptions = regions.map(region => ({ value: region._id, label: region.name }));
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -151,7 +155,7 @@ const ProductCreate = () => {
 
   const handleSizePriceChange = (index, value, type) => {
     setVariant((prev) => {
-      const updatedArray = [...prev[type]];
+      const updatedArray = [...(prev[type] || [])];
       updatedArray[index] = value;
       return { ...prev, [type]: updatedArray };
     });
@@ -218,9 +222,34 @@ const ProductCreate = () => {
   const handleCreateSize = async (inputValue) => {
     try {
       await createSize(inputValue);
-      setVariant(prev => ({ ...prev, sizes: [...prev.sizes, inputValue] }));
+      setVariant(prev => ({
+        ...prev,
+        sizes: [...(prev.sizes || []), inputValue],
+        prices: [...(prev.prices || []), ''],
+        discountPrices: [...(prev.discountPrices || []), ''],
+        stockBySize: [...(prev.stockBySize || []), ''],
+      }));
     } catch (err) {
       alert(err.message || 'Failed to create size');
+    }
+  };
+
+  const handleCreateRegion = async (inputValue) => {
+    const name = String(inputValue || '').trim();
+    if (!name) return;
+    const existing = regions.find(region => region.name.trim().toLowerCase() === name.toLowerCase());
+    if (existing) {
+      setVariant(prev => ({ ...prev, regionId: existing._id }));
+      return;
+    }
+    setCreatingRegion(true);
+    try {
+      const region = await createRegion(name);
+      setVariant(prev => ({ ...prev, regionId: region._id }));
+    } catch (err) {
+      alert(err.message || 'Failed to create region');
+    } finally {
+      setCreatingRegion(false);
     }
   };
 
@@ -333,8 +362,8 @@ const ProductCreate = () => {
   };
 
   const saveVariant = () => {
-    if (!variant.selectedColor || variant.sizes.length === 0 || !variant.stockBySize.length) {
-      alert('Please fill in all required fields for the variant.');
+    if (!variant.selectedColor || !variant.regionId || variant.sizes.length === 0 || !variant.stockBySize.length) {
+      alert('Select a region and complete the required variant fields.');
       return;
     }
 
@@ -362,6 +391,7 @@ const ProductCreate = () => {
     setVariant({
       selectedColor: '',
       selectedColorHex: '',
+      regionId: '',
       sizes: [],
       prices: [],
       discountPrices: [],
@@ -379,9 +409,20 @@ const ProductCreate = () => {
 
   const editVariant = (index) => {
     const v = product.variants[index];
+    const sizes = Array.isArray(v.sizes) ? v.sizes : [];
     setVariant({
       ...v,
-      images: v.images.map(imgObj =>
+      regionId: v.regionId || '',
+      sizes,
+      prices: sizes.map((_, i) => v.prices?.[i] ?? ''),
+      discountPrices: sizes.map((_, i) => v.discountPrices?.[i] ?? ''),
+      stockBySize: sizes.map((_, i) => v.stockBySize?.[i] ?? ''),
+      badgeNames: Array.isArray(v.badgeNames) ? v.badgeNames : [],
+      badgeColors: Array.isArray(v.badgeColors) ? v.badgeColors : [],
+      specifications: Array.isArray(v.specifications) ? v.specifications : [],
+      shippingIds: Array.isArray(v.shippingIds) ? v.shippingIds : [],
+      description: v.description || '',
+      images: (Array.isArray(v.images) ? v.images : []).map(imgObj =>
         imgObj.preview
           ? imgObj
           : { ...imgObj, preview: URL.createObjectURL(imgObj.file) }
@@ -405,6 +446,7 @@ const ProductCreate = () => {
       setVariant({
         selectedColor: '',
         selectedColorHex: '',
+        regionId: '',
         sizes: [],
         prices: [],
         discountPrices: [],
@@ -424,6 +466,7 @@ const ProductCreate = () => {
     setVariant({
       selectedColor: '',
       selectedColorHex: '',
+      regionId: '',
       sizes: [],
       prices: [],
       discountPrices: [],
@@ -460,8 +503,9 @@ const ProductCreate = () => {
       formData.append('gender', product.gender);
       formData.append('measureType', product.measureType);
       formData.append('unitName', product.unitName);
+      formData.append('isDigitalProduct', product.isDigitalProduct ? 'true' : 'false');
       formData.append('isPreOrder', product.isPreOrder ? 'true' : 'false');
-      if (product.preOrderEstimatedDate) formData.append('preOrderEstimatedDate', product.preOrderEstimatedDate);
+      formData.append('preOrderEstimatedDate', product.isPreOrder ? product.preOrderEstimatedDate : '');
       formData.append('comingSoon', product.comingSoon ? 'true' : 'false');
       formData.append('mainImage', product.mainImage);
       formData.append('seo', JSON.stringify(product.seo));
@@ -469,6 +513,7 @@ const ProductCreate = () => {
       const variantsWithoutImages = product.variants.map((variant) => ({
         colorName: variant.selectedColor,
         hexCode: variant.selectedColorHex,
+        regionId: variant.regionId,
         sizes: variant.sizes,
         prices: variant.prices,
         discountPrices: variant.discountPrices,
@@ -509,6 +554,7 @@ const ProductCreate = () => {
         gender: '',
         measureType: '',
         unitName: '',
+        isDigitalProduct: false,
         isPreOrder: false,
         preOrderEstimatedDate: '',
         broadcast: false,
@@ -522,6 +568,7 @@ const ProductCreate = () => {
       setVariant({
         selectedColor: '',
         selectedColorHex: '',
+        regionId: '',
         sizes: [],
         prices: [],
         discountPrices: [],
@@ -636,10 +683,23 @@ const ProductCreate = () => {
             <input
               type="checkbox"
               checked={product.isPreOrder}
-              onChange={(e) => setProduct(prev => ({ ...prev, isPreOrder: e.target.checked }))}
+              onChange={(e) => setProduct(prev => ({ ...prev, isPreOrder: e.target.checked, preOrderEstimatedDate: e.target.checked ? prev.preOrderEstimatedDate : '' }))}
               className="accent-maybelline-pink"
             />
             Pre-order product
+          </label>
+
+          <label className="mb-4 flex cursor-pointer items-start gap-3 rounded-lg border border-cool-gray bg-white p-4 text-sm text-dark-gray">
+            <input
+              type="checkbox"
+              checked={product.isDigitalProduct}
+              onChange={(e) => setProduct((prev) => ({ ...prev, isDigitalProduct: e.target.checked }))}
+              className="mt-0.5 accent-maybelline-pink"
+            />
+            <span>
+              <span className="block font-semibold text-black">Digital product · apply to every variant</span>
+              <span className="mt-1 block text-xs text-dark-gray">Checkout will require bKash or Nagad payment and a transaction ID.</span>
+            </span>
           </label>
 
           {product.isPreOrder && (
@@ -795,6 +855,26 @@ const ProductCreate = () => {
                     )}
                   </div>
 
+                  <div>
+                    <label className="block mb-2 text-sm font-medium text-dark-gray">Region</label>
+                    <Creatable
+                      name="regionId"
+                      options={regionOptions}
+                      value={regionOptions.find(option => option.value === variant.regionId) || null}
+                      onChange={(option) => setVariant(prev => ({ ...prev, regionId: option?.value || '' }))}
+                      onCreateOption={handleCreateRegion}
+                      isLoading={creatingRegion}
+                      isSearchable
+                      isClearable
+                      required
+                      className="mb-4"
+                      classNamePrefix="select"
+                      placeholder="Search or create a region"
+                      formatCreateLabel={(input) => `Create region “${input}”`}
+                    />
+                    {regions.length === 0 && <p className="-mt-3 mb-4 text-xs text-dark-gray">Type a region name above and choose Create to add it.</p>}
+                  </div>
+
                   <input
                     type="number"
                     name="stock"
@@ -923,7 +1003,7 @@ const ProductCreate = () => {
                       <input
                         type="number"
                         placeholder="Price"
-                        value={variant.prices[index]}
+                        value={variant.prices?.[index] ?? ''}
                         onChange={(e) => handleSizePriceChange(index, e.target.value, 'prices')}
                         className="w-50 px-2 py-1 border border-cool-gray bg-white text-black"
                         required
@@ -931,14 +1011,14 @@ const ProductCreate = () => {
                       <input
                         type="number"
                         placeholder="Discount Price"
-                        value={variant.discountPrices[index]}
+                        value={variant.discountPrices?.[index] ?? ''}
                         onChange={(e) => handleSizePriceChange(index, e.target.value, 'discountPrices')}
                         className="w-50 px-2 py-1 border border-cool-gray bg-white text-black"
                       />
                       <input
                         type="number"
                         placeholder="Stock"
-                        value={variant.stockBySize[index]}
+                        value={variant.stockBySize?.[index] ?? ''}
                         onChange={(e) => {
                           const newStock = [...variant.stockBySize];
                           newStock[index] = e.target.value;

@@ -4,9 +4,12 @@ import React, { useEffect, useState, useContext, useRef } from 'react';
 import Link from "next/link"
 import { useRouter, useParams } from "next/navigation";
 import { UserContext } from '../context/UserContext';
+import { CartContext } from '../context/CartContext';
 import RefundStatusTracker from '../components/RefundStatusTracker';
+import MiniCart from '../components/MiniCart';
 import { formatMeasureLine } from '../lib/measure';
 import { formatBDT } from '../config/brand';
+import { getPublicCurrentUrl } from '../lib/publicSiteUrl';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import io from 'socket.io-client';
@@ -26,21 +29,25 @@ import {
   FaShare,
   FaEye,
   FaCheck,
+  FaCopy,
   FaSpinner,
   FaUndoAlt,
   FaTimes,
-  FaUpload
+  FaUpload,
+  FaShoppingCart,
 } from 'react-icons/fa';
 
 function OrderDetails() {
   const { orderId } = useParams();
   const { user } = useContext(UserContext);
+  const { cartItems = [] } = useContext(CartContext);
   const router = useRouter();
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [cancelLoading, setCancelLoading] = useState(false);
   const [showRefundModal, setShowRefundModal] = useState(false);
+  const [miniCartOpen, setMiniCartOpen] = useState(false);
   const [refundReason, setRefundReason] = useState('');
   const [refundNote, setRefundNote] = useState('');
   const [refundSubmitting, setRefundSubmitting] = useState(false);
@@ -54,6 +61,30 @@ function OrderDetails() {
 
   const formatCurrency = (amount, currency = 'BDT', locale = 'en-BD') => {
     return formatBDT(amount);
+  };
+
+  const copyDigitalValue = async (label, value) => {
+    const text = String(value ?? '');
+    if (!text.trim()) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const input = document.createElement('textarea');
+        input.value = text;
+        input.setAttribute('readonly', '');
+        input.style.position = 'fixed';
+        input.style.opacity = '0';
+        document.body.appendChild(input);
+        input.select();
+        const copied = document.execCommand('copy');
+        input.remove();
+        if (!copied) throw new Error('Clipboard is unavailable');
+      }
+      toast.success(`${label} copied`);
+    } catch {
+      toast.error(`Could not copy ${label.toLowerCase()}`);
+    }
   };
 
   const formatDate = (dateString) => {
@@ -328,18 +359,19 @@ function OrderDetails() {
   };
 
   const handleShare = async () => {
+    const url = getPublicCurrentUrl();
     if (navigator.share) {
       try {
         await navigator.share({
           title: `Order #${order?.orderId}`,
           text: `Check out my order #${order?.orderId}`,
-          url: window.location.href
+          url
         });
       } catch (err) {
         console.log('Error sharing:', err);
       }
     } else {
-      navigator.clipboard.writeText(window.location.href);
+      navigator.clipboard.writeText(url);
       toast.success('Order link copied to clipboard');
     }
   };
@@ -379,7 +411,7 @@ function OrderDetails() {
         <div className="text-center">
           <FaBox className="text-4xl text-mid-gray mx-auto mb-4" />
           <h2 className="text-xl font-semibold text-black mb-2 font-heading">Order Not Found</h2>
-          <p className="text-dark-gray mb-4 font-sans">The order you're looking for doesn't exist.</p>
+          <p className="text-dark-gray mb-4 font-sans">The order you&apos;re looking for doesn&apos;t exist.</p>
           <Link href="/profile/orders"
             className="btn-primary"
           >
@@ -393,8 +425,26 @@ function OrderDetails() {
 
   const currentStep = getStatusStep(order.orderStatus);
   const totalSteps = 4;
+  const mobileCartCount = cartItems.reduce((count, item) => count + (Number(item.quantity) || 0), 0);
+  const mobileMiniCartButton = (
+    <button
+      type="button"
+      onClick={() => setMiniCartOpen(true)}
+      aria-label={`Open mini cart${mobileCartCount ? `, ${mobileCartCount} items` : ''}`}
+      title="Open mini cart"
+      className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-rose-200 bg-white text-[#bd1238] shadow-sm transition hover:bg-rose-50 active:scale-95 sm:hidden"
+    >
+      <FaShoppingCart size={18} />
+      {mobileCartCount > 0 && (
+        <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#d70b3d] px-1 text-[10px] font-bold text-white ring-2 ring-white">
+          {mobileCartCount > 99 ? '99+' : mobileCartCount}
+        </span>
+      )}
+    </button>
+  );
 
   return (
+    <>
     <div className="min-h-screen bg-pure-white">
       <div className="card rounded-none border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -654,8 +704,10 @@ function OrderDetails() {
                     <div className="flex-1">
                       <h3 className="font-semibold text-black font-heading">{item.name}</h3>
                       <div className="text-sm text-dark-gray space-y-1 mt-1 font-sans">
+                        {item.isPreOrder && <p className="font-semibold text-maybelline-pink">Pre-order{item.preOrderEstimatedDate ? ` · Est. ${new Date(item.preOrderEstimatedDate).toLocaleDateString()}` : ' · ETA to be confirmed'}</p>}
                         {item.color && <p>Color: {item.color}</p>}
-                        {item.size && (
+                        {(item.regionName || item.regionId?.name || item.configuration?.regionName) && <p>Region: {item.regionName || item.regionId?.name || item.configuration?.regionName}</p>}
+                        {formatMeasureLine(item) && (
                           <p>
                             {formatMeasureLine(item)}
                           </p>
@@ -680,6 +732,55 @@ function OrderDetails() {
                 ))}
               </div>
             </div>
+
+            {(order.items || []).some((item) => item.isDigitalProduct && item.digitalFulfillment && Object.values(item.digitalFulfillment).some(Boolean)) && (
+              <div id="digital-delivery" className="card rounded-xl border border-rose-200 bg-rose-50/50 p-6">
+                <h2 className="text-lg font-semibold text-black mb-2 font-heading">Your digital delivery</h2>
+                <p className="mb-4 text-sm text-dark-gray">Keep these access details private. They are also sent to your email.</p>
+                <div className="space-y-4">
+                  {(order.items || []).filter((item) => item.isDigitalProduct && item.digitalFulfillment && Object.values(item.digitalFulfillment).some(Boolean)).map((item, index) => (
+                    <section id={`digital-${item._id || index}`} key={item._id || index} className="rounded-lg border border-rose-100 bg-white p-4">
+                      <h3 className="font-semibold text-black">{item.name}</h3>
+                      {item.digitalFulfillment.codes?.length > 0 && (
+                        <div className="mt-3 rounded-md border border-rose-100 bg-rose-50 p-3">
+                          <p className="text-xs font-medium uppercase tracking-wide text-gray-600">Your redemption code{item.digitalFulfillment.codes.length === 1 ? '' : 's'}</p>
+                          <div className="mt-2 space-y-2">
+                            {item.digitalFulfillment.codes.map((code, codeIndex) => (
+                              <div id={`digital-${item._id || index}-code-${codeIndex}`} key={`${item._id || index}-code-${codeIndex}`} className="flex flex-wrap items-center justify-between gap-2 rounded bg-white px-3 py-2">
+                                <p className="min-w-0 flex-1 break-all font-mono text-sm text-gray-900">{code}</p>
+                                <button type="button" onClick={() => copyDigitalValue(`Code ${codeIndex + 1}`, code)} className="inline-flex shrink-0 items-center gap-1 rounded-md border border-rose-200 px-2 py-1 text-xs font-semibold text-rose-800 hover:bg-rose-50"><FaCopy /> Copy</button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        {[
+                          ['code', 'Redemption code / license key'],
+                          ['loginId', 'Account ID / login'],
+                          ['username', 'Username / email'],
+                          ['password', 'Password'],
+                          ['pin', 'PIN'],
+                          ['accessUrl', 'Access / redemption URL'],
+                          ['expiry', 'Expiry date / period'],
+                          ['serialNumber', 'Serial number'],
+                          ['instructions', 'How to use'],
+                          ['additionalDetails', 'Additional details'],
+                        ].filter(([field]) => item.digitalFulfillment[field]).map(([field, label]) => (
+                          <div id={`digital-${item._id || index}-${field}`} key={field} className="min-w-0 rounded-md bg-gray-50 p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{label}</p>
+                              <button type="button" onClick={() => copyDigitalValue(label, item.digitalFulfillment[field])} className="inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-semibold text-rose-800 hover:bg-rose-50"><FaCopy /> Copy</button>
+                            </div>
+                            <p className="mt-1 whitespace-pre-wrap break-words font-mono text-sm text-gray-900">{item.digitalFulfillment[field]}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {order.shipping && (
               <div className="card rounded-xl p-6">
@@ -729,9 +830,27 @@ function OrderDetails() {
                     <span className="font-medium text-black">{formatCurrency(fee.amount || 0)}</span>
                   </div>
                 ))}
+                {Number(order.loyaltyAmountUsed) > 0 && (
+                  <>
+                    <div className="flex justify-between text-green-700">
+                      <span className="font-sans">Loyalty balance applied</span>
+                      <span className="font-medium">-{formatCurrency(order.loyaltyAmountUsed)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-dark-gray font-sans">Amount due</span>
+                      <span className="font-medium text-black">{formatCurrency(order.amountDue)}</span>
+                    </div>
+                  </>
+                )}
+                {Number(order.loyaltyRewardEarned) > 0 && (
+                  <div className="flex justify-between text-[#B1123B]">
+                    <span className="font-sans">Loyalty balance earned</span>
+                    <span className="font-medium">{formatCurrency(order.loyaltyRewardEarned)}</span>
+                  </div>
+                )}
                 <div className="border-t border-cool-gray pt-3">
                   <div className="flex justify-between text-lg font-bold">
-                    <span className="text-black">Total</span>
+                    <span className="text-black">{Number(order.loyaltyAmountUsed) > 0 ? 'Order total' : 'Total'}</span>
                     <span className="text-maybelline-pink">{formatCurrency(order.grandTotal)}</span>
                   </div>
                 </div>
@@ -864,6 +983,30 @@ function OrderDetails() {
                     </div>
                   )}
                   {canRequestRefund(order) && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          setRefundReason('');
+                          setRefundNote('');
+                          setRefundImage('');
+                          setRefundBkash('');
+                          setShowRefundModal(true);
+                        }}
+                        className="flex min-w-0 flex-1 items-center justify-center gap-2 rounded-lg border border-cool-gray bg-pure-white px-3 py-3 font-sans text-black transition-colors hover:border-maybelline-pink hover:text-maybelline-pink"
+                      >
+                        <FaUndoAlt />
+                        Request Refund Again
+                      </button>
+                      {mobileMiniCartButton}
+                    </div>
+                  )}
+                </div>
+              ) : canRequestRefund(order) ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-dark-gray font-sans">
+                    If something is wrong with your order, you can request a refund. Our team will review your request.
+                  </p>
+                  <div className="flex gap-2">
                     <button
                       onClick={() => {
                         setRefundReason('');
@@ -872,31 +1015,13 @@ function OrderDetails() {
                         setRefundBkash('');
                         setShowRefundModal(true);
                       }}
-                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-pure-white text-black border border-cool-gray rounded-lg hover:border-maybelline-pink hover:text-maybelline-pink transition-colors font-sans"
+                      className="flex min-w-0 flex-1 items-center justify-center gap-2 rounded-lg border border-cool-gray bg-pure-white px-3 py-3 font-sans text-black transition-colors hover:border-maybelline-pink hover:text-maybelline-pink"
                     >
                       <FaUndoAlt />
-                      Request Refund Again
+                      Request Refund
                     </button>
-                  )}
-                </div>
-              ) : canRequestRefund(order) ? (
-                <div className="space-y-3">
-                  <p className="text-sm text-dark-gray font-sans">
-                    If something is wrong with your order, you can request a refund. Our team will review your request.
-                  </p>
-                  <button
-                    onClick={() => {
-                      setRefundReason('');
-                      setRefundNote('');
-                      setRefundImage('');
-                      setRefundBkash('');
-                      setShowRefundModal(true);
-                    }}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-pure-white text-black border border-cool-gray rounded-lg hover:border-maybelline-pink hover:text-maybelline-pink transition-colors font-sans"
-                  >
-                    <FaUndoAlt />
-                    Request Refund
-                  </button>
+                    {mobileMiniCartButton}
+                  </div>
                 </div>
               ) : (
                 <p className="text-sm text-dark-gray font-sans">
@@ -1050,6 +1175,8 @@ function OrderDetails() {
         </div>
       )}
     </div>
+    <MiniCart open={miniCartOpen} onClose={() => setMiniCartOpen(false)} />
+    </>
   );
 }
 

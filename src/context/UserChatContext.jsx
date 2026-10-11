@@ -4,7 +4,9 @@ import React, { createContext, useContext, useState, useEffect, useRef, useMemo 
 import axios from "axios";
 import { UserContext } from "./UserContext";
 import { io } from "socket.io-client";
+import { notificationFeedStorage, showBrowserNotification as showNativeBrowserNotification } from '../lib/browserNotifications';
 
+const API_URI = process.env.NEXT_PUBLIC_API_URI;
 const UserChatContext = createContext();
 
 export const useUserChat = () => {
@@ -25,6 +27,7 @@ export const UserChatProvider = ({ children }) => {
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [socket, setSocket] = useState(null);
+  const socketRef = useRef(null);
   const [error, setError] = useState(null);
   const messagesEndRef = useRef(null);
 
@@ -55,6 +58,11 @@ export const UserChatProvider = ({ children }) => {
   // Notification states
   const [unreadCount, setUnreadCount] = useState(0);
   const [newMessageNotifications, setNewMessageNotifications] = useState([]);
+  const [activityNotifications, setActivityNotifications] = useState([]);
+  const activityNotificationsRef = useRef(activityNotifications);
+  activityNotificationsRef.current = activityNotifications;
+  const notificationFeedKeyRef = useRef(null);
+  const notificationFeedKey = user?._id ? `belorella:notification-feed:user:${user._id}` : null;
   const [showNotification, setShowNotification] = useState(false);
   const [isOnline, setIsOnline] = useState(false);
   const [assignedAdmin, setAssignedAdmin] = useState(null);
@@ -64,26 +72,60 @@ export const UserChatProvider = ({ children }) => {
   const activeRoomRef = useRef(null);
   const isOpenRef = useRef(false);
   const fetchRoomRef = useRef(null);
+  const sendInFlightRef = useRef(false);
+  const isLoadingRef = useRef(isLoading);
+  isLoadingRef.current = isLoading;
   activeRoomRef.current = activeRoom;
   isOpenRef.current = isOpen;
 
 
 
-  const API_URI = process.env.NEXT_PUBLIC_API_URI ;
-
-  // Request browser notification permission
   useEffect(() => {
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
-    }
-  }, []);
+    notificationFeedKeyRef.current = notificationFeedKey;
+    const saved = notificationFeedStorage.read(notificationFeedKey);
+    activityNotificationsRef.current = saved;
+    setActivityNotifications(saved);
+  }, [notificationFeedKey]);
+
+  const addActivityNotification = (notification) => {
+    const key = notificationFeedKeyRef.current;
+    const current = activityNotificationsRef.current;
+    if (current.some((item) => item.id === notification.id)) return;
+    const next = [{ read: false, createdAt: new Date().toISOString(), ...notification }, ...current].slice(0, 50);
+    activityNotificationsRef.current = next;
+    setActivityNotifications(next);
+    notificationFeedStorage.write(key, next);
+  };
+
+  const markActivityNotificationRead = (id) => {
+    const next = activityNotificationsRef.current.map((item) => item.id === id ? { ...item, read: true } : item);
+    activityNotificationsRef.current = next;
+    setActivityNotifications(next);
+    notificationFeedStorage.write(notificationFeedKeyRef.current, next);
+  };
+
+  const markAllActivityNotificationsRead = () => {
+    const next = activityNotificationsRef.current.map((item) => ({ ...item, read: true }));
+    activityNotificationsRef.current = next;
+    setActivityNotifications(next);
+    notificationFeedStorage.write(notificationFeedKeyRef.current, next);
+  };
+
+  const clearActivityNotifications = () => {
+    activityNotificationsRef.current = [];
+    setActivityNotifications([]);
+    notificationFeedStorage.write(notificationFeedKeyRef.current, []);
+  };
+
+  const addActivityNotificationRef = useRef(addActivityNotification);
+  addActivityNotificationRef.current = addActivityNotification;
 
   // --- Helper function to show notification ---
   const showMessageNotification = (message) => {
-    const adminName = assignedAdmin?.firstName || assignedAdmin?.lastName || 'Admin';
+    const adminName = message.senderName || assignedAdmin?.fullName || [assignedAdmin?.firstName, assignedAdmin?.lastName].filter(Boolean).join(' ') || assignedAdmin?.name || 'BELORELLA Support';
     const notification = {
       id: Date.now(),
-      message: message.text,
+      message: message.text || (message.image ? 'Sent an image' : 'Sent a message'),
       sender: message.senderType === 'admin' ? adminName : 'You',
       timestamp: new Date().toLocaleTimeString()
     };
@@ -100,82 +142,31 @@ export const UserChatProvider = ({ children }) => {
   // --- Show browser notification ---
   const showBrowserNotification = (message) => {
     if ("Notification" in window && Notification.permission === "granted") {
-      const adminName = assignedAdmin?.firstName || assignedAdmin?.name || 'Admin';
+      const adminName = message.senderName || assignedAdmin?.fullName || [assignedAdmin?.firstName, assignedAdmin?.lastName].filter(Boolean).join(' ') || assignedAdmin?.name || 'BELORELLA Support';
+      const messageText = typeof message.text === 'string' && message.text.trim()
+        ? message.text.trim()
+        : message.image ? 'Sent an image' : 'Sent a message';
       const title = `💬 New message from ${adminName}`;
-      const options = {
-        body: message.text.length > 100 ? message.text.substring(0, 100) + '...' : message.text,
-        icon: '/favicon.ico',
-        badge: '/favicon.ico',
-        tag: `user-chat-${activeRoom?._id}`,
-        requireInteraction: false,
-        silent: false,
-        vibrate: [200, 100, 200],
-        data: {
-          roomId: activeRoom?._id,
-          messageId: message._id,
-          senderType: message.senderType,
-          timestamp: new Date().toISOString()
-        },
-        actions: [
-          {
-            action: 'open',
-            title: '📱 Open Chat',
-            icon: '/favicon.ico'
-          },
-          {
-            action: 'mark_read',
-            title: '✅ Mark Read',
-            icon: '/favicon.ico'
-          },
-          {
-            action: 'dismiss',
-            title: '❌ Dismiss',
-            icon: '/favicon.ico'
-          }
-        ]
-      };
-      
-      const notification = new Notification(title, options);
-      
-      // Handle notification clicks
-      notification.onclick = (event) => {
-        event.preventDefault();
-        window.focus();
-        setIsOpen(true);
-        notification.close();
-      };
-      
-      // Handle notification actions
-      notification.onactionclick = (event) => {
-        event.preventDefault();
-        if (event.action === 'open') {
-          window.focus();
-          setIsOpen(true);
-        } else if (event.action === 'mark_read') {
-          // Mark messages as read via socket
-          if (socket && socket.connected && activeRoom?._id) {
-            socket.emit("markMessagesAsRead", {
-              roomId: activeRoom._id,
-              readerType: "customer",
-              readerId: user._id
-            });
-          }
-        }
-        notification.close();
-      };
-      
-      // Auto-close notification after 15 seconds
-      setTimeout(() => {
-        notification.close();
-      }, 15000);
+      showNativeBrowserNotification({
+        title,
+        body: messageText,
+        image: message.image || undefined,
+        url: '/contactus',
+        tag: `user-chat-${message._id || message.roomId || Date.now()}`,
+        data: { roomId: message.roomId, messageId: message._id, senderName: adminName },
+      });
     }
   };
+  const showBrowserNotificationRef = useRef(showBrowserNotification);
+  showBrowserNotificationRef.current = showBrowserNotification;
+  const showMessageNotificationRef = useRef(showMessageNotification);
+  showMessageNotificationRef.current = showMessageNotification;
 
   // --- Socket.IO connection ---
   useEffect(() => {
     const isGuest = !user?._id || !isLoggedIn;
     
-    if (socket && socket.connected) {
+    if (socketRef.current?.connected) {
       return;
     }
 
@@ -191,6 +182,7 @@ export const UserChatProvider = ({ children }) => {
       timeout: 10000,
       transports: ['websocket', 'polling']
     });
+    socketRef.current = socketClient;
 
     socketClient.on("connect", () => {
       setIsConnected(true);
@@ -205,6 +197,52 @@ export const UserChatProvider = ({ children }) => {
     socketClient.on("connect_error", () => {
       setIsConnected(false);
     });
+
+    if (!isGuest && user?._id) {
+      socketClient.on(`user:orderUpdate:${user._id}`, (payload = {}) => {
+        const order = payload.order || payload.data?.order || payload.data || payload;
+        if (!order?.orderId) return;
+        const eventType = payload.eventType || payload.updateType || 'update';
+        const title = eventType === 'create'
+          ? `Order #${order.orderId} placed`
+          : eventType === 'cancel'
+            ? `Order #${order.orderId} cancelled`
+            : `Order #${order.orderId} updated`;
+        const firstItem = order.items?.[0] || {};
+        const itemsText = (order.items || []).slice(0, 3).map((item) => {
+          const options = [
+            item.variantName,
+            item.color || item.configuration?.color,
+            item.size || item.configuration?.size,
+            item.regionName || item.configuration?.regionName,
+          ].filter(Boolean).join(' / ');
+          return `${item.name || 'Product'} ×${Number(item.quantity) || 1}${options ? ` · ${options}` : ''}`;
+        }).join(', ');
+        const amount = Number(order.grandTotal ?? order.totalAmount);
+        const amountText = Number.isFinite(amount) ? `BDT ${amount.toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
+        const paymentText = [order.paymentMethod, order.paymentStatus ? `Payment ${order.paymentStatus}` : ''].filter(Boolean).join(' · ');
+        const body = [order.orderStatus ? `Status: ${order.orderStatus}` : '', itemsText, amountText, paymentText].filter(Boolean).join('\n') || 'Open your orders to view the latest details.';
+        const id = `order:${order.orderId}:${eventType}:${order.updatedAt || order.createdAt || Date.now()}`;
+        addActivityNotificationRef.current?.({
+          id,
+          kind: 'order',
+          title,
+          body,
+          image: firstItem.mainImage || firstItem.variantImage || '',
+          url: '/profile/orders',
+          createdAt: order.updatedAt || order.createdAt || new Date().toISOString(),
+          details: order,
+        });
+        showNativeBrowserNotification({
+          title,
+          body,
+          image: firstItem.mainImage || firstItem.variantImage || undefined,
+          url: '/profile/orders',
+          tag: id,
+          data: { orderId: order.orderId, eventType },
+        });
+      });
+    }
 
     socketClient.on("messageReceived", (message) => {
       
@@ -240,11 +278,27 @@ export const UserChatProvider = ({ children }) => {
       
       // Show notification if chat is not open (use ref — listener is attached once)
       if (!isOpenRef.current) {
-        showMessageNotification(message);
+        showMessageNotificationRef.current?.(message);
         setUnreadCount(prev => prev + 1);
         
         // Show browser notification
-        showBrowserNotification(message);
+        showBrowserNotificationRef.current?.(message);
+        if (message.senderType === 'admin') {
+          const senderName = message.senderName || assignedAdmin?.fullName || [assignedAdmin?.firstName, assignedAdmin?.lastName].filter(Boolean).join(' ') || assignedAdmin?.name || 'BELORELLA Support';
+          const preview = typeof message.text === 'string' && message.text.trim()
+            ? message.text.trim()
+            : message.image ? 'Sent an image' : 'Sent a message';
+          addActivityNotificationRef.current?.({
+            id: `chat-message:${message._id || `${message.roomId}:${message.createdAt || Date.now()}`}`,
+            kind: 'message',
+            title: `Message from ${senderName}`,
+            body: preview,
+            image: message.image || '',
+            url: '/contactus',
+            createdAt: message.createdAt || new Date().toISOString(),
+            details: { roomId: message.roomId, messageId: message._id, senderName },
+          });
+        }
       } else if (activeRoomRef.current?._id === message.roomId && socketClient.connected) {
         // Mark incoming messages read immediately for instant receipts on the other side
         const isGuestNow = !user?._id || !isLoggedIn;
@@ -379,11 +433,10 @@ export const UserChatProvider = ({ children }) => {
     setSocket(socketClient);
 
     return () => {
-      if (socketClient) {
-        socketClient.disconnect();
-      }
+      socketClient.disconnect();
+      if (socketRef.current === socketClient) socketRef.current = null;
     };
-  }, [user?._id, isLoggedIn]);
+  }, [user?._id, isLoggedIn, guestId]);
 
   // --- Fetch or create chat room (socket-first approach) ---
   const fetchRoom = React.useCallback(async (guestData) => {
@@ -492,7 +545,7 @@ export const UserChatProvider = ({ children }) => {
       setError("Failed to load chat");
       setIsLoading(false);
     }
-  }, [user?._id, authRequest, API_URI, socket, isLoggedIn, guestInfo]);
+  }, [user?._id, authRequest, socket, isLoggedIn, guestInfo, guestId]);
 
   // Keep latest fetchRoom available to the one-time socket listeners (reconnect resync)
   fetchRoomRef.current = fetchRoom;
@@ -526,10 +579,10 @@ export const UserChatProvider = ({ children }) => {
     }
 
     // Only fetch if we don't have a room and we're not already loading
-    if (!activeRoom && !isLoading) {
-      fetchRoom();
+    if (!activeRoom && !isLoadingRef.current) {
+      fetchRoomRef.current?.();
     }
-  }, [isOpen, user?._id, isLoggedIn, activeRoom, guestInfo]);
+  }, [isOpen, user?._id, isLoggedIn, activeRoom, guestInfo, guestId]);
 
   // --- Clear loading state when we have valid room data ---
   useEffect(() => {
@@ -569,7 +622,7 @@ export const UserChatProvider = ({ children }) => {
         return msg;
       }));
     }
-  }, [socket, activeRoom?._id, isConnected, user?._id, isOpen]);
+  }, [socket, activeRoom?._id, isConnected, user?._id, isOpen, guestId]);
 
   // --- Scroll to bottom ---
   useEffect(() => {
@@ -580,10 +633,8 @@ export const UserChatProvider = ({ children }) => {
   const handleSend = React.useCallback(async () => {
     const trimmed = inputMessage.trim();
     const image = imageToSend;
-    if (!trimmed && !image) return;
-    if (!activeRoom?._id) {
-      return;
-    }
+    if ((!trimmed && !image) || !activeRoom?._id || !socket?.connected || sendInFlightRef.current) return;
+    sendInFlightRef.current = true;
     
     const isGuest = !user?._id || !isLoggedIn;
     
@@ -591,7 +642,7 @@ export const UserChatProvider = ({ children }) => {
       setError(null);
       
       // Send message via socket first for immediate feedback
-      if (socket) {
+      if (socket.connected) {
         const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         const tempMessage = {
           _id: tempId,
@@ -635,13 +686,17 @@ export const UserChatProvider = ({ children }) => {
     } catch (err) {
       console.error("Error sending message:", err);
       setError(err.response?.data?.message || "Failed to send message");
+    } finally {
+      sendInFlightRef.current = false;
     }
-  }, [inputMessage, imageToSend, activeRoom?._id, socket, user?._id, isLoggedIn, guestInfo]);
+  }, [inputMessage, imageToSend, activeRoom?._id, socket, user?._id, isLoggedIn, guestId, guestInfo]);
 
   // --- Mark messages as read (with debouncing) ---
   const markAsReadTimeoutRef = useRef(null);
   const markAsRead = React.useCallback(async () => {
     if (!activeRoom?._id) return;
+    const isGuest = !user?._id || !isLoggedIn;
+    const readerId = user?._id || guestId;
     
     // Clear existing timeout
     if (markAsReadTimeoutRef.current) {
@@ -654,34 +709,35 @@ export const UserChatProvider = ({ children }) => {
         // Mark messages as read via socket instead of API
         if (socket && socket.connected) {
           socket.emit("markMessagesAsRead", {
-            roomId: activeRoom._id,
-            readerType: "customer",
-            readerId: user._id
+          roomId: activeRoom._id,
+          readerType: isGuest ? "guest" : "customer",
+          readerId
           });
         }
       } catch (err) {
         console.error("Error marking messages as read:", err);
       }
     }, 300); // 300ms delay
-  }, [activeRoom?._id, socket, user?._id]);
+  }, [activeRoom?._id, socket, user?._id, isLoggedIn, guestId]);
 
   // --- Update online status ---
   const updateOnlineStatus = React.useCallback(async (status) => {
     if (!activeRoom?._id) return;
+    const senderId = user?._id || guestId;
     
     try {
       // Update online status via socket
       if (socket) {
         socket.emit("updateOnlineStatus", {
           roomId: activeRoom._id,
-          userId: user._id,
+          userId: senderId,
           isOnline: status
         });
       }
     } catch (err) {
       console.error("Error updating online status:", err);
     }
-  }, [activeRoom?._id, socket, user?._id]);
+  }, [activeRoom?._id, socket, user?._id, guestId]);
 
   // --- Send typing indicator ---
   const sendTypingIndicator = React.useCallback((isTyping) => {
@@ -734,7 +790,7 @@ export const UserChatProvider = ({ children }) => {
         isOnline: true
       });
     }
-  }, [socket, activeRoom?._id, user?._id, isLoggedIn]);
+  }, [socket, activeRoom?._id, user?._id, isLoggedIn, guestId]);
   
   const closeChat = React.useCallback(() => {
     setIsOpen(false);
@@ -749,7 +805,7 @@ export const UserChatProvider = ({ children }) => {
         isOnline: false
       });
     }
-  }, [socket, activeRoom?._id, user?._id]);
+  }, [socket, activeRoom?._id, user?._id, isLoggedIn, guestId]);
 
   // --- Clear error ---
   const clearError = React.useCallback(() => setError(null), []);
@@ -884,6 +940,7 @@ export const UserChatProvider = ({ children }) => {
     messagesEndRef,
     unreadCount,
     newMessageNotifications,
+    activityNotifications,
     showNotification,
     isOnline,
     assignedAdmin,
@@ -904,6 +961,9 @@ export const UserChatProvider = ({ children }) => {
     handleSend,
     clearError,
     clearNotifications,
+    markActivityNotificationRead,
+    markAllActivityNotificationsRead,
+    clearActivityNotifications,
     markAsRead,
     retryLoadChat,
     sendTypingIndicator,

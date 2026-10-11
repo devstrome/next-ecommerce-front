@@ -1,7 +1,9 @@
 'use client'
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
 import axios from 'axios';
 import { getStorage } from '../lib/storage';
+import { createRegionRequest, fetchRegions, selectActiveRegions } from '../store/slices/regionSlice';
 
 const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
 
@@ -12,6 +14,7 @@ export const useAdminProduct = () => useContext(AdminProductContext);
 const authHeaders = () => ({ headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` } });
 
 export const AdminProductProvider = ({ children }) => {
+  const dispatch = useDispatch();
   const [categoryTree, setCategoryTree] = useState([]);
   const [colors, setColors] = useState([]);
   const [sizes, setSizes] = useState([]);
@@ -19,6 +22,7 @@ export const AdminProductProvider = ({ children }) => {
   const [badges, setBadges] = useState([]);
   const [measureTypes, setMeasureTypes] = useState([]);
   const [shippingTypes, setShippingTypes] = useState([]);
+  const regions = useSelector(selectActiveRegions);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const treeRef = useRef([]);
@@ -44,13 +48,14 @@ export const AdminProductProvider = ({ children }) => {
       setBadges(badgesRes.data || []);
       setMeasureTypes(unitsRes.data || []);
       setShippingTypes(shippingRes.data || []);
+      await dispatch(fetchRegions()).unwrap();
     } catch (err) {
       console.error('Error loading product options:', err);
       setError(err.response?.data?.message || 'Failed to load product options');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [dispatch]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -120,6 +125,12 @@ export const AdminProductProvider = ({ children }) => {
     } catch (err) { throw serverError(err); }
   };
 
+  const createRegion = async (name, description = '') => {
+    try {
+      return await dispatch(createRegionRequest({ name, description })).unwrap();
+    } catch (err) { throw serverError(err); }
+  };
+
   const findCategoryByName = (name, nodes = treeRef.current) => {
     for (const node of nodes) {
       if (node.name === name) return node;
@@ -137,6 +148,7 @@ export const AdminProductProvider = ({ children }) => {
     badges,
     measureTypes,
     shippingTypes,
+    regions,
     loading,
     error,
     refresh,
@@ -148,6 +160,7 @@ export const AdminProductProvider = ({ children }) => {
     createGender,
     createBadge,
     createMeasureType,
+    createRegion,
     findCategoryByName,
   };
 

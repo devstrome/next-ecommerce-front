@@ -1,5 +1,5 @@
 'use client'
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import { useRouter } from 'next/navigation';
@@ -29,7 +29,7 @@ const periodLabel = (p) => {
 const PartnershipAdmin = () => {
   const router = useRouter();
   const headers = useMemo(() => {
-    const token = getStorage('adminAccessToken') || getStorage('adminToken') || getStorage('accessToken');
+    const token = getStorage('adminAccessToken') || getStorage('adminToken');
     return token ? { Authorization: `Bearer ${token}` } : {};
   }, []);
 
@@ -44,12 +44,12 @@ const PartnershipAdmin = () => {
     amount: '',
   });
 
-  const fetchAll = async () => {
+  const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
       const [stateRes, profitsRes] = await Promise.all([
         axios.get(`${API}/api/partnership`, { headers }),
-        axios.get(`${API}/api/partnership/profits`, { headers: headers2 }),
+        axios.get(`${API}/api/partnership/profits`, { headers }),
       ]);
       setState(stateRes.data);
       setProfits(Array.isArray(profitsRes.data) ? profitsRes.data : []);
@@ -63,9 +63,9 @@ const PartnershipAdmin = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [headers]);
 
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => { fetchAll(); }, [fetchAll]);
 
   // Live profit split preview (mirrors backend rounding)
   const preview = useMemo(() => {

@@ -4,8 +4,10 @@ import Link from "next/link";
 import { FiHeart, FiShoppingBag, FiEye, FiShare2 } from "react-icons/fi";
 import { FaHeart } from "react-icons/fa";
 import { UserContext } from "../context/UserContext";
+import { getProductPriceSummary } from "../lib/productPricing";
+import { getPublicSiteUrl } from "../lib/publicSiteUrl";
 
-const ProductCard = ({ Data, viewMode = "grid", onAddToCart }) => {
+const ProductCard = ({ Data, viewMode = "grid", onAddToCart, onBuyNow, selectedRegions = [] }) => {
   const {
     _id,
     mainBadgeName,
@@ -18,6 +20,9 @@ const ProductCard = ({ Data, viewMode = "grid", onAddToCart }) => {
     totalReviews,
     variants,
     comingSoon,
+    brand,
+    regions,
+    regionId,
   } = Data;
 
   const userCtx = useContext(UserContext);
@@ -25,17 +30,28 @@ const ProductCard = ({ Data, viewMode = "grid", onAddToCart }) => {
   const wishlist = userCtx?.wishlist || [];
   const isWishlisted = wishlist.some(p => (p._id || p) === _id);
 
-  const hasDiscount = discountPrice && discountPrice < mainPrice;
-  const discountPercent = hasDiscount ? Math.round(((mainPrice - discountPrice) / mainPrice) * 100) : 0;
+  const priceSummary = getProductPriceSummary(Data, selectedRegions);
+  const displayPrice = priceSummary.price || discountPrice || mainPrice || 0;
+  const displayOriginalPrice = priceSummary.originalPrice || mainPrice || displayPrice;
+  const displayDiscountPrice = priceSummary.discountPrice;
+  const hasDiscount = displayDiscountPrice !== null;
+  const discountPercent = hasDiscount
+    ? Math.round(((displayOriginalPrice - displayDiscountPrice) / displayOriginalPrice) * 100)
+    : 0;
 
   const variantColors = Array.isArray(variants)
     ? variants.filter(v => v.hexCode).map(v => v.hexCode)
     : [];
+  const regionNames = [...new Set([
+    ...(Array.isArray(regions) ? regions : []),
+    regionId,
+    ...(Array.isArray(variants) ? variants.map((variant) => variant.regionId).filter(Boolean) : []),
+  ].map((region) => region?.name || region?.slug || '').filter(Boolean))];
 
   const handleShare = async (e) => {
     e.preventDefault();
     e.stopPropagation();
-    const url = `${typeof window !== 'undefined' ? window.location.origin : ''}/products/${_id}`;
+    const url = getPublicSiteUrl(`/products/${encodeURIComponent(_id)}`);
     if (navigator.share) {
       try { await navigator.share({ title: name, url }); } catch {}
     } else {
@@ -63,15 +79,16 @@ const ProductCard = ({ Data, viewMode = "grid", onAddToCart }) => {
           <h3 className="font-sans text-sm font-medium text-black mb-1 line-clamp-1">
             <Link href={`/products/${_id}`} className="hover:text-maybelline-pink transition-colors">{name}</Link>
           </h3>
+          {(brand || regionNames.length > 0) && <p className="mb-1 text-xs text-dark-gray">{[brand, ...regionNames].filter(Boolean).join(' · ')}</p>}
           <div className="flex items-center gap-2">
             {hasDiscount ? (
               <>
-                <span className="font-sans text-base font-semibold text-maybelline-pink">BDT {discountPrice}</span>
-                <span className="font-sans text-xs text-mid-gray line-through">BDT {mainPrice}</span>
+                <span className="font-sans text-base font-semibold text-maybelline-pink">{priceSummary.hasRange ? 'From ' : ''}BDT {displayDiscountPrice}</span>
+                <span className="font-sans text-xs text-mid-gray line-through">BDT {displayOriginalPrice}</span>
                 <span className="font-sans text-[10px] font-medium text-rose bg-blush px-1.5 py-0.5">-{discountPercent}%</span>
               </>
             ) : (
-              <span className="font-sans text-base font-semibold text-black">BDT {mainPrice}</span>
+              <span className="font-sans text-base font-semibold text-black">{priceSummary.hasRange ? 'From ' : ''}BDT {displayPrice}</span>
             )}
           </div>
           {averageRating > 0 && (
@@ -102,6 +119,14 @@ const ProductCard = ({ Data, viewMode = "grid", onAddToCart }) => {
             }`}
           >
             <FiShoppingBag size={13} /> {comingSoon ? 'Notify Me' : 'Add'}
+          </button>
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onBuyNow?.(_id); }}
+            disabled={comingSoon}
+            className="h-9 px-3 text-[11px] font-medium tracking-wider uppercase transition-colors bg-maybelline-pink text-pure-white hover:bg-maybelline-magenta disabled:bg-mid-gray disabled:cursor-not-allowed"
+          >
+            Buy Now
           </button>
         </div>
       </div>
@@ -167,17 +192,6 @@ const ProductCard = ({ Data, viewMode = "grid", onAddToCart }) => {
         >
           <FiEye size={15} />
         </Link>
-        <button
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAddToCart?.(_id); }}
-          disabled={comingSoon}
-          className={`h-9 px-4 text-[11px] font-medium tracking-wider uppercase transition-colors flex items-center gap-1.5 ${
-            comingSoon
-              ? 'bg-mid-gray text-pure-white cursor-not-allowed'
-              : 'bg-black text-pure-white hover:bg-maybelline-pink'
-          }`}
-        >
-          <FiShoppingBag size={13} /> {comingSoon ? 'Notify Me' : 'Add'}
-        </button>
       </div>
 
       {/* Product Info */}
@@ -185,6 +199,7 @@ const ProductCard = ({ Data, viewMode = "grid", onAddToCart }) => {
         <h3 className="font-sans text-sm font-medium text-black line-clamp-2 leading-snug group-hover:text-maybelline-pink transition-colors duration-300">
           <Link href={`/products/${_id}`}>{name}</Link>
         </h3>
+        {(brand || regionNames.length > 0) && <p className="mt-1 text-[11px] text-dark-gray truncate">{[brand, ...regionNames].filter(Boolean).join(' · ')}</p>}
 
         {/* Color swatches */}
         {variantColors.length > 0 && (
@@ -202,11 +217,11 @@ const ProductCard = ({ Data, viewMode = "grid", onAddToCart }) => {
         <div className="flex items-center gap-2 mt-auto pt-1">
           {hasDiscount ? (
             <>
-              <span className="font-sans text-sm font-semibold text-maybelline-pink">BDT {discountPrice}</span>
-              <span className="font-sans text-xs text-mid-gray line-through">BDT {mainPrice}</span>
+              <span className="font-sans text-sm font-semibold text-maybelline-pink">{priceSummary.hasRange ? 'From ' : ''}BDT {displayDiscountPrice}</span>
+              <span className="font-sans text-xs text-mid-gray line-through">BDT {displayOriginalPrice}</span>
             </>
           ) : (
-            <span className="font-sans text-sm font-semibold text-black">BDT {mainPrice}</span>
+            <span className="font-sans text-sm font-semibold text-black">{priceSummary.hasRange ? 'From ' : ''}BDT {displayPrice}</span>
           )}
         </div>
 
@@ -218,6 +233,24 @@ const ProductCard = ({ Data, viewMode = "grid", onAddToCart }) => {
             <span className="font-sans text-xs text-mid-gray">({totalReviews || 0})</span>
           </div>
         )}
+        <div className="grid grid-cols-2 gap-2 pt-2">
+          <button
+            type="button"
+            onClick={() => onAddToCart?.(_id)}
+            disabled={comingSoon}
+            className="h-9 px-2 text-[10px] font-medium tracking-wider uppercase transition-colors flex items-center justify-center gap-1 bg-black text-pure-white hover:bg-maybelline-pink disabled:bg-mid-gray disabled:cursor-not-allowed"
+          >
+            <FiShoppingBag size={13} /> {comingSoon ? 'Notify Me' : 'Add to Cart'}
+          </button>
+          <button
+            type="button"
+            onClick={() => onBuyNow?.(_id)}
+            disabled={comingSoon}
+            className="h-9 px-2 text-[10px] font-medium tracking-wider uppercase transition-colors bg-maybelline-pink text-pure-white hover:bg-maybelline-magenta disabled:bg-mid-gray disabled:cursor-not-allowed"
+          >
+            Buy Now
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -230,7 +263,7 @@ ProductCard.propTypes = {
     mainBadgeColor: PropTypes.string,
     mainImage: PropTypes.string.isRequired,
     name: PropTypes.string.isRequired,
-    mainPrice: PropTypes.number.isRequired,
+  mainPrice: PropTypes.number,
     discountPrice: PropTypes.number,
     averageRating: PropTypes.number,
     totalReviews: PropTypes.number,
@@ -239,6 +272,8 @@ ProductCard.propTypes = {
   }).isRequired,
   viewMode: PropTypes.oneOf(["grid", "list"]),
   onAddToCart: PropTypes.func,
+  onBuyNow: PropTypes.func,
+  selectedRegions: PropTypes.arrayOf(PropTypes.string),
 };
 
 export default ProductCard;

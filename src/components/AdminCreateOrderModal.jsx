@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import { getStorage } from '../lib/storage';
+import { formatMeasure } from '../lib/measure';
 import {
   FaTimes, FaSearch, FaPlus, FaTrash, FaUser, FaBox,
   FaMapMarkerAlt, FaTruck, FaCreditCard, FaCheckCircle
@@ -21,9 +22,35 @@ const pickPrice = (arr, sizeIdx) => {
   return Number(arr[0]) > 0 ? Number(arr[0]) : 0;
 };
 
+const getConfigurationOptions = (product, variant) => {
+  if (!variant) return [];
+  if (Array.isArray(variant.options) && variant.options.length) return variant.options;
+  const sizes = Array.isArray(variant.sizes) ? variant.sizes : [];
+  const prices = Array.isArray(variant.prices) ? variant.prices : [];
+  const discounts = Array.isArray(variant.discountPrices) ? variant.discountPrices : [];
+  const stocks = Array.isArray(variant.stockBySize) ? variant.stockBySize : [];
+  return Array.from({ length: Math.max(sizes.length, prices.length, discounts.length, stocks.length) }, (_, index) => ({
+    size: sizes[index] || '',
+    measureType: variant.measureType || product?.measureType || '',
+    unitName: variant.unitName || product?.unitName || '',
+    price: prices[index],
+    discountPrice: discounts[index],
+    stock: stocks[index] ?? variant.stock,
+  }));
+};
+
+const optionLabel = (option) => formatMeasure(option)
+  || [option?.measureType, option?.unitName].filter(Boolean).join(' ')
+  || 'Default';
+
 // Discounted price first (matches client behavior: price = discountPrice || price || mainPrice)
 const resolvePrice = (product, variant, sizeIdx) => {
   if (variant) {
+    const option = getConfigurationOptions(product, variant)[Math.max(0, sizeIdx)];
+    const optionDiscount = Number(option?.discountPrice);
+    if (optionDiscount > 0) return optionDiscount;
+    const optionPrice = Number(option?.price);
+    if (optionPrice > 0) return optionPrice;
     const discounted = pickPrice(variant.discountPrices, sizeIdx);
     if (discounted > 0) return discounted;
     const regular = pickPrice(variant.prices, sizeIdx);
@@ -36,6 +63,8 @@ const resolvePrice = (product, variant, sizeIdx) => {
 
 // Original (non-discounted) price for strike-through display
 const resolveListPrice = (product, variant, sizeIdx) => {
+  const optionPrice = Number(getConfigurationOptions(product, variant)[Math.max(0, sizeIdx)]?.price);
+  if (optionPrice > 0) return optionPrice;
   const regular = variant ? pickPrice(variant.prices, sizeIdx) : 0;
   if (regular > 0) return regular;
   if (product?.mainPrice > 0) return Number(product.mainPrice);
@@ -44,7 +73,7 @@ const resolveListPrice = (product, variant, sizeIdx) => {
 
 const AdminCreateOrderModal = ({ isOpen, onClose, onCreated }) => {
   const adminHeaders = useMemo(() => {
-    const token = getStorage('adminAccessToken') || getStorage('adminToken') || getStorage('accessToken');
+    const token = getStorage('adminAccessToken') || getStorage('adminToken');
     return token ? { Authorization: `Bearer ${token}` } : {};
   }, []);
 
@@ -86,15 +115,17 @@ const AdminCreateOrderModal = ({ isOpen, onClose, onCreated }) => {
   const warnings = ruleEval?.blockers || [];
 
   const currentVariant = pickedProduct?.variants?.[variantIdx];
-  const currentSizes = currentVariant?.sizes || [];
-  const currentStock = currentSizes.length
-    ? (currentVariant?.stockBySize?.[sizeIdx] ?? currentVariant?.stock ?? null)
+  const currentOptions = getConfigurationOptions(pickedProduct, currentVariant);
+  const currentSizes = currentOptions.map(optionLabel);
+  const selectedOption = currentOptions[sizeIdx] || currentOptions[0] || null;
+  const currentStock = currentOptions.length
+    ? (selectedOption?.stock ?? currentVariant?.stock ?? null)
     : (currentVariant?.stock ?? null);
   const currentPrice = pickedProduct && currentVariant
-    ? resolvePrice(pickedProduct, currentVariant, currentSizes.length ? sizeIdx : -1)
+    ? resolvePrice(pickedProduct, currentVariant, currentOptions.length ? sizeIdx : -1)
     : 0;
   const currentListPrice = pickedProduct && currentVariant
-    ? resolveListPrice(pickedProduct, currentVariant, currentSizes.length ? sizeIdx : -1)
+    ? resolveListPrice(pickedProduct, currentVariant, currentOptions.length ? sizeIdx : -1)
     : 0;
 
   const paymentMethodValue = (() => {
@@ -153,7 +184,7 @@ const AdminCreateOrderModal = ({ isOpen, onClose, onCreated }) => {
       }
     })();
     return () => { cancelled = true; };
-  }, [isOpen]);
+  }, [isOpen, adminHeaders]);
 
   // Evaluate checkout rules for live totals
   useEffect(() => {
@@ -180,7 +211,7 @@ const AdminCreateOrderModal = ({ isOpen, onClose, onCreated }) => {
       }
     }, 300);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [isOpen, subtotal, discountNum, selectedShipping?.name, paymentMethodValue, items]);
+  }, [isOpen, subtotal, discountNum, selectedShipping, paymentMethodValue, items]);
 
   const displayName = (u) =>
     u?.fullName || [u?.firstName, u?.lastName].filter(Boolean).join(' ') || u?.userName || u?.email || 'Customer';
@@ -240,14 +271,15 @@ const AdminCreateOrderModal = ({ isOpen, onClose, onCreated }) => {
     if (!pickedProduct) return;
     const v = pickedProduct.variants?.[variantIdx];
     if (!v) { toast.error('This product has no variants'); return; }
-    const sizes = v.sizes || [];
-    const sizeLabel = sizes.length ? sizes[sizeIdx] : '';
-    const sizeForLookup = sizes.length ? sizeIdx : -1;
+    const options = getConfigurationOptions(pickedProduct, v);
+    const option = options[sizeIdx] || options[0] || null;
+    const sizeLabel = option?.size || '';
+    const sizeForLookup = options.length ? sizeIdx : -1;
     const price = resolvePrice(pickedProduct, v, sizeForLookup);
     const listPrice = resolveListPrice(pickedProduct, v, sizeForLookup);
     if (!price || price <= 0) { toast.error('No price configured for this variant'); return; }
     const stockVal = currentStock;
-    const key = `${pickedProduct._id}|${v._id}|${sizeLabel}`;
+    const key = `${pickedProduct._id}|${v.regionId?._id || v.regionId || ''}|${v._id}|${sizeLabel}|${option?.measureType || v.measureType || ''}|${option?.unitName || v.unitName || ''}`;
 
     setItems(prev => {
       const existing = prev.find(i => i.key === key);
@@ -263,15 +295,17 @@ const AdminCreateOrderModal = ({ isOpen, onClose, onCreated }) => {
         key,
         productId: pickedProduct._id,
         variantId: v._id,
+        regionId: v.regionId?._id || v.regionId || null,
+        regionName: v.regionId?.name || '',
         name: pickedProduct.name,
         color: v.colorName || '',
         size: sizeLabel,
         quantity: Number(qty),
         price,
         listPrice,
-        mainImage: pickedProduct.mainImage || v.images?.[0] || '',
-        measureType: v.measureType || 'pcs',
-        unitName: v.unitName || 'unit',
+        mainImage: v.images?.[0] || pickedProduct.mainImage || '',
+        measureType: option?.measureType || v.measureType || pickedProduct.measureType || 'pcs',
+        unitName: option?.unitName || v.unitName || pickedProduct.unitName || 'unit',
         discountApplied: 0,
         stock: stockVal,
       }];
@@ -337,6 +371,8 @@ const AdminCreateOrderModal = ({ isOpen, onClose, onCreated }) => {
         mainImage: i.mainImage,
         size: i.size,
         color: i.color,
+        regionId: i.regionId,
+        regionName: i.regionName,
         measureType: i.measureType,
         unitName: i.unitName,
         discountApplied: 0,
@@ -583,7 +619,7 @@ const AdminCreateOrderModal = ({ isOpen, onClose, onCreated }) => {
                             </div>
                           </td>
                           <td className="px-3 py-2 text-gray-600 text-xs">
-                            {i.color || 'Default'}{i.size ? ` · ${i.size}` : ''}
+                            {[i.color || 'Default', i.size, i.regionName && `Region: ${i.regionName}`].filter(Boolean).join(' · ')}
                           </td>
                           <td className="px-3 py-2 text-right text-gray-700">
                             {i.listPrice > i.price && (

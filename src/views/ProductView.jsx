@@ -1,8 +1,9 @@
 'use client'
 import { getStorage, setStorage, removeStorage } from "../lib/storage"
-import React, { useRef, useState, useEffect, useContext } from 'react';
+import React, { useRef, useState, useEffect, useContext, useCallback, useMemo } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
 import Link from "next/link"
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import axios from 'axios';
 import io from 'socket.io-client';
 import Badge from '../components/Badge';
@@ -13,8 +14,102 @@ import { UserContext } from '../context/UserContext';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { FaHeart, FaRegHeart, FaStar, FaMinus, FaPlus } from 'react-icons/fa';
-import { FiTruck, FiShield, FiRotateCcw, FiShare2, FiShoppingCart, FiX } from 'react-icons/fi';
+import { FiTruck, FiShield, FiRotateCcw, FiShare2, FiShoppingCart, FiX, FiGlobe, FiMapPin, FiCheckCircle } from 'react-icons/fi';
 import { formatBDT } from '../config/brand';
+import { fetchProductById, selectProductById } from '../store/slices/productSlice';
+import { getProductPriceSummary } from '../lib/productPricing';
+import { formatMeasure } from '../lib/measure';
+import { getPublicCurrentUrl } from '../lib/publicSiteUrl';
+
+const getVariantOptions = (product, variant) => {
+  if (!variant) return [];
+  if (Array.isArray(variant.options) && variant.options.length) return variant.options;
+
+  const sizes = Array.isArray(variant.sizes) ? variant.sizes : [];
+  const prices = Array.isArray(variant.prices) ? variant.prices : [];
+  const discounts = Array.isArray(variant.discountPrices) ? variant.discountPrices : [];
+  const stocks = Array.isArray(variant.stockBySize) ? variant.stockBySize : [];
+  const count = Math.max(sizes.length, prices.length, discounts.length, stocks.length);
+  if (count) {
+    return Array.from({ length: count }, (_, index) => ({
+      size: sizes[index] || '',
+      measureType: variant.measureType || product?.measureType || '',
+      unitName: variant.unitName || product?.unitName || '',
+      price: prices[index],
+      discountPrice: discounts[index],
+      stock: stocks[index] ?? variant.stock,
+    }));
+  }
+
+  if (variant.price !== undefined) {
+    return [{
+      size: '',
+      measureType: variant.measureType || product?.measureType || '',
+      unitName: variant.unitName || product?.unitName || '',
+      price: variant.price,
+      discountPrice: variant.discountPrice,
+      stock: variant.stock,
+    }];
+  }
+  return [];
+};
+
+const optionLabel = (option = {}) => {
+  return formatMeasure(option) || [option.measureType, option.unitName].filter(Boolean).join(' ');
+};
+
+const RegionSelector = ({ regions, selectedRegionId, onChange, compact = false }) => {
+  if (!regions?.length) return null;
+
+  return (
+    <section className={`rounded-2xl border border-[#f0e5e7] bg-gradient-to-br from-white via-white to-[#fff5f7] shadow-sm ${compact ? 'p-3.5' : 'mb-6 p-4 sm:p-5'}`}>
+      <div className={`flex items-center justify-between gap-3 ${compact ? 'mb-3' : 'mb-4'}`}>
+        <div className="flex min-w-0 items-center gap-3">
+          <span className={`flex shrink-0 items-center justify-center rounded-xl bg-[#fff0f3] text-maybelline-pink ${compact ? 'h-9 w-9' : 'h-10 w-10'}`}>
+            <FiGlobe size={compact ? 17 : 19} />
+          </span>
+          <div className="min-w-0">
+            <h3 className={`font-sans font-semibold text-black ${compact ? 'text-sm' : 'text-sm sm:text-base'}`}>Choose your region</h3>
+            <p className="mt-0.5 text-[11px] leading-snug text-dark-gray sm:text-xs">Prices and stock update for each region.</p>
+          </div>
+        </div>
+        <span className="shrink-0 rounded-full border border-[#f0e5e7] bg-white px-2.5 py-1 text-[10px] font-medium uppercase tracking-wide text-dark-gray">
+          {regions.length} {regions.length === 1 ? 'market' : 'markets'}
+        </span>
+      </div>
+
+      <div role="group" aria-label="Choose product region" className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2">
+        {regions.map((region) => {
+          const isSelected = String(selectedRegionId) === String(region.id);
+          return (
+            <button
+              key={region.id}
+              type="button"
+              aria-pressed={isSelected}
+              onClick={() => onChange(region.id)}
+              className={`group flex min-h-[58px] min-w-0 items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-all duration-200 ${
+                isSelected
+                  ? 'border-maybelline-pink bg-white shadow-[0_4px_14px_rgba(225,0,55,0.10)] ring-1 ring-maybelline-pink/20'
+                  : 'border-[#e9e6e6] bg-white/75 hover:border-[#e9a5b5] hover:bg-white'
+              }`}
+            >
+              <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${isSelected ? 'bg-maybelline-pink text-white' : 'bg-[#f5f3f3] text-mid-gray group-hover:bg-[#fff0f3] group-hover:text-maybelline-pink'}`}>
+                <FiMapPin size={15} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className={`block truncate text-sm font-semibold ${isSelected ? 'text-black' : 'text-[#454545]'}`}>{region.name || 'Region'}</span>
+                <span className={`mt-0.5 block text-[10px] ${isSelected ? 'font-medium text-maybelline-pink' : 'text-mid-gray'}`}>
+                  {isSelected ? 'Selected market' : 'View prices & stock'}
+                </span>
+              </span>
+              {isSelected && <FiCheckCircle className="shrink-0 text-maybelline-pink" size={17} aria-hidden="true" />}
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+};
 
 const ProductView = () => {
   const cartCtx = useContext(CartContext);
@@ -22,11 +117,15 @@ const ProductView = () => {
   const userCtx = useContext(UserContext);
   const isLoggedIn = userCtx?.isLoggedIn || false;
   const toggleWish = userCtx?.toggleWishlist || (() => {});
-  const wishlist = userCtx?.wishlist || [];
+  const wishlist = useMemo(() => userCtx?.wishlist || [], [userCtx?.wishlist]);
   const fetchWishlist = userCtx?.fetchWishlist || (() => {});
   const { id } = useParams();
-  const [product, setProduct] = useState(null);
+  const router = useRouter();
+  const dispatch = useDispatch();
+  const product = useSelector((state) => selectProductById(state, id));
+  const [selectedRegionId, setSelectedRegionId] = useState('');
   const [selectedVariant, setSelectedVariant] = useState(null);
+  const [selectedOptionIndex, setSelectedOptionIndex] = useState(0);
   const [selectedSize, setSelectedSize] = useState(null);
   const [selectedPrice, setSelectedPrice] = useState(null);
   const [selectedColor, setSelectedColor] = useState(null);
@@ -44,54 +143,70 @@ const ProductView = () => {
   const [isLiked, setIsLiked] = useState(false);
   const [realTimeUpdates, setRealTimeUpdates] = useState([]);
   const [quantity, setQuantity] = useState(1);
+  const [cartSubmitting, setCartSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState('description');
   const [showCartModal, setShowCartModal] = useState(false);
   const [relatedCartProductId, setRelatedCartProductId] = useState(null);
 
-  const fetchProduct = async () => {
+  const fetchProduct = useCallback(async () => {
     try {
-      const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/products/${id}`);
-      setProduct(response.data);
-      setLikesCount(response.data.likesCount || 0);
-      const currentUserId = userCtx?.user?._id;
-      if (currentUserId && Array.isArray(response.data.likedBy)) {
-        setIsLiked(response.data.likedBy.some(uid => uid === currentUserId || uid?._id === currentUserId));
-      }
-      console.log("Fetched product:", response.data);
+      const fetchedProduct = await dispatch(fetchProductById(id)).unwrap();
+      setLikesCount(fetchedProduct.likesCount || 0);
+      const variantRegions = (fetchedProduct.variants || []).map((variant) => variant.regionId).filter(Boolean);
+      const regionMap = new Map();
+      [...(fetchedProduct.regions || []), fetchedProduct.regionId, ...variantRegions].filter(Boolean).forEach((region) => {
+        const regionId = String(region._id || region);
+        regionMap.set(regionId, { id: regionId, name: region.name || region.slug || regionId, slug: region.slug || '' });
+      });
+      const url = typeof window !== 'undefined' ? new URL(window.location.href) : null;
+      const urlVariantId = url?.searchParams.get('variant') || '';
+      const requestedRegion = url?.searchParams.get('region') || '';
+      const requestedVariant = (fetchedProduct.variants || []).find((variant) => String(variant._id) === String(urlVariantId));
+      const requestedRegionRecord = [...regionMap.values()].find((region) =>
+        [region.id, region.name, region.slug].some((value) => String(value || '').toLowerCase() === requestedRegion.toLowerCase())
+      );
+      const requestedVariantRegionId = requestedVariant?.regionId?._id || requestedVariant?.regionId || '';
+      const preferredRegionId = String(
+        requestedVariantRegionId || requestedRegionRecord?.id || fetchedProduct.regionId?._id || fetchedProduct.regionId || regionMap.keys().next().value || ''
+      );
+      setSelectedRegionId(preferredRegionId);
 
-      if (response.data.variants && response.data.variants.length > 0) {
-        const urlVariantId = typeof window !== 'undefined'
-          ? new URLSearchParams(window.location.search).get('variant')
-          : null;
+      if (fetchedProduct.variants && fetchedProduct.variants.length > 0) {
+        const variantsInRegion = fetchedProduct.variants.filter((variant) =>
+          !preferredRegionId || !variant.regionId || String(variant.regionId._id || variant.regionId) === preferredRegionId);
         const defaultVariant = (urlVariantId
-          ? response.data.variants.find(v => String(v._id) === String(urlVariantId))
-          : null) || response.data.variants[0];
+          ? variantsInRegion.find(v => String(v._id) === String(urlVariantId))
+          : null) || variantsInRegion[0] || fetchedProduct.variants[0];
         setSelectedVariant(defaultVariant);
+        const options = getVariantOptions(fetchedProduct, defaultVariant);
+        const requestedOption = url?.searchParams.get('option') || url?.searchParams.get('size') || '';
+        const optionIndex = Math.max(0, options.findIndex((option) =>
+          String(option._id || '') === requestedOption || String(option.size || '').toLowerCase() === requestedOption.toLowerCase()
+        ));
+        const option = options[optionIndex];
+        setSelectedOptionIndex(optionIndex);
+        setSelectedSize(option?.size || '');
+        setSelectedPrice(option?.price ?? null);
+        setSelectedDiscountPrice(Number(option?.discountPrice) || 0);
+        setSelectedColor(defaultVariant.colorName || '');
 
-        if (
-          defaultVariant.sizes &&
-          defaultVariant.prices &&
-          defaultVariant.discountPrices &&
-          defaultVariant.sizes.length > 0 &&
-          defaultVariant.prices.length > 0 &&
-          defaultVariant.discountPrices.length > 0
-        ) {
-          setSelectedSize(defaultVariant.sizes[0]);
-          setSelectedPrice(defaultVariant.prices[0]);
-          setSelectedDiscountPrice(defaultVariant.discountPrices[0]);
-          setSelectedColor(defaultVariant.colorName);
-        }
-
-        setMainImage(defaultVariant.images[0]);
+        setMainImage(defaultVariant.images?.[0] || fetchedProduct.mainImage || '');
       } else {
         console.warn("No variants available for this product.");
+        setSelectedVariant(null);
+        setSelectedOptionIndex(0);
+        setSelectedSize(null);
+        setSelectedPrice(null);
+        setSelectedDiscountPrice(null);
+        setSelectedColor(null);
+        setMainImage(fetchedProduct.mainImage || '');
       }
     } catch (error) {
       console.error('Error fetching product data:', error);
     }
-  };
+  }, [dispatch, id]);
 
-  const fetchReviews = async () => {
+  const fetchReviews = useCallback(async () => {
     try {
       const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/products/${id}/reviews`);
       if (res.status === 200) {
@@ -100,9 +215,9 @@ const ProductView = () => {
     } catch (err) {
       console.error('Failed to fetch reviews', err);
     }
-  };
+  }, [id]);
 
-  const fetchRelatedProducts = async () => {
+  const fetchRelatedProducts = useCallback(async () => {
     try {
       const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/relatedproductfront/${id}`, {
         params: { excludeId: id }
@@ -121,7 +236,7 @@ const ProductView = () => {
     } catch (error) {
       console.error('Error fetching related products:', error);
     }
-  };
+  }, [id]);
 
   useEffect(() => {
     fetchProduct();
@@ -223,7 +338,28 @@ const ProductView = () => {
         socketRef.current.disconnect();
       }
     };
-  }, [id]);
+  }, [id, fetchProduct, fetchReviews]);
+
+  useEffect(() => {
+    let active = true;
+    const token = getStorage('accessToken');
+    if (!isLoggedIn || !token) {
+      setIsLiked(false);
+      return () => { active = false; };
+    }
+
+    axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/products/${id}/like/status`, {
+      headers: { Authorization: `Bearer ${token}` }
+    }).then(({ data }) => {
+      if (!active) return;
+      setIsLiked(Boolean(data.liked));
+      setLikesCount(Number(data.likesCount) || 0);
+    }).catch(() => {
+      if (active) setIsLiked(false);
+    });
+
+    return () => { active = false; };
+  }, [id, isLoggedIn]);
 
   const unwrapCategories = (cats) => {
     if (!Array.isArray(cats)) return [];
@@ -247,9 +383,9 @@ const ProductView = () => {
 
   useEffect(() => {
     if (product && product.categories && product.categories.length > 0) {
-      fetchRelatedProducts(unwrapCategories(product.categories));
+      fetchRelatedProducts();
     }
-  }, [product]);
+  }, [product, fetchRelatedProducts]);
 
   useEffect(() => {
     if (wishlist.length > 0 && id) {
@@ -258,38 +394,100 @@ const ProductView = () => {
   }, [wishlist, id]);
 
   const handleVariantChange = (variant) => {
+    if (!variant) return;
     setSelectedVariant(variant);
     setQuantity(1);
 
-    // Keep the URL in sync so ?variant=<id> serves this variant's SEO/meta
+    const options = getVariantOptions(product, variant);
+    const firstOption = options[0];
+    setSelectedOptionIndex(0);
+    setSelectedSize(firstOption?.size || '');
+    setSelectedPrice(firstOption?.price ?? null);
+    setSelectedDiscountPrice(Number(firstOption?.discountPrice) || 0);
+    setSelectedColor(variant.colorName || '');
+
+    // Keep the URL in sync so variant, option, and region previews match the selection.
     if (variant && variant._id && typeof window !== 'undefined') {
       try {
         const url = new URL(window.location.href);
         url.searchParams.set('variant', variant._id);
+        const region = variant.regionId && typeof variant.regionId === 'object'
+          ? variant.regionId
+          : null;
+        const regionOption = regionOptions.find((entry) => entry.id === String(region?._id || variant.regionId || selectedRegionId));
+        const regionValue = region?.slug || regionOption?.slug || regionOption?.id;
+        if (regionValue) url.searchParams.set('region', regionValue);
+        if (firstOption?._id) {
+          url.searchParams.set('option', String(firstOption._id));
+          url.searchParams.delete('size');
+        } else if (firstOption?.size) {
+          url.searchParams.set('size', String(firstOption.size));
+          url.searchParams.delete('option');
+        } else {
+          url.searchParams.delete('option');
+          url.searchParams.delete('size');
+        }
         window.history.replaceState(null, '', url.toString());
       } catch {}
     }
-
-    if (variant.sizes && variant.prices && variant.discountPrices && variant.discountPrices.length > 0 && variant.sizes.length > 0 && variant.prices.length > 0) {
-      setSelectedSize(variant.sizes[0]);
-      setSelectedPrice(variant.prices[0]);
-      setSelectedDiscountPrice(variant.discountPrices[0]);
-      setSelectedColor(variant.colorName);
-    } else {
-      setSelectedSize(null);
-      setSelectedPrice(null);
-      setSelectedDiscountPrice(null);
-      setSelectedColor(null);
-    }
-    setMainImage(variant.images[0]);
+    setMainImage(variant.images?.[0] || product?.mainImage || '');
   };
 
-  const handleSizeChange = (size) => {
-    const sizeIndex = selectedVariant.sizes.indexOf(size);
-    if (sizeIndex !== -1 && selectedVariant.prices[sizeIndex] !== undefined) {
-      setSelectedSize(size);
-      setSelectedPrice(selectedVariant.prices[sizeIndex]);
-      setSelectedDiscountPrice(selectedVariant.discountPrices[sizeIndex]);
+  const handleSizeChange = (index) => {
+    const option = variantOptions[index];
+    if (!option) return;
+    setSelectedOptionIndex(index);
+    setSelectedSize(option.size || '');
+    setSelectedPrice(option.price ?? null);
+    setSelectedDiscountPrice(Number(option.discountPrice) || 0);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (option._id) {
+        url.searchParams.set('option', String(option._id));
+        url.searchParams.delete('size');
+      } else if (option.size) {
+        url.searchParams.set('size', String(option.size));
+        url.searchParams.delete('option');
+      }
+      window.history.replaceState(null, '', url.toString());
+    }
+  };
+
+  const regionRefs = product ? [
+    ...(Array.isArray(product.regions) ? product.regions : []),
+    product.regionId,
+    ...(product.variants || []).map((variant) => variant.regionId),
+  ].filter(Boolean) : [];
+  const regionOptions = [...new Map(regionRefs.map((region) => {
+    const regionId = String(region._id || region);
+    return [regionId, { id: regionId, name: region.name || region.slug || regionId, slug: region.slug || '' }];
+  })).values()];
+  const variantOptions = getVariantOptions(product, selectedVariant);
+  const selectedOption = variantOptions[selectedOptionIndex] || variantOptions[0] || null;
+  const regionVariants = (product?.variants || []).filter((variant) =>
+    !selectedRegionId || !variant.regionId || String(variant.regionId._id || variant.regionId) === selectedRegionId);
+  const currentOriginalPrice = Number(
+    selectedOption?.price ?? selectedPrice ?? product?.mainPrice ?? 0
+  );
+  const rawDiscountPrice = Number(
+    selectedOption?.discountPrice ?? (selectedVariant ? selectedDiscountPrice : product?.discountPrice) ?? 0
+  );
+  const currentDiscountPrice = rawDiscountPrice > 0 && rawDiscountPrice < currentOriginalPrice ? rawDiscountPrice : null;
+  const currentSellPrice = currentDiscountPrice || currentOriginalPrice;
+  const currentStockValue = Number(selectedOption?.stock ?? selectedVariant?.stock);
+  const currentStock = Number.isFinite(currentStockValue) ? currentStockValue : null;
+
+  const handleRegionChange = (regionId) => {
+    setSelectedRegionId(regionId);
+    const candidates = (product?.variants || []).filter((variant) =>
+      !regionId || !variant.regionId || String(variant.regionId._id || variant.regionId) === regionId);
+    handleVariantChange(candidates[0]);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      const region = regionOptions.find((entry) => entry.id === regionId);
+      if (region?.slug || region?.id) url.searchParams.set('region', region.slug || region.id);
+      else url.searchParams.delete('region');
+      window.history.replaceState(null, '', url.toString());
     }
   };
 
@@ -323,38 +521,65 @@ const ProductView = () => {
     try {
       const res = await axios.post(
         `${process.env.NEXT_PUBLIC_API_URI}/api/products/${id}/like`,
-        {},
+        { liked: !isLiked },
         { headers: { Authorization: `Bearer ${getStorage('accessToken')}` } }
       );
       setLikesCount(res.data.likesCount);
-      setIsLiked(res.data.liked);
+      setIsLiked(Boolean(res.data.liked));
     } catch {
       toast.error('Failed to update like');
     }
   };
 
-  const handleAddToCart = () => {
+  const handleAddToCart = async ({ goToCheckout = false } = {}) => {
+    if (!product || !selectedOption || (!product.isPreOrder && currentStock !== null && quantity > currentStock)) {
+      toast.error('Please select an available product option.');
+      return false;
+    }
+    if (cartSubmitting) return false;
+    setCartSubmitting(true);
     const productToAdd = {
-      variantId: selectedVariant._id,
+      variantId: selectedVariant?._id,
       productId: id,
       name: product.name,
       mainImage,
-      price: selectedDiscountPrice ? selectedDiscountPrice : product.discountPrice,
-      size: selectedSize,
-      measureType: selectedVariant.measureType,
-      unitName: selectedVariant.unitName,
+      price: currentSellPrice,
+      regionId: selectedRegionId || selectedVariant?.regionId?._id || selectedVariant?.regionId || null,
+      regionName: regionOptions.find((region) => region.id === selectedRegionId)?.name || selectedVariant?.regionId?.name || '',
+      size: selectedOption?.size || selectedSize || '',
+      measureType: selectedOption?.measureType || selectedVariant?.measureType || product.measureType,
+      unitName: selectedOption?.unitName || selectedVariant?.unitName || product.unitName,
       color: selectedColor,
-      quantity
+      hexCode: selectedVariant?.hexCode || '',
+      quantity,
+      isPreOrder: Boolean(product.isPreOrder),
+      preOrderEstimatedDate: product.preOrderEstimatedDate || null,
     };
-    addToCart(productToAdd);
-    toast.success('Added to cart successfully!', {
-      position: 'top-center',
-      autoClose: 3000,
-      hideProgressBar: true,
-      closeOnClick: true,
-      pauseOnHover: true,
-      draggable: true,
-    });
+    try {
+      const result = await addToCart(productToAdd);
+      if (result == null) {
+        toast.error('Could not add this item to your cart. Please try again.');
+        return false;
+      }
+      if (goToCheckout) {
+        router.push('/checkout');
+      } else {
+        toast.success('Added to cart successfully!', {
+          position: 'top-center',
+          autoClose: 3000,
+          hideProgressBar: true,
+          closeOnClick: true,
+          pauseOnHover: true,
+          draggable: true,
+        });
+      }
+      return true;
+    } catch (error) {
+      toast.error(error?.message || 'Could not add this item to your cart. Please try again.');
+      return false;
+    } finally {
+      setCartSubmitting(false);
+    }
   };
 
   const getUpdateMessage = (updateData) => {
@@ -413,7 +638,7 @@ const ProductView = () => {
 
   return (
     <>
-      <SEOHead product={product} url={`/products/${id}`} hideMeta />
+      <SEOHead product={product} url={`/products/${id}`} hideMeta hideProductSchema />
       <div className="min-h-screen bg-pure-white">
       <ToastContainer />
       {product && selectedVariant ? (
@@ -442,7 +667,7 @@ const ProductView = () => {
                 </div>
 
                 {/* Thumbnail Images */}
-                {selectedVariant.images.length > 1 && (
+                {(selectedVariant?.images?.length || 0) > 1 && (
                   <div className="flex gap-2 mt-4 overflow-x-auto pb-2">
                     {selectedVariant.images.map((image, index) => (
                       <button
@@ -523,22 +748,17 @@ const ProductView = () => {
 
               {/* Price */}
               <div className="flex items-center gap-3 mb-6">
-                {selectedDiscountPrice ? (
+                {currentDiscountPrice !== null ? (
                   <>
-                    <span className="text-lg text-dark-gray line-through font-sans">{formatBDT(selectedPrice)}</span>
-                    <span className="text-2xl text-maybelline-pink font-heading font-bold">{formatBDT(selectedDiscountPrice)}</span>
+                    <span className="text-lg text-dark-gray line-through font-sans">{formatBDT(currentOriginalPrice)}</span>
+                    <span className="text-2xl text-maybelline-pink font-heading font-bold">{formatBDT(currentDiscountPrice)}</span>
                   </>
                 ) : (
-                  <>
-                    <span className="text-lg text-dark-gray line-through font-sans">{formatBDT(product.mainPrice)}</span>
-                    <span className="text-2xl text-maybelline-pink font-heading font-bold">{formatBDT(product.discountPrice)}</span>
-                  </>
+                  <span className="text-2xl text-maybelline-pink font-heading font-bold">{formatBDT(currentOriginalPrice)}</span>
                 )}
                 {(() => {
-                  const original = selectedDiscountPrice ? selectedPrice : product.mainPrice;
-                  const discount = selectedDiscountPrice ? selectedDiscountPrice : product.discountPrice;
-                  if (original && discount && original > discount) {
-                    const pct = Math.round(((original - discount) / original) * 100);
+                  if (currentDiscountPrice !== null && currentOriginalPrice > currentDiscountPrice) {
+                    const pct = Math.round(((currentOriginalPrice - currentDiscountPrice) / currentOriginalPrice) * 100);
                     return pct > 0 ? (
                       <span className="text-xs text-maybelline-pink bg-maybelline-pink bg-opacity-10 px-2 py-0.5 font-sans font-medium">{pct}% OFF</span>
                     ) : null;
@@ -550,18 +770,20 @@ const ProductView = () => {
                 )}
               </div>
 
+              <RegionSelector regions={regionOptions} selectedRegionId={selectedRegionId} onChange={handleRegionChange} />
+
               {/* Color Selector */}
-              {product.variants.length > 0 && (
+              {regionVariants.length > 0 && (
                 <div className="mb-6">
                   <p className="text-sm font-sans font-semibold mb-3 text-black uppercase tracking-wider">Color: <span className="font-normal normal-case text-dark-gray">{selectedColor}</span></p>
                   <div className="flex gap-3">
-                    {product.variants.map((variant) => (
+                    {regionVariants.map((variant) => (
                       <button
-                        key={variant.hexCode}
+                        key={variant._id || `${variant.regionId}-${variant.hexCode}-${variant.colorName}`}
                         style={{ backgroundColor: variant.hexCode }}
                         onClick={() => handleVariantChange(variant)}
                         className={`w-9 h-9 rounded-full transition-all duration-200 ${
-                          selectedVariant.hexCode === variant.hexCode
+                          selectedVariant?._id === variant._id
                             ? 'ring-2 ring-maybelline-pink ring-offset-2 scale-110'
                             : 'ring-1 ring-mid-gray hover:ring-dark-gray'
                         }`}
@@ -575,22 +797,22 @@ const ProductView = () => {
               )}
 
               {/* Size Selector */}
-              {selectedVariant.sizes && selectedVariant.sizes.length > 0 && (
+              {variantOptions.length > 0 && (
                 <div className="mb-6">
                   <p className="text-sm font-sans font-semibold mb-3 text-black uppercase tracking-wider">
-                    {selectedVariant.measureType ? selectedVariant.measureType : "Size"}:
+                    {selectedVariant?.measureType || product.measureType || "Size"}:
                   </p>
                   <div className="flex flex-wrap gap-3">
-                    {selectedVariant.sizes.map((size, index) => {
-                      const stockBySize = selectedVariant.stockBySize || [];
-                      const stock = stockBySize[index] || selectedVariant.stock || 0;
+                    {variantOptions.map((option, index) => {
+                      const label = optionLabel(option) || 'Standard';
+                      const stock = Number(option.stock ?? selectedVariant?.stock ?? 0);
                       const isOutOfStock = stock <= 0;
-                      const isSelected = size === selectedSize;
+                      const isSelected = index === selectedOptionIndex;
 
                       return (
                         <button
-                          key={size}
-                          onClick={() => !isOutOfStock && handleSizeChange(size)}
+                          key={option._id || `${label}-${index}`}
+                          onClick={() => !isOutOfStock && handleSizeChange(index)}
                           disabled={isOutOfStock}
                           className={`px-5 py-2.5 border font-sans text-sm transition-all duration-200 ${
                             isOutOfStock
@@ -602,17 +824,12 @@ const ProductView = () => {
                         >
                           <div className="flex flex-col items-center">
                             <span className={isSelected ? 'text-pure-white' : isOutOfStock ? 'text-mid-gray' : 'text-black'}>
-                              {size}
+                              {label}
                             </span>
-                            {selectedVariant.unitName && (
-                              <span className={`text-xs ${isSelected ? 'text-pure-white' : isOutOfStock ? 'text-mid-gray' : 'text-dark-gray'}`}>
-                                {selectedVariant.unitName}
-                              </span>
-                            )}
                             <span className={`text-xs mt-1 ${isOutOfStock ? 'text-rose' : stock < 5 ? 'text-maybelline-pink' : 'text-dark-gray'}`}>
                               {isOutOfStock ? 'Out of Stock' : `${stock} in stock`}
                               {realTimeUpdates.some(update =>
-                                update.data?.size === size &&
+                                String(update.data?.size || '') === String(option.size || '') &&
                                 (update.type === 'stock_updated' || update.type === 'inventory_assignment')
                               ) && (
                                 <span className="ml-1 text-maybelline-pink animate-pulse">●</span>
@@ -643,6 +860,7 @@ const ProductView = () => {
                   <button
                     onClick={() => setQuantity(q => q + 1)}
                     className="px-4 py-2.5 text-black hover:bg-cool-gray transition-colors"
+                    disabled={!product.isPreOrder && currentStock !== null && quantity >= currentStock}
                   >
                     <FaPlus size={12} />
                   </button>
@@ -661,19 +879,21 @@ const ProductView = () => {
                   </button>
                 ) : (
                   <button
-                    onClick={handleAddToCart}
+                    onClick={() => handleAddToCart()}
+                    disabled={cartSubmitting || !product.isPreOrder && currentStock !== null && currentStock <= 0}
                     className="w-full py-3.5 bg-maybelline-pink text-pure-white font-sans font-semibold text-sm uppercase tracking-wider hover:bg-maybelline-magenta transition-all duration-200 flex items-center justify-center gap-2 min-h-[48px]"
                   >
                     <FiShoppingCart size={18} />
-                    Add to Cart
+                    {product.isPreOrder ? 'Pre-order Now' : 'Add to Cart'}
                   </button>
                 )}
                 <div className="flex gap-3">
                   <button
+                    onClick={() => handleAddToCart({ goToCheckout: true })}
                     className="flex-1 py-3 border border-black text-black font-sans font-medium text-sm uppercase tracking-wider bg-pure-white hover:bg-black hover:text-pure-white transition-all duration-200"
-                    disabled
+                    disabled={cartSubmitting || product.comingSoon || !product.isPreOrder && currentStock !== null && currentStock <= 0}
                   >
-                    Buy Now
+                    {cartSubmitting ? 'Please wait…' : 'Buy Now'}
                   </button>
                   <div className="flex gap-2">
                     <button
@@ -702,7 +922,7 @@ const ProductView = () => {
                     )}
                     <button
                       onClick={async () => {
-                        const url = typeof window !== 'undefined' ? window.location.href : '';
+                        const url = getPublicCurrentUrl();
                         if (navigator.share) {
                           try {
                             await navigator.share({ title: product.name, url });
@@ -995,13 +1215,17 @@ const ProductView = () => {
                   .filter((relatedProduct) => relatedProduct.productId !== product._id)
                   .slice(0, 8)
                   .map((relatedProduct) => {
-                    const hasDiscount =
-                      relatedProduct.discountPrice > 0 &&
-                      relatedProduct.discountPrice < relatedProduct.mainPrice;
+                    const priceSummary = getProductPriceSummary(relatedProduct);
+                    const relatedOriginalPrice = priceSummary.originalPrice || Number(relatedProduct.mainPrice || 0);
+                    const relatedSellPrice = priceSummary.price || relatedOriginalPrice;
+                    const usesVariantPrices = Array.isArray(relatedProduct.variants) && relatedProduct.variants.length > 0;
+                    const relatedDiscountPrice = priceSummary.discountPrice ?? (!usesVariantPrices ? relatedProduct.discountPrice : null);
+                    const hasDiscount = relatedDiscountPrice !== null && relatedDiscountPrice !== undefined &&
+                      Number(relatedDiscountPrice) > 0 && Number(relatedDiscountPrice) < relatedOriginalPrice;
                     const pctOff = hasDiscount
                       ? Math.round(
-                          ((relatedProduct.mainPrice - relatedProduct.discountPrice) /
-                            relatedProduct.mainPrice) *
+                          ((relatedOriginalPrice - relatedDiscountPrice) /
+                            relatedOriginalPrice) *
                             100
                         )
                       : 0;
@@ -1045,11 +1269,11 @@ const ProductView = () => {
                               hasDiscount ? 'text-maybelline-pink' : 'text-black'
                             }`}
                           >
-                            {formatBDT((hasDiscount ? relatedProduct.discountPrice : relatedProduct.mainPrice).toFixed(2))}
+                            {priceSummary.hasRange ? 'From ' : ''}{formatBDT((hasDiscount ? relatedDiscountPrice : relatedSellPrice).toFixed(2))}
                           </span>
                           {hasDiscount && (
                             <span className="text-xs font-sans text-mid-gray line-through">
-                              {formatBDT(relatedProduct.mainPrice.toFixed(2))}
+                              {formatBDT(relatedOriginalPrice.toFixed(2))}
                             </span>
                           )}
                         </div>
@@ -1070,6 +1294,13 @@ const ProductView = () => {
                           Add to Cart
                         </button>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => setRelatedCartProductId(relatedProduct.productId)}
+                        className="mt-2 w-full text-[11px] font-sans font-semibold uppercase tracking-wider text-pure-white bg-black text-center py-2.5 hover:bg-maybelline-pink transition-colors duration-200"
+                      >
+                        Buy Now
+                      </button>
                     </div>
                     );
                   })}
@@ -1120,35 +1351,34 @@ const ProductView = () => {
                 <div className="flex-1 min-w-0">
                   <h4 className="font-sans font-semibold text-black text-sm line-clamp-2">{product.name}</h4>
                   <div className="flex items-center gap-2 mt-1">
-                    {selectedDiscountPrice ? (
+                    {currentDiscountPrice !== null ? (
                       <>
-                        <span className="text-xs text-dark-gray line-through font-sans">{formatBDT(selectedPrice)}</span>
-                        <span className="text-base text-maybelline-pink font-heading font-bold">{formatBDT(selectedDiscountPrice)}</span>
+                        <span className="text-xs text-dark-gray line-through font-sans">{formatBDT(currentOriginalPrice)}</span>
+                        <span className="text-base text-maybelline-pink font-heading font-bold">{formatBDT(currentDiscountPrice)}</span>
                       </>
                     ) : (
-                      <>
-                        <span className="text-xs text-dark-gray line-through font-sans">{formatBDT(product.mainPrice)}</span>
-                        <span className="text-base text-maybelline-pink font-heading font-bold">{formatBDT(product.discountPrice)}</span>
-                      </>
+                      <span className="text-base text-maybelline-pink font-heading font-bold">{formatBDT(currentOriginalPrice)}</span>
                     )}
                   </div>
                 </div>
               </div>
 
+              <RegionSelector regions={regionOptions} selectedRegionId={selectedRegionId} onChange={handleRegionChange} compact />
+
               {/* Color Selector in Modal */}
-              {product.variants.length > 0 && (
+              {regionVariants.length > 0 && (
                 <div>
                   <p className="text-xs font-sans font-semibold mb-2.5 text-black uppercase tracking-wider">
                     Color: <span className="font-normal normal-case text-dark-gray">{selectedColor}</span>
                   </p>
                   <div className="flex flex-wrap gap-2.5">
-                    {product.variants.map((variant) => (
+                    {regionVariants.map((variant) => (
                       <button
-                        key={variant.hexCode}
+                        key={variant._id || `${variant.regionId}-${variant.hexCode}-${variant.colorName}`}
                         style={{ backgroundColor: variant.hexCode }}
                         onClick={() => handleVariantChange(variant)}
                         className={`w-10 h-10 min-h-[44px] min-w-[44px] rounded-full transition-all duration-200 ${
-                          selectedVariant.hexCode === variant.hexCode
+                          selectedVariant?._id === variant._id
                             ? 'ring-2 ring-maybelline-pink ring-offset-2 scale-110'
                             : 'ring-1 ring-mid-gray hover:ring-dark-gray'
                         }`}
@@ -1162,22 +1392,22 @@ const ProductView = () => {
               )}
 
               {/* Size Selector in Modal */}
-              {selectedVariant.sizes && selectedVariant.sizes.length > 0 && (
+              {variantOptions.length > 0 && (
                 <div>
                   <p className="text-xs font-sans font-semibold mb-2.5 text-black uppercase tracking-wider">
-                    {selectedVariant.measureType ? selectedVariant.measureType : "Size"}:
+                    {selectedVariant?.measureType || product.measureType || "Size"}:
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    {selectedVariant.sizes.map((size, index) => {
-                      const stockBySize = selectedVariant.stockBySize || [];
-                      const stock = stockBySize[index] || selectedVariant.stock || 0;
+                    {variantOptions.map((option, index) => {
+                      const label = optionLabel(option) || 'Standard';
+                      const stock = Number(option.stock ?? selectedVariant?.stock ?? 0);
                       const isOutOfStock = stock <= 0;
-                      const isSelected = size === selectedSize;
+                      const isSelected = index === selectedOptionIndex;
 
                       return (
                         <button
-                          key={size}
-                          onClick={() => !isOutOfStock && handleSizeChange(size)}
+                          key={option._id || `${label}-${index}`}
+                          onClick={() => !isOutOfStock && handleSizeChange(index)}
                           disabled={isOutOfStock}
                           className={`px-4 py-2.5 min-h-[44px] border font-sans text-sm transition-all duration-200 ${
                             isOutOfStock
@@ -1188,12 +1418,7 @@ const ProductView = () => {
                           }`}
                         >
                           <div className="flex flex-col items-center">
-                            <span>{size}</span>
-                            {selectedVariant.unitName && (
-                              <span className={`text-xs ${isSelected ? 'text-pure-white' : isOutOfStock ? 'text-mid-gray' : 'text-dark-gray'}`}>
-                                {selectedVariant.unitName}
-                              </span>
-                            )}
+                            <span>{label}</span>
                           </div>
                         </button>
                       );
@@ -1229,7 +1454,7 @@ const ProductView = () => {
               <div className="bg-cool-gray bg-opacity-50 p-4 space-y-2">
                 <div className="flex justify-between items-center text-sm font-sans">
                   <span className="text-dark-gray">Price per unit</span>
-                  <span className="text-black font-medium">{formatBDT(selectedDiscountPrice || product.discountPrice)}</span>
+                  <span className="text-black font-medium">{formatBDT(currentSellPrice)}</span>
                 </div>
                 <div className="flex justify-between items-center text-sm font-sans">
                   <span className="text-dark-gray">Quantity</span>
@@ -1238,7 +1463,7 @@ const ProductView = () => {
                 <div className="border-t border-cool-gray pt-2 flex justify-between items-center">
                   <span className="text-sm font-sans font-semibold text-black uppercase tracking-wider">Total</span>
                   <span className="text-xl font-heading font-bold text-maybelline-pink">
-                    {formatBDT(((selectedDiscountPrice || product.discountPrice) * quantity).toFixed(2))}
+                    {formatBDT((currentSellPrice * quantity).toFixed(2))}
                   </span>
                 </div>
               </div>
@@ -1247,14 +1472,14 @@ const ProductView = () => {
             {/* Modal Footer */}
             <div className="px-5 py-4 border-t border-cool-gray bg-pure-white">
               <button
-                onClick={() => {
-                  handleAddToCart();
-                  setShowCartModal(false);
+                onClick={async () => {
+                  if (await handleAddToCart()) setShowCartModal(false);
                 }}
+                disabled={cartSubmitting}
                 className="w-full py-3.5 bg-maybelline-pink text-pure-white font-sans font-semibold text-sm uppercase tracking-wider hover:bg-maybelline-magenta transition-all duration-200 flex items-center justify-center gap-2 min-h-[48px]"
               >
                 <FiShoppingCart size={18} />
-                Add to Cart
+                {cartSubmitting ? 'Please wait…' : 'Add to Cart'}
               </button>
             </div>
           </div>

@@ -1,5 +1,5 @@
 'use client'
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { getStorage } from "../lib/storage";
 import { toast } from 'react-toastify';
@@ -48,6 +48,13 @@ const itemMeasure = (i) =>
     size: i?.size
   });
 
+const getRegionId = (region) => String(region?._id || region || '');
+const getRegionName = (region) => region?.name || region?.regionName || '';
+const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+}[character]));
+const safeLabelColor = (value) => /^#[\da-f]{3,8}$/i.test(String(value || '')) ? value : '#9CA3AF';
+
 const AdminInventory = () => {
   const [inventory, setInventory] = useState([]);
   const [products, setProducts] = useState([]);
@@ -71,6 +78,7 @@ const AdminInventory = () => {
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedVariants, setSelectedVariants] = useState([]);
   const [variantStock, setVariantStock] = useState({});
+  const [variantRealBarcodes, setVariantRealBarcodes] = useState({});
   const [printQuantities, setPrintQuantities] = useState({});
   const [printSettings, setPrintSettings] = useState({
     printerType: 'normal',
@@ -84,6 +92,7 @@ const AdminInventory = () => {
     search: '',
     status: '',
     productId: '',
+    regionId: '',
     variantId: '',
     color: '',
     size: ''
@@ -96,11 +105,14 @@ const AdminInventory = () => {
   });
   const [formData, setFormData] = useState({
     productId: '',
+    regionId: '',
     variantId: '',
     size: '',
     stockQuantity: 1,
     price: 0,
     discountPrice: 0,
+    costPrice: '',
+    realBarcode: '',
     manualPricing: false,
     location: {
       warehouse: 'Main Warehouse',
@@ -111,21 +123,6 @@ const AdminInventory = () => {
   });
   const router = useRouter();
   const { isAuthenticated, loading: authLoading } = useAdmin();
-
-  useEffect(() => {
-    if (!authLoading && !isAuthenticated) {
-      toast.error('Please log in as admin to access this page');
-      router.push('/admin');
-      return;
-    }
-    
-    if (isAuthenticated) {
-      fetchInventory();
-      fetchProducts();
-      fetchOrders();
-      fetchStats();
-    }
-  }, [pagination.page, filters, isAuthenticated, authLoading]);
 
   useEffect(() => {
     if (formData.productId) {
@@ -148,31 +145,49 @@ const AdminInventory = () => {
     if (!selectedInventory) return;
     setFormData({
       productId: selectedInventory.productId?._id || selectedInventory.productId || '',
+      regionId: getRegionId(selectedInventory.regionId || selectedInventory.variantId?.regionId),
       variantId: selectedInventory.variantId?._id || selectedInventory.variantId || '',
       size: selectedInventory.size || '',
       stockQuantity: selectedInventory.stockQuantity || 1,
       price: selectedInventory.price || 0,
       discountPrice: selectedInventory.discountPrice || 0,
+      costPrice: selectedInventory.costPrice ?? '',
+      realBarcode: selectedInventory.realBarcode || '',
       manualPricing: true,
       location: selectedInventory.location || { warehouse: 'Main Warehouse', shelf: '', section: '' },
       notes: selectedInventory.notes || ''
     });
   }, [selectedInventory]);
 
-  // Cascading filter options: product -> variant -> color -> size
+  // Cascading filter options: product -> region -> variant/color -> size
   const filterProduct = products.find(p => p._id === filters.productId) || null;
   const filterVariants = filterProduct?.variants || [];
-  const filterColors = [...new Set(filterVariants.map(v => v.colorName || 'Default'))];
-  const filterVariant = filters.variantId ? filterVariants.find(v => v._id === filters.variantId) : null;
+  const filterRegions = [...new Map(filterVariants.map((variant) => {
+    const region = variant.regionId;
+    const id = getRegionId(region);
+    return [id, { id, name: getRegionName(region) || 'Unassigned region' }];
+  }).filter(([id]) => id)).values()];
+  const regionFilterVariants = filterVariants.filter((variant) => !filters.regionId || getRegionId(variant.regionId) === filters.regionId);
+  const filterColors = [...new Set(regionFilterVariants.map(v => v.colorName || 'Default'))];
+  const filterVariant = filters.variantId ? regionFilterVariants.find(v => v._id === filters.variantId) : null;
   const filterSizes = filterVariant
     ? (filterVariant.sizes || [])
     : [...new Set(
-        filterVariants
+        regionFilterVariants
           .filter(v => !filters.color || (v.colorName || 'Default') === filters.color)
           .flatMap(v => v.sizes || [])
       )];
 
-  const fetchInventory = async () => {
+  const formRegions = [...new Map(availableVariants.map((variant) => {
+    const region = variant.regionId;
+    const id = getRegionId(region);
+    return [id, { id, name: getRegionName(region) || 'Unassigned region' }];
+  }).filter(([id]) => id)).values()];
+  const regionVariants = formRegions.length > 0 && !formData.regionId
+    ? []
+    : availableVariants.filter((variant) => !formData.regionId || getRegionId(variant.regionId) === formData.regionId);
+
+  const fetchInventory = useCallback(async () => {
     try {
       setLoading(true);
       const params = new URLSearchParams({
@@ -193,9 +208,9 @@ const AdminInventory = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filters, pagination.page, pagination.limit]);
 
-  const fetchProducts = async () => {
+  const fetchProducts = useCallback(async () => {
     try {
       const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/products`, {
         headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` }
@@ -204,9 +219,9 @@ const AdminInventory = () => {
     } catch (error) {
       console.error('Error fetching products:', error);
     }
-  };
+  }, []);
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     try {
       const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/allorders`, {
         headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` }
@@ -215,9 +230,9 @@ const AdminInventory = () => {
     } catch (error) {
       console.error('Error fetching orders:', error);
     }
-  };
+  }, []);
 
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URI}/api/inventory/stats`, {
         headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` }
@@ -226,7 +241,22 @@ const AdminInventory = () => {
     } catch (error) {
       console.error('Error fetching stats:', error);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      toast.error('Please log in as admin to access this page');
+      router.push('/admin');
+      return;
+    }
+
+    if (isAuthenticated) {
+      fetchInventory();
+      fetchProducts();
+      fetchOrders();
+      fetchStats();
+    }
+  }, [authLoading, isAuthenticated, router, fetchInventory, fetchProducts, fetchOrders, fetchStats]);
 
   const fetchAllInventoryIds = async () => {
     try {
@@ -260,14 +290,18 @@ const AdminInventory = () => {
               if (stockQuantity > 0) {
                 const price = variant.prices?.[i] || variant.prices?.[0] || 0;
                 const discountPrice = variant.discountPrices?.[i] || 0;
+                const option = variant.options?.find((entry) => String(entry.size || '').trim().toLowerCase() === String(size).trim().toLowerCase());
                 
                 bulkData.push({
                   productId: formData.productId,
+                  regionId: getRegionId(variant.regionId) || formData.regionId,
                   variantId: variant._id,
                   size: size,
                   stockQuantity: stockQuantity,
+                  realBarcode: variantRealBarcodes[variantId]?.[size] || '',
                   price: price,
                   discountPrice: discountPrice,
+                  costPrice: option?.costPrice ?? variant.costPrice ?? selectedProduct?.costPrice ?? undefined,
                   location: formData.location,
                   notes: formData.notes
                 });
@@ -335,19 +369,24 @@ const AdminInventory = () => {
 
    const handleDeleteAllSelected = async () => {
      try {
-       const deletePromises = selectedItems.map(id => 
-         axios.delete(`${process.env.NEXT_PUBLIC_API_URI}/api/inventory/${id}`, {
+       let deletedCount = 0;
+       let skippedCount = 0;
+       for (let offset = 0; offset < selectedItems.length; offset += 500) {
+         const response = await axios.delete(`${process.env.NEXT_PUBLIC_API_URI}/api/inventory/bulk`, {
+           data: { ids: selectedItems.slice(offset, offset + 500) },
            headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` }
-         })
-       );
-       
-       await Promise.all(deletePromises);
-       
-       toast.success(`${selectedItems.length} inventory items deleted successfully`);
+         });
+         deletedCount += Number(response.data.deletedCount) || 0;
+         skippedCount += Number(response.data.skippedCount) || 0;
+       }
+       toast.success(skippedCount
+         ? `Deleted ${deletedCount} items; ${skippedCount} assigned items were kept.`
+         : `Deleted ${deletedCount} inventory items successfully.`);
        setSelectedItems([]);
        fetchInventory();
+       fetchStats();
      } catch (error) {
-       toast.error('Failed to delete some inventory items');
+       toast.error(error.response?.data?.message || 'Failed to delete selected inventory items');
        console.error('Error deleting inventory items:', error);
     }
   };
@@ -436,6 +475,11 @@ const AdminInventory = () => {
       const next = { ...prev, [key]: value };
       // Cascade: changing a higher level clears the lower ones
       if (key === 'productId') {
+        next.regionId = '';
+        next.variantId = '';
+        next.color = '';
+        next.size = '';
+      } else if (key === 'regionId') {
         next.variantId = '';
         next.color = '';
         next.size = '';
@@ -456,11 +500,14 @@ const AdminInventory = () => {
   const resetForm = () => {
     setFormData({
       productId: '',
+      regionId: '',
       variantId: '',
       size: '',
       stockQuantity: 1,
       price: 0,
       discountPrice: 0,
+      costPrice: '',
+      realBarcode: '',
       manualPricing: false,
       location: {
         warehouse: 'Main Warehouse',
@@ -474,6 +521,7 @@ const AdminInventory = () => {
     setBulkMode(false);
     setSelectedVariants([]);
     setVariantStock({});
+    setVariantRealBarcodes({});
   };
 
   const getStatusColor = (status) => {
@@ -514,12 +562,14 @@ const AdminInventory = () => {
       for (let i = 0; i < quantity; i++) {
         labels.push({
           productName: showInfo ? item.productId?.name : '',
+          regionName: showInfo ? (item.regionName || item.variantId?.regionName || '') : '',
           size: showInfo ? item.size : '',
           measureType: item.measureType || item.variantId?.measureType,
           unitName: item.unitName || item.variantId?.unitName,
           colorName: showInfo ? item.color?.name : '',
           hexCode: item.color?.hexCode,
           barcode: printSettings.qrCodeType === 'qrCode' ? '' : item.barcode,
+          realBarcode: showInfo ? item.realBarcode || '' : '',
           qrCode: item.qrCode,
           qrDataUri: printSettings.qrCodeType !== 'barcode' && item.qrCode ? generateQRCodeDataURI(item.qrCode, 60) : '',
           price: item.price,
@@ -595,7 +645,7 @@ const AdminInventory = () => {
     } catch {
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 25" width="100%" height="100%">
         <rect width="80" height="25" fill="#fff"/>
-        <text x="40" y="15" text-anchor="middle" font-family="monospace" font-size="5" fill="#000">${text}</text>
+        <text x="40" y="15" text-anchor="middle" font-family="monospace" font-size="5" fill="#000">${escapeHtml(text)}</text>
       </svg>`;
     }
   };
@@ -605,23 +655,31 @@ const AdminInventory = () => {
       const showBarcode = printSettings.qrCodeType !== 'qrCode';
       const showQR = printSettings.qrCodeType !== 'barcode';
       const barcodeImg = showBarcode && item.barcode ? generateBarcodeSync(item.barcode) : '';
-      const qrImg = showQR && item.qrCode ? `<img src="${generateQRCodeDataURI(item.qrCode, 48)}" style="width:100%;height:100%;" />` : '';
-      const measure = formatMeasureLine({ measureType: item.measureType, unitName: item.unitName, size: item.size });
+      const qrData = showQR && item.qrCode ? generateQRCodeDataURI(item.qrCode, 96) : '';
+      const qrImg = qrData ? `<img src="${escapeHtml(qrData)}" alt="QR code" />` : '';
+      const productName = escapeHtml(item.productName || 'Product');
+      const barcodeValue = escapeHtml(item.barcode || '');
+      const realBarcode = escapeHtml(item.realBarcode || '');
+      const measure = escapeHtml(formatMeasureLine({ measureType: item.measureType, unitName: item.unitName, size: item.size }));
       const discountBlock = item.discountPrice
         ? `<span class="old">${formatBDT(item.price)}</span>${formatBDT(item.discountPrice)}`
         : item.price ? formatBDT(item.price) : '';
       const colorBlock = item.colorName
-        ? `<div class="sticker-color"><span class="swatch" style="background:${item.hexCode || '#999'}"></span> ${item.colorName}</div>`
+        ? `<span class="sticker-color"><span class="swatch" style="background:${safeLabelColor(item.hexCode)}"></span>${escapeHtml(item.colorName)}</span>`
         : '';
+      const regionBlock = item.regionName ? `<span class="sticker-region">REGION · ${escapeHtml(item.regionName)}</span>` : '';
 
       return `
           <div class="sticker">
-            <div class="sticker-name">${item.productName || 'Product'}</div>
-            ${colorBlock}
-            <div class="sticker-size">${measure || 'N/A'}</div>
-            <div class="sticker-price">${discountBlock}</div>
-            ${barcodeImg ? `<div class="sticker-barcode">${barcodeImg}</div>` : ''}
-            ${qrImg ? `<div class="sticker-qr">${qrImg}</div>` : ''}
+            <div class="sticker-head"><span class="sticker-brand">BELORELLA</span><span class="sticker-label">PRODUCT IDENTIFICATION</span></div>
+            <div class="sticker-name">${productName}</div>
+            ${(colorBlock || regionBlock) ? `<div class="sticker-attributes">${colorBlock}${regionBlock}</div>` : ''}
+            <div class="sticker-specs">${measure ? `<span class="sticker-size">${measure}</span>` : '<span></span>'}<span class="sticker-price">${discountBlock}</span></div>
+            ${(barcodeImg || qrImg) ? `<div class="sticker-codes">
+              ${barcodeImg ? `<div class="sticker-barcode"><span class="code-label">MY BARCODE</span>${barcodeImg}<small>${barcodeValue}</small></div>` : ''}
+              ${qrImg ? `<div class="sticker-qr"><span class="code-label">SCAN</span>${qrImg}</div>` : ''}
+            </div>` : '<div class="sticker-no-code">No print code available</div>'}
+            ${realBarcode ? `<div class="sticker-real-barcode">PRODUCT BARCODE · ${realBarcode}</div>` : ''}
           </div>`;
     }).join('');
 
@@ -633,23 +691,35 @@ const AdminInventory = () => {
             <style>
               @page {
                 size: A4;
-                margin: 8mm 8mm 12mm;
+                margin: 7mm 7mm 11mm;
                 @bottom-center { content: "Page " counter(page) " of " counter(pages); font-family: Arial, sans-serif; font-size: 8pt; color: #888; }
                 @bottom-left { content: "BELORELLA"; font-family: Arial, sans-serif; font-size: 7.5pt; color: #999; }
               }
               * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-              body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
-              .sticker-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2mm; }
-              .sticker { border: 0.5px solid #ccc; border-radius: 2px; padding: 2mm; text-align: center; break-inside: avoid; page-break-inside: avoid; display: flex; flex-direction: column; align-items: center; justify-content: space-between; min-height: 35mm; background: white; }
-              .sticker-name { font-size: 7px; font-weight: 700; text-transform: uppercase; line-height: 1.1; max-height: 8mm; overflow: hidden; word-break: break-word; }
-              .sticker-size { font-size: 6px; background: #f0f0f0; padding: 0.5mm 1mm; border-radius: 1px; border: 0.3px solid #ddd; display: inline-block; }
-              .sticker-color { font-size: 5.5px; color: #555; }
-              .swatch { width: 5px; height: 5px; border-radius: 50%; border: 0.3px solid #ccc; display: inline-block; vertical-align: middle; margin-right: 1px; }
-              .sticker-price { font-size: 7px; font-weight: 700; color: #DC143C; }
-              .sticker-price .old { text-decoration: line-through; color: #999; font-size: 5.5px; font-weight: 400; margin-right: 1px; }
-              .sticker-barcode img { width: 80%; max-height: 12mm; }
-              .sticker-qr { width: 12mm; height: 12mm; }
-              .sticker-qr img { width: 100%; height: 100%; }
+              body { margin: 0; padding: 0; font-family: Arial, sans-serif; color: #171717; }
+              .sticker-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: 43mm; gap: 2.4mm; }
+              .sticker { height: 43mm; min-width: 0; overflow: hidden; border: 0.25mm solid #D7DADF; border-left: 0.8mm solid #B1123B; border-radius: 1.4mm; padding: 2mm 2.2mm; background: #fff; display: flex; flex-direction: column; gap: 0.8mm; break-inside: avoid; page-break-inside: avoid; }
+              .sticker-head { display: flex; align-items: center; justify-content: space-between; gap: 1mm; border-bottom: 0.2mm solid #E5E7EB; padding-bottom: 0.6mm; }
+              .sticker-brand { color: #B1123B; font-size: 5.5pt; font-weight: 800; letter-spacing: 1px; }
+              .sticker-label { color: #6B7280; font-size: 4.5pt; font-weight: 700; letter-spacing: 0.3px; }
+              .sticker-name { font-size: 8pt; font-weight: 750; line-height: 1.1; max-height: 8.5mm; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+              .sticker-attributes { display: flex; align-items: center; gap: 2mm; min-height: 3mm; color: #4B5563; overflow: hidden; white-space: nowrap; }
+              .sticker-color, .sticker-region { min-width: 0; display: inline-flex; align-items: center; gap: 0.8mm; overflow: hidden; text-overflow: ellipsis; font-size: 6pt; }
+              .swatch { width: 2.2mm; height: 2.2mm; flex: none; border-radius: 50%; border: 0.25mm solid #D1D5DB; }
+              .sticker-specs { display: flex; align-items: center; justify-content: space-between; gap: 1mm; }
+              .sticker-size { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #374151; background: #F3F4F6; border-radius: 1mm; padding: 0.7mm 1.2mm; font-size: 6pt; }
+              .sticker-price { color: #B1123B; white-space: nowrap; font-size: 8pt; font-weight: 800; }
+              .sticker-price .old { text-decoration: line-through; color: #9CA3AF; font-size: 5.5pt; font-weight: 400; margin-right: 1mm; }
+              .sticker-codes { margin-top: auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 16mm; align-items: center; gap: 1.5mm; }
+              .sticker-barcode { min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 0.4mm; }
+              .sticker-barcode img { display: block; width: 100% !important; height: 8mm !important; max-height: 8mm; object-fit: fill; }
+              .sticker-barcode small { display: block; font: 5.2pt/1.05 'Courier New', monospace; color: #374151; overflow-wrap: anywhere; }
+              .code-label { color: #6B7280; font: 700 4.8pt/1 Arial, sans-serif; letter-spacing: 0.4px; }
+              .sticker-qr { display: flex; flex-direction: column; align-items: center; gap: 0.5mm; }
+              .sticker-qr img { display: block; width: 14mm; height: 14mm; object-fit: contain; }
+              .sticker-real-barcode { color: #6B7280; font: 5pt/1.05 'Courier New', monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+              .sticker-no-code { margin-top: auto; color: #6B7280; font-size: 6pt; }
+              @media print { .sticker { box-shadow: none; } }
             </style>
           </head>
           <body>
@@ -844,6 +914,19 @@ const AdminInventory = () => {
             </div>
 
             <div>
+              <label className="block text-sm font-medium text-[#4A4A4A] mb-1">Region</label>
+              <select
+                value={filters.regionId}
+                onChange={(e) => handleFilterChange('regionId', e.target.value)}
+                disabled={!filters.productId || filterRegions.length === 0}
+                className="w-full px-4 py-2 border border-[#BDBDBD] bg-white text-[#1B1B1B] rounded focus:outline-none focus:ring-2 focus:ring-[#B1123B] disabled:bg-[#F4F4F4] disabled:text-[#BDBDBD]"
+              >
+                <option value="">{filters.productId ? 'All Regions' : 'Select a product first'}</option>
+                {filterRegions.map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}
+              </select>
+            </div>
+
+            <div>
               <label className="block text-sm font-medium text-[#4A4A4A] mb-1">Variant</label>
               <select
                 value={filters.variantId}
@@ -852,7 +935,7 @@ const AdminInventory = () => {
                 className="w-full px-4 py-2 border border-[#BDBDBD] bg-white text-[#1B1B1B] rounded focus:outline-none focus:ring-2 focus:ring-[#B1123B] disabled:bg-[#F4F4F4] disabled:text-[#BDBDBD]"
               >
                 <option value="">{filters.productId ? 'All Variants' : 'Select a product first'}</option>
-                {filterVariants.map((v) => (
+                {regionFilterVariants.map((v) => (
                   <option key={v._id} value={v._id}>
                     {v.colorName || 'Default'}{v.sizes?.length ? ` — ${v.sizes.join(', ')}` : ''}
                   </option>
@@ -893,7 +976,7 @@ const AdminInventory = () => {
             <div className="flex items-end">
               <button
                 onClick={() => {
-                  setFilters({ search: '', status: '', productId: '', variantId: '', color: '', size: '' });
+                  setFilters({ search: '', status: '', productId: '', regionId: '', variantId: '', color: '', size: '' });
                   setPagination(prev => ({ ...prev, page: 1 }));
                 }}
                 className="w-full px-4 py-2 bg-[#F4F4F4] text-[#4A4A4A] rounded hover:bg-[#BDBDBD] transition-colors duration-200"
@@ -969,7 +1052,7 @@ const AdminInventory = () => {
                      </th>
                     <th className="py-3 px-4 border-b text-left font-semibold text-[#1B1B1B]">Product</th>
                     <th className="py-3 px-4 border-b text-left font-semibold text-[#1B1B1B]">Variant/Size</th>
-                    <th className="py-3 px-4 border-b text-left font-semibold text-[#1B1B1B]">Individual Barcode/QR</th>
+                    <th className="py-3 px-4 border-b text-left font-semibold text-[#1B1B1B]">My barcode / Product barcode</th>
                     <th className="py-3 px-4 border-b text-left font-semibold text-[#1B1B1B]">Stock</th>
                     <th className="py-3 px-4 border-b text-left font-semibold text-[#1B1B1B]">Status</th>
                     <th className="py-3 px-4 border-b text-left font-semibold text-[#1B1B1B]">Location</th>
@@ -1029,6 +1112,7 @@ const AdminInventory = () => {
                              <div className="text-sm text-[#4A4A4A]">
                                {item.color?.name || 'Default Color'}
                              </div>
+                             {(item.regionName || item.variantId?.regionName) && <div className="text-xs text-[#4A4A4A] mt-1">Region: {item.regionName || item.variantId.regionName}</div>}
                              {item.color?.hexCode && (
                                <div className="flex items-center space-x-1 mt-1">
                                  <div 
@@ -1047,6 +1131,10 @@ const AdminInventory = () => {
                               <div className="flex-1 min-w-0">
                                 <Barcode value={item.barcode || 'NOBARCODE'} className="w-full h-8" />
                                 <div className="text-[10px] text-[#4A4A4A] font-mono truncate mt-0.5 text-center font-bold tracking-wider">{item.barcode}</div>
+                                <div className="mt-1 border-t border-gray-100 pt-1 text-center">
+                                  <div className="text-[9px] text-gray-500">Product barcode</div>
+                                  <div className="text-[10px] text-gray-700 font-mono break-all">{item.realBarcode || '—'}</div>
+                                </div>
                               </div>
                               <div className="flex-shrink-0">
                                 <div 
@@ -1089,11 +1177,14 @@ const AdminInventory = () => {
                               setSelectedInventory(item);
                               setFormData({
                                 productId: item.productId._id,
-                                variantId: item.variantId,
+                                regionId: getRegionId(item.regionId || item.variantId?.regionId),
+                                variantId: item.variantId?._id || item.variantId,
                                 size: item.size,
                                 stockQuantity: item.stockQuantity,
                                 price: item.price || 0,
                                 discountPrice: item.discountPrice || 0,
+                                costPrice: item.costPrice ?? '',
+                                realBarcode: item.realBarcode || '',
                                 manualPricing: true,
                                 location: item.location,
                                 notes: item.notes
@@ -1169,6 +1260,7 @@ const AdminInventory = () => {
                       <div className="ml-2">
                         <div className="font-semibold text-[#1B1B1B] text-sm">{item.productId?.name}</div>
                         <div className="text-xs text-[#4A4A4A]">{itemMeasure(item)} - {item.color?.name || 'Default Color'}</div>
+                        <div className="text-xs text-[#6B7280]">{item.regionName || item.variantId?.regionName || 'Region not set'}</div>
                       </div>
                     </div>
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${getStatusColor(item.status)}`}>
@@ -1210,17 +1302,27 @@ const AdminInventory = () => {
                     )}
                   </div>
 
+                  <div className="mb-3 rounded border border-[#E5E7EB] bg-white p-2 text-xs">
+                    <div className="font-medium text-[#4A4A4A]">My barcode (generated)</div>
+                    <div className="font-mono break-all text-[#1B1B1B]">{item.barcode || '—'}</div>
+                    <div className="mt-1 font-medium text-[#4A4A4A]">Product barcode (real)</div>
+                    <div className="font-mono break-all text-[#1B1B1B]">{item.realBarcode || 'Not added'}</div>
+                  </div>
+
                   <div className="flex items-center gap-1 pt-2 border-t border-[#BDBDBD]">
                     <button
                       onClick={() => {
                         setSelectedInventory(item);
                         setFormData({
                           productId: item.productId._id,
-                          variantId: item.variantId,
+                          regionId: getRegionId(item.regionId || item.variantId?.regionId),
+                          variantId: item.variantId?._id || item.variantId,
                           size: item.size,
                           stockQuantity: item.stockQuantity,
                           price: item.price || 0,
                           discountPrice: item.discountPrice || 0,
+                          costPrice: item.costPrice ?? '',
+                          realBarcode: item.realBarcode || '',
                           manualPricing: true,
                           location: item.location,
                           notes: item.notes
@@ -1348,7 +1450,12 @@ const AdminInventory = () => {
                 <label className="block text-sm font-medium text-[#4A4A4A] mb-2">Product</label>
                 <select
                   value={formData.productId}
-                  onChange={(e) => setFormData(prev => ({ ...prev, productId: e.target.value, variantId: '', size: '' }))}
+                  onChange={(e) => {
+                    setSelectedVariants([]);
+                    setVariantStock({});
+                    setVariantRealBarcodes({});
+                    setFormData(prev => ({ ...prev, productId: e.target.value, regionId: '', variantId: '', size: '', realBarcode: '' }));
+                  }}
                   className="w-full px-3 py-2 border border-[#BDBDBD] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#B1123B] bg-white text-[#1B1B1B]"
                   disabled={!!selectedInventory}
                 >
@@ -1378,7 +1485,28 @@ const AdminInventory = () => {
                 </div>
               )}
 
-              {selectedProduct && availableVariants.length > 0 && !selectedInventory && (
+              {selectedProduct && formRegions.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-[#4A4A4A] mb-2">Product region</label>
+                  <select
+                    value={formData.regionId}
+                    onChange={(e) => {
+                      setSelectedVariants([]);
+                      setVariantStock({});
+                      setVariantRealBarcodes({});
+                      setFormData(prev => ({ ...prev, regionId: e.target.value, variantId: '', size: '', realBarcode: '' }));
+                    }}
+                    disabled={!!selectedInventory}
+                    className="w-full px-3 py-2 border border-[#BDBDBD] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#B1123B] bg-white text-[#1B1B1B] disabled:bg-[#F4F4F4]"
+                  >
+                    <option value="">Select region</option>
+                    {formRegions.map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}
+                  </select>
+                  <p className="mt-1 text-xs text-[#6B7280]">Choose a region first to see only its colors and sizes.</p>
+                </div>
+              )}
+
+              {selectedProduct && regionVariants.length > 0 && !selectedInventory && (
                 <div className="flex items-center space-x-4">
                   <label className="flex items-center">
                     <input
@@ -1402,16 +1530,18 @@ const AdminInventory = () => {
                 </div>
               )}
 
-                             {selectedProduct && availableVariants.length > 0 && !bulkMode && (
+                             {selectedProduct && regionVariants.length > 0 && !bulkMode && (
                  <div>
                    <label className="block text-sm font-medium text-[#4A4A4A] mb-2">Variant & Size</label>
                     <select
                      value={formData.variantId}
                      onChange={(e) => {
-                       const variant = availableVariants.find(v => v._id === e.target.value);
+                       const variant = regionVariants.find(v => v._id === e.target.value);
                        setFormData(prev => ({ 
                          ...prev, 
                          variantId: e.target.value,
+                         regionId: getRegionId(variant?.regionId) || prev.regionId,
+                         realBarcode: '',
                          size: variant?.sizes?.[0] || '',
                          price: variant ? (variant.prices?.[0] || variant.price || 0) : 0,
                          discountPrice: variant ? (variant.discountPrices?.[0] || 0) : 0
@@ -1421,7 +1551,7 @@ const AdminInventory = () => {
                      disabled={!!selectedInventory}
                    >
                      <option value="">Select Variant</option>
-                     {availableVariants.map((variant) => (
+                     {regionVariants.map((variant) => (
                        <option key={variant._id} value={variant._id}>
                          {variant.colorName || 'Default'} - {variant.sizes?.join(', ') || 'No sizes'} - {formatBDT(variant.prices?.[0] || variant.price || 0)} (Stock: {variant.stock || 0})
                        </option>
@@ -1529,17 +1659,32 @@ const AdminInventory = () => {
                         </select>
                       </div>
                     )}
+
+                    {formData.variantId && !bulkMode && (
+                      <div className="mt-3">
+                        <label className="block text-sm font-medium text-[#4A4A4A] mb-2">Product barcode (manufacturer / real barcode)</label>
+                        <input
+                          type="text"
+                          value={formData.realBarcode}
+                          onChange={(e) => setFormData(prev => ({ ...prev, realBarcode: e.target.value }))}
+                          maxLength={120}
+                          placeholder="Scan or enter the barcode printed on the product"
+                          className="w-full px-3 py-2 border border-[#BDBDBD] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#B1123B] bg-white text-[#1B1B1B]"
+                        />
+                        <p className="mt-1 text-xs text-[#6B7280]">Optional. Duplicate manufacturer barcodes are allowed across matching units.</p>
+                      </div>
+                    )}
                   </div>
                 )}
 
-                             {selectedProduct && bulkMode && availableVariants.length > 0 && (
+                             {selectedProduct && bulkMode && regionVariants.length > 0 && (
                  <div>
                    <label className="block text-sm font-medium text-[#4A4A4A] mb-2">
                      Select Variants to Create Inventory For
                    </label>
                    <div className="bg-[#F4F4F4] p-4 rounded-lg max-h-60 overflow-y-auto">
                      <div className="space-y-3">
-                       {availableVariants.map((variant) => (
+                       {regionVariants.map((variant) => (
                          <div key={variant._id} className="border border-[#BDBDBD] rounded-lg p-3 bg-white">
                                                                                    <div className="flex items-center justify-between mb-2">
                                <div className="flex items-center space-x-3">
@@ -1627,6 +1772,20 @@ const AdminInventory = () => {
                                           placeholder="Quantity"
                                         />
                                       </div>
+                                      <div className="mt-3">
+                                        <label className="block text-xs font-medium text-[#4A4A4A] mb-1">Product barcode (real, optional)</label>
+                                        <input
+                                          type="text"
+                                          value={variantRealBarcodes[variant._id]?.[size] || ''}
+                                          onChange={(e) => setVariantRealBarcodes(prev => ({
+                                            ...prev,
+                                            [variant._id]: { ...prev[variant._id], [size]: e.target.value }
+                                          }))}
+                                          maxLength={120}
+                                          placeholder="Barcode printed on this product"
+                                          className="w-full px-2 py-1.5 text-sm border border-[#BDBDBD] rounded focus:outline-none focus:ring-1 focus:ring-[#B1123B] bg-white text-[#1B1B1B]"
+                                        />
+                                      </div>
                                     </div>
                                   ))}
                                 </div>
@@ -1671,7 +1830,7 @@ const AdminInventory = () => {
                     </label>
                   </div>
                 )}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-[#4A4A4A] mb-2">
                       Price (BDT) {formData.variantId && !formData.manualPricing && <span className="text-xs text-[#4A4A4A]">(Auto-filled from variant)</span>}
@@ -1701,6 +1860,19 @@ const AdminInventory = () => {
                       placeholder={formData.variantId && !formData.manualPricing ? "Auto-filled from variant" : "Enter discount price (optional)"}
                       readOnly={!!formData.variantId && !formData.manualPricing}
                     />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-[#4A4A4A] mb-2">Unit Cost (BDT, optional)</label>
+                    <input
+                      type="number"
+                      value={formData.costPrice}
+                      onChange={(e) => setFormData(prev => ({ ...prev, costPrice: e.target.value }))}
+                      className="w-full px-3 py-2 border border-[#BDBDBD] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#B1123B] bg-white text-[#1B1B1B]"
+                      min="0"
+                      step="0.01"
+                      placeholder="Leave blank if unknown"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">Used for variant profit estimates; historical orders keep the cost captured at sale.</p>
                   </div>
                 </div>
 
@@ -1758,13 +1930,18 @@ const AdminInventory = () => {
 
               {selectedInventory && (
                 <div className="border-t border-[#F4F4F4] pt-4">
-                  <h3 className="text-lg font-medium text-[#1B1B1B] mb-3">Generated Codes</h3>
+                  <h3 className="text-lg font-medium text-[#1B1B1B] mb-3">Inventory Codes</h3>
+                  {(selectedInventory.regionName || selectedInventory.variantId?.regionName) && <p className="text-sm text-[#4A4A4A] mb-3">Region: {selectedInventory.regionName || selectedInventory.variantId.regionName}</p>}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-[#4A4A4A] mb-2">Barcode</label>
+                      <label className="block text-sm font-medium text-[#4A4A4A] mb-2">My barcode (generated)</label>
                       <div className="bg-white p-3 rounded-lg border border-[#BDBDBD]">
                         <Barcode value={selectedInventory.barcode || 'NOBARCODE'} className="w-full h-10" />
                         <div className="text-sm font-mono text-[#1B1B1B] text-center mt-1">{selectedInventory.barcode}</div>
+                        <div className="mt-3 border-t border-gray-100 pt-2">
+                          <div className="text-xs font-medium text-[#6B7280]">Product barcode (real)</div>
+                          <div className="text-sm font-mono text-[#1B1B1B] break-all">{formData.realBarcode || 'Not added'}</div>
+                        </div>
                       </div>
                     </div>
                     <div>

@@ -1,6 +1,7 @@
 'use client'
 import React from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { FiFacebook, FiInstagram, FiTwitter, FiYoutube, FiMail, FiPhone, FiMapPin } from 'react-icons/fi';
 
 const socialLinks = [
@@ -17,7 +18,10 @@ export default function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10">
           {/* Brand */}
           <div>
-            <h3 className="font-heading text-xl tracking-[0.2em] uppercase font-bold mb-4 text-maybelline-pink">BELORELLA</h3>
+            <div className="flex items-center gap-3 mb-4">
+              <Image src="/logo.png" alt="BELORELLA" width={44} height={44} className="h-11 w-11 rounded-xl bg-white p-1 object-contain" />
+              <h3 className="font-heading text-xl tracking-[0.2em] uppercase font-bold text-maybelline-pink">BELORELLA</h3>
+            </div>
             <p className="text-sm text-gray-400 leading-relaxed mb-6">
               Your trusted destination for premium fashion and lifestyle products in Bangladesh.
             </p>

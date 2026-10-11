@@ -6,6 +6,9 @@ import { FaBoxOpen, FaCreditCard, FaTruck, FaUser, FaHome, FaPhone, FaMapMarkerA
 import { formatMeasureLine } from '../lib/measure';
 import { formatBDT } from '../config/brand';
 import { FiClock } from 'react-icons/fi';
+import { getStorage } from '../lib/storage';
+
+const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
 
 export default function OrderConfirmationPage() {
   const { orderId } = useParams();
@@ -14,12 +17,12 @@ export default function OrderConfirmationPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
-
   useEffect(() => {
     async function fetchOrder() {
       try {
-        const res = await axios.get(`${API_URI}/api/orders/${orderId}`);
+        const res = await axios.get(`${API_URI}/api/orders/${orderId}`, {
+          headers: { Authorization: `Bearer ${getStorage('accessToken') || ''}` },
+        });
         setOrder(res.data);
       } catch (err) {
         setError(err.response?.data?.message || 'Failed to load order. Please try again.');
@@ -75,7 +78,7 @@ export default function OrderConfirmationPage() {
           <p className="text-lg text-dark-gray font-sans">
             Your order <span className="font-semibold text-black">#{order.orderId}</span> has been placed successfully.
           </p>
-          <p className="text-dark-gray mt-2 font-sans">We've sent a confirmation to your email.</p>
+          <p className="text-dark-gray mt-2 font-sans">We&apos;ve sent a confirmation to your email.</p>
         </div>
 
         <div className="card rounded-xl mb-8">
@@ -101,8 +104,10 @@ export default function OrderConfirmationPage() {
                         <p className="ml-4 text-sm font-semibold text-black">{formatBDT((item.price * item.quantity).toFixed(2))}</p>
                       </div>
                       <div className="mt-1 text-sm text-dark-gray font-sans">
-                        {item.size && <span className="mr-3">{formatMeasureLine(item)}</span>}
+                        {item.isPreOrder && <span className="mr-3 font-semibold text-maybelline-pink">Pre-order{item.preOrderEstimatedDate ? ` · Est. ${new Date(item.preOrderEstimatedDate).toLocaleDateString()}` : ' · ETA to be confirmed'}</span>}
+                        {formatMeasureLine(item) && <span className="mr-3">{formatMeasureLine(item)}</span>}
                         {item.color && <span>Color: {item.color}</span>}
+                        {(item.regionName || item.regionId?.name || item.configuration?.regionName) && <span className="ml-3">Region: {item.regionName || item.regionId?.name || item.configuration?.regionName}</span>}
                       </div>
                       <div className="mt-1 text-sm text-dark-gray font-sans">
                         Qty: {item.quantity} &times; {formatBDT(item.price.toFixed(2))}
@@ -155,8 +160,10 @@ export default function OrderConfirmationPage() {
                   </div>
                 )}
                 <div className="sm:col-span-1">
-                  <dt className="text-sm font-medium text-dark-gray font-sans">Total Amount</dt>
-                  <dd className="mt-1 text-lg font-semibold text-black">{formatBDT(order.totalAmount.toFixed(2))}</dd>
+                  <dt className="text-sm font-medium text-dark-gray font-sans">Amount Due</dt>
+                  <dd className="mt-1 text-lg font-semibold text-black">{formatBDT((order.loyaltyAmountUsed > 0 ? order.amountDue : order.grandTotal ?? order.totalAmount).toFixed(2))}</dd>
+                  {Number(order.loyaltyAmountUsed) > 0 && <p className="mt-1 text-xs text-green-700">Loyalty balance applied: -{formatBDT(Number(order.loyaltyAmountUsed).toFixed(2))}</p>}
+                  {Number(order.loyaltyRewardEarned) > 0 && <p className="mt-1 text-xs text-[#B1123B]">Earned {formatBDT(Number(order.loyaltyRewardEarned).toFixed(2))} loyalty balance</p>}
                 </div>
               </dl>
             </div>

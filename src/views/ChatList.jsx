@@ -13,14 +13,15 @@ const ChatList = () => {
     loading, 
     error, 
     fetchRooms,
-    unreadCount 
+    unreadCount,
+    onlineUsers,
   } = useAdminChat();
 
   useEffect(() => {
     if (rooms.length === 0 && !loading) {
       fetchRooms();
     }
-  }, [rooms.length, loading]);
+  }, [rooms.length, loading, fetchRooms]);
 
   const filteredRooms = rooms.filter((room) => {
     const customerName = room.guestName || (room.customerId?.firstName
@@ -123,7 +124,7 @@ const ChatList = () => {
                       key={room._id}
                       customer={displayCustomer}
                       lastMessage={room.messages?.[room.messages.length - 1]}
-                      isActive={!!room.assignedAdmin?._id}
+                      isOnline={!room.guestId && !!room.customerId?._id && onlineUsers.includes(String(room.customerId._id))}
                       unreadCount={unreadCount}
                       isGuest={!room.customerId}
                       isClosed={room.isClosed}

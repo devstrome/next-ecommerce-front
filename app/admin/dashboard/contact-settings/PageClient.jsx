@@ -2,19 +2,18 @@
 import React, { useState, useEffect } from 'react';
 import { getStorage } from '../../../../src/lib/storage';
 import { FiSave, FiMapPin, FiPhone, FiMail, FiGlobe, FiClock } from 'react-icons/fi';
+import { resolveSocialLinks, SOCIAL_LINKS } from '../../../../src/config/socialLinks';
+
+const CONTACT_MAP_URL = 'https://www.google.com/maps/embed?pb=!1m14!1m12!1m3!1d271.33110450500544!2d90.38341171599906!3d23.7979072937477!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!5e0!3m2!1sen!2sbd!4v1791496054381!5m2!1sen!2sbd';
+const LEGACY_MAP_CENTER = '!2d90.399!3d23.750';
 
 const defaultSettings = {
   businessName: 'BELORELLA',
   email: 'info.belorella@gmail.com',
   phone: '01601-886367',
   address: '200/1 North Ibrahimpur, Mushibari Road, Dhaka-1206',
-  mapUrl: 'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3651.0!2d90.399!3d23.750!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3755b8b33cffc3fb%3A0x0!2s200%2F1%20North%20Ibrahimpur%2C%20Mushibari%20Road%2C%20Dhaka-1206!5e0!3m2!1sen!2sbd!4v1',
-  socialLinks: {
-    facebook: 'https://facebook.com',
-    instagram: 'https://instagram.com',
-    youtube: 'https://youtube.com',
-    twitter: 'https://twitter.com'
-  },
+  mapUrl: CONTACT_MAP_URL,
+  socialLinks: SOCIAL_LINKS,
   seoTitle: 'Contact Us - BELORELLA',
   seoDescription: 'Get in touch with BELORELLA. Reach out for inquiries, feedback, or support.',
   businessHours: {
@@ -32,7 +31,19 @@ export default function ContactSettingsClient() {
     try {
       const stored = localStorage.getItem('contactSettings');
       if (stored) {
-        setSettings({ ...defaultSettings, ...JSON.parse(stored) });
+        const savedSettings = JSON.parse(stored);
+        const savedMapUrl = String(savedSettings.mapUrl || '');
+        const mapUrl = !savedMapUrl || savedMapUrl.includes(LEGACY_MAP_CENTER) ? CONTACT_MAP_URL : savedMapUrl;
+        const nextSettings = {
+          ...defaultSettings,
+          ...savedSettings,
+          mapUrl,
+          socialLinks: resolveSocialLinks(savedSettings.socialLinks),
+        };
+        setSettings(nextSettings);
+        if (JSON.stringify(nextSettings) !== JSON.stringify(savedSettings)) {
+          localStorage.setItem('contactSettings', JSON.stringify(nextSettings));
+        }
       }
     } catch {}
   }, []);

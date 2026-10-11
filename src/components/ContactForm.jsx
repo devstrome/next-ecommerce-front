@@ -117,7 +117,7 @@ function ContactForm() {
             Contact Us
           </h1>
           <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-            Have a question or need assistance? We're here to help! Reach out to us and we'll get back to you as soon as possible.
+            Have a question or need assistance? We&apos;re here to help! Reach out to us and we&apos;ll get back to you as soon as possible.
           </p>
         </div>
 
@@ -154,7 +154,7 @@ function ContactForm() {
                     <p className="text-xs text-gray-600 mt-1">Typically 3-5 business days for domestic orders.</p>
                   </div>
                   <div className="p-3 bg-maybelline-light rounded-lg border border-maybelline-light">
-                    <p className="text-sm font-medium text-gray-900">What's your return policy?</p>
+                    <p className="text-sm font-medium text-gray-900">What&apos;s your return policy?</p>
                     <p className="text-xs text-gray-600 mt-1">30-day return policy for unused items in original packaging.</p>
                   </div>
                   <div className="p-3 bg-maybelline-light rounded-lg border border-maybelline-light">
@@ -205,7 +205,7 @@ function ContactForm() {
                     <FaCheckCircle className="text-green-600 text-xl" />
                     <div>
                       <p className="text-green-800 font-medium">Message Sent Successfully!</p>
-                      <p className="text-green-700 text-sm">We'll get back to you within 24 hours.</p>
+                      <p className="text-green-700 text-sm">We&apos;ll get back to you within 24 hours.</p>
                     </div>
                   </div>
                 </div>

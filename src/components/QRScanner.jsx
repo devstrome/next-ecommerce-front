@@ -1,5 +1,5 @@
 'use client'
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { FaTimes, FaCamera, FaKeyboard } from 'react-icons/fa';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 
@@ -12,7 +12,7 @@ const QRScanner = ({ onScan, onClose, isOpen, title = 'Scan Code', mode = 'qr' }
   const scannerRef = useRef(null);
   const containerRef = useRef(null);
 
-  const stop = async () => {
+  const stop = useCallback(async () => {
     try {
       if (scannerRef.current) {
         await scannerRef.current.stop();
@@ -20,9 +20,9 @@ const QRScanner = ({ onScan, onClose, isOpen, title = 'Scan Code', mode = 'qr' }
       }
     } catch {}
     scannerRef.current = null;
-  };
+  }, []);
 
-  const start = async () => {
+  const start = useCallback(async () => {
     const el = containerRef.current;
     if (!el) return;
     try {
@@ -67,7 +67,7 @@ const QRScanner = ({ onScan, onClose, isOpen, title = 'Scan Code', mode = 'qr' }
       setLoading(false);
       setError(err?.message || 'Camera access denied. Check permissions.');
     }
-  };
+  }, [onScan, onClose, scanType, stop]);
 
   useEffect(() => {
     if (isOpen && scanMode === 'camera') {
@@ -79,7 +79,7 @@ const QRScanner = ({ onScan, onClose, isOpen, title = 'Scan Code', mode = 'qr' }
       setManualCode('');
       setScanMode('camera');
     }
-  }, [isOpen, scanType, scanMode]);
+  }, [isOpen, scanType, scanMode, start, stop]);
 
   const handleManualSubmit = (e) => {
     e.preventDefault();

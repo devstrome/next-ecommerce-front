@@ -356,7 +356,7 @@ const AdminWishlists = () => {
               </div>
 
               <p className="text-xs text-[#888888]">
-                Sent through BELORELLA's server email account.
+                Sent through BELORELLA&apos;s server email account.
               </p>
             </div>
 
