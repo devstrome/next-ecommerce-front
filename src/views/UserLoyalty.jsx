@@ -69,9 +69,13 @@ export default function UserLoyalty() {
 
       <section className="grid gap-4 md:grid-cols-[1fr_1.2fr]">
         <div className="rounded-2xl bg-gradient-to-br from-[#b1123b] to-[#790b28] p-6 text-white shadow-sm">
-          <div className="flex items-center gap-3 text-white/80"><FaCoins /><span className="text-sm">Available to use</span></div>
+          <div className="flex items-center gap-3 text-white/80"><FaCoins /><span className="text-sm">{summary.redemptionFrozen ? 'Loyalty balance' : 'Available to use'}</span></div>
           <div className="mt-5 text-4xl font-semibold">{loading ? '—' : formatBDT(summary.balanceBDT)}</div>
-          <p className="mt-3 text-sm text-white/80">Your balance is stored as BDT and can be applied during checkout or at POS.</p>
+          {summary.redemptionFrozen ? (
+            <p className="mt-3 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm text-white">Redemption is temporarily frozen by the store. Your balance and points history are safe, and you can still earn rewards.</p>
+          ) : (
+            <p className="mt-3 text-sm text-white/80">Your balance is stored as BDT and can be applied during checkout or at POS.</p>
+          )}
           {(summary.tierName || summary.enabled) && <div className="mt-5 border-t border-white/20 pt-4 text-sm">
             {summary.tierName && <p className="mb-1 font-semibold">{summary.tierName} tier</p>}
             {summary.enabled

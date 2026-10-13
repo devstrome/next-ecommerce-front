@@ -38,6 +38,7 @@ export const POSProvider = ({ children }) => {
   const [stats, setStats] = useState({});
   const [recentOrders, setRecentOrders] = useState([]);
   const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [paymentTrxId, setPaymentTrxId] = useState('');
   const [taxRate, setTaxRate] = useState(0);
   const [discount, setDiscount] = useState(0);
   const [notes, setNotes] = useState('');
@@ -175,14 +176,12 @@ export const POSProvider = ({ children }) => {
     
     if (existingItem) {
       toast.warning('This unit is already in the cart');
-      barcodeInputRef.current?.focus();
       return;
     }
 
     // Check if item is available
     if (inventory.availableQuantity <= 0) {
       toast.error('Item is out of stock');
-      barcodeInputRef.current?.focus();
       return;
     }
 
@@ -211,7 +210,6 @@ export const POSProvider = ({ children }) => {
       scannedBarcode: inventory.barcode
     };
     setCart([...cart, newItem]);
-    barcodeInputRef.current?.focus();
   };
 
   const removeFromCart = (inventoryId) => {
@@ -226,6 +224,7 @@ export const POSProvider = ({ children }) => {
     setPosGiftCodeValue('');
     setPosGiftCodeDetails(null);
     setPaymentMethod('cash');
+    setPaymentTrxId('');
     setTaxRate(0);
     setDiscount(0);
     setNotes('');
@@ -250,8 +249,6 @@ export const POSProvider = ({ children }) => {
     const linkedCustomer = response.data.customer;
     setLoyaltyCustomer(linkedCustomer);
     setLoyaltyRequested('');
-    setPosGiftCodeValue('');
-    setPosGiftCodeDetails(null);
     setCustomer((current) => ({
       ...current,
       name: linkedCustomer.name || current.name,
@@ -264,8 +261,6 @@ export const POSProvider = ({ children }) => {
   const clearLoyaltyCustomer = () => {
     setLoyaltyCustomer(null);
     setLoyaltyRequested('');
-    setPosGiftCodeValue('');
-    setPosGiftCodeDetails(null);
   };
 
   const setPOSGiftCode = (value) => {
@@ -279,7 +274,6 @@ export const POSProvider = ({ children }) => {
   };
 
   const validatePOSGiftCode = async () => {
-    if (!loyaltyCustomer?.userId) throw new Error('Find and select the customer who will use this gift code');
     const code = String(posGiftCode || '').trim().toUpperCase();
     if (!code) throw new Error('Enter a gift code');
     setPosGiftCodeLoading(true);
@@ -287,7 +281,7 @@ export const POSProvider = ({ children }) => {
       const response = await makeAuthenticatedRequest({
         method: 'POST',
         url: `${process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000'}/api/pos/gift-codes/validate`,
-        data: { code, userId: loyaltyCustomer.userId },
+        data: { code },
       });
       const details = { ...response.data.giftCode, code };
       setPosGiftCodeDetails(details);
@@ -308,6 +302,11 @@ export const POSProvider = ({ children }) => {
       return;
     }
 
+    if (paymentMethod === 'mobile_payment' && !/^[a-z0-9]{8,100}$/i.test(String(paymentTrxId || '').trim())) {
+      toast.error('Enter a valid mobile payment transaction ID (at least 8 letters or numbers)');
+      return;
+    }
+
     const { subtotal, taxAmount, discountAmount, total } = calculateTotals();
 
     try {
@@ -320,6 +319,7 @@ export const POSProvider = ({ children }) => {
         discount: discountAmount,
         total,
         paymentMethod,
+        paymentDetails: paymentMethod === 'mobile_payment' ? { trxId: paymentTrxId.trim() } : {},
         loyaltyUserId: loyaltyCustomer?.userId || null,
         loyaltyAmountBDT: Math.max(0, Number(loyaltyRequested) || 0),
         loyaltyGiftCode: posGiftCodeDetails?.code || '',
@@ -388,6 +388,7 @@ export const POSProvider = ({ children }) => {
     stats,
     recentOrders,
     paymentMethod,
+    paymentTrxId,
     taxRate,
     discount,
     notes,
@@ -404,6 +405,7 @@ export const POSProvider = ({ children }) => {
     setScannedBarcode,
     setShowScanner,
     setPaymentMethod,
+    setPaymentTrxId,
     setTaxRate,
     setDiscount,
     setNotes,

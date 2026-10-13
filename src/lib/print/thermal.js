@@ -125,6 +125,7 @@ export const buildThermalReceiptHTML = (receipt, { width = 80 } = {}) => {
     ${(Array.isArray(receipt?.giftCodeRedemptions) ? receipt.giftCodeRedemptions : []).filter((entry) => Number(entry?.appliedBDT) > 0).map((entry) => `<div class="total-row"><span>Gift ••••-${esc(entry.codeSuffix)}</span><span>-${formatBDT(entry.appliedBDT)}</span></div>`).join('')}
     <div class="total-row grand"><span>${hasAppliedBalance ? 'AMOUNT DUE' : 'TOTAL'}</span><span>${formatBDT(Number.isFinite(Number(receipt?.amountDue)) ? receipt.amountDue : receipt?.total)}</span></div>
     <div class="total-row"><span>Payment</span><span>${esc(String(receipt?.paymentMethod || '').toUpperCase())}</span></div>
+    ${receipt?.paymentDetails?.trxId ? `<div class="total-row"><span>Transaction ID</span><span>${esc(receipt.paymentDetails.trxId)}</span></div>` : ''}
   </div>
 
   <div class="barcode-section">

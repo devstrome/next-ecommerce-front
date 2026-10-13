@@ -1,8 +1,90 @@
 'use client'
-import React from 'react';
-import { FaTimes, FaCircle, FaEnvelope, FaPhone, FaMapMarkerAlt, FaCreditCard, FaShoppingCart, FaCalendar, FaUser, FaEye, FaEyeSlash } from 'react-icons/fa';
+import React, { useCallback, useEffect, useState } from 'react';
+import axios from 'axios';
+import { FaTimes, FaCircle, FaEnvelope, FaPhone, FaMapMarkerAlt, FaCreditCard, FaShoppingCart, FaCalendar, FaUser, FaEye, FaEyeSlash, FaGift, FaLock, FaUnlock, FaHistory } from 'react-icons/fa';
+import { getStorage } from '../lib/storage';
 
 const UserDetailsModal = ({ user, onClose, isOnline }) => {
+  const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
+  const [loyalty, setLoyalty] = useState(null);
+  const [loyaltyLoading, setLoyaltyLoading] = useState(true);
+  const [loyaltySaving, setLoyaltySaving] = useState(false);
+  const [loyaltyError, setLoyaltyError] = useState('');
+  const [loyaltyNotice, setLoyaltyNotice] = useState('');
+  const [adjustment, setAdjustment] = useState({ direction: 'credit', amountBDT: '', note: '' });
+
+  const adminHeaders = useCallback(() => {
+    const token = getStorage('adminAccessToken') || getStorage('adminToken');
+    return token ? { Authorization: `Bearer ${token}` } : null;
+  }, []);
+
+  const loadLoyalty = useCallback(async () => {
+    const headers = adminHeaders();
+    if (!headers || !user?._id) {
+      setLoyaltyError('Admin session is unavailable. Sign in again to manage loyalty.');
+      setLoyaltyLoading(false);
+      return;
+    }
+    setLoyaltyLoading(true);
+    setLoyaltyError('');
+    try {
+      const response = await axios.get(`${API_URI}/api/admin/loyalty/customers/${user._id}`, { headers });
+      setLoyalty(response.data);
+    } catch (error) {
+      setLoyaltyError(error.response?.data?.message || 'Unable to load this customer’s loyalty account.');
+    } finally {
+      setLoyaltyLoading(false);
+    }
+  }, [API_URI, adminHeaders, user?._id]);
+
+  useEffect(() => { loadLoyalty(); }, [loadLoyalty]);
+
+  const adjustLoyaltyBalance = async (event) => {
+    event.preventDefault();
+    const headers = adminHeaders();
+    const amountBDT = Number(adjustment.amountBDT);
+    if (!headers || !Number.isFinite(amountBDT) || amountBDT <= 0) {
+      setLoyaltyError('Enter a valid adjustment amount greater than BDT 0.');
+      return;
+    }
+    setLoyaltySaving(true);
+    setLoyaltyError('');
+    setLoyaltyNotice('');
+    try {
+      await axios.post(`${API_URI}/api/admin/loyalty/adjust`, {
+        userId: user._id,
+        direction: adjustment.direction,
+        amountBDT,
+        note: adjustment.note,
+      }, { headers });
+      setAdjustment((current) => ({ ...current, amountBDT: '', note: '' }));
+      setLoyaltyNotice(`Balance ${adjustment.direction === 'credit' ? 'credited' : 'debited'} successfully.`);
+      await loadLoyalty();
+    } catch (error) {
+      setLoyaltyError(error.response?.data?.message || 'Unable to adjust the loyalty balance.');
+    } finally {
+      setLoyaltySaving(false);
+    }
+  };
+
+  const toggleLoyaltyFreeze = async () => {
+    const headers = adminHeaders();
+    if (!headers || !loyalty?.customer) return;
+    const frozen = !loyalty.customer.redemptionFrozen;
+    setLoyaltySaving(true);
+    setLoyaltyError('');
+    setLoyaltyNotice('');
+    try {
+      await axios.patch(`${API_URI}/api/admin/loyalty/customers/${user._id}/freeze`, { frozen }, { headers });
+      setLoyaltyNotice(frozen ? 'Loyalty redemption frozen. Checkout and POS can no longer spend this balance.' : 'Loyalty redemption unfrozen.');
+      await loadLoyalty();
+    } catch (error) {
+      setLoyaltyError(error.response?.data?.message || 'Unable to update loyalty redemption status.');
+    } finally {
+      setLoyaltySaving(false);
+    }
+  };
+
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -171,6 +253,87 @@ const UserDetailsModal = ({ user, onClose, isOnline }) => {
               )}
             </div>
           </div>
+
+          {/* Loyalty balance and redemption controls */}
+          <section className="rounded-lg border border-rose-100 bg-rose-50/50 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h3 className="mb-1 flex items-center text-lg font-semibold text-gray-900">
+                  <FaGift className="mr-2 text-rose-600" /> Loyalty balance
+                </h3>
+                {loyaltyLoading ? (
+                  <p className="text-sm text-gray-500">Loading loyalty account…</p>
+                ) : loyalty?.customer ? (
+                  <>
+                    <p className="text-2xl font-bold text-gray-900">{formatCurrency(loyalty.customer.balanceBDT)}</p>
+                    <p className="text-sm text-gray-600">
+                      {loyalty.customer.tierName || 'Standard customer'} · {Number(loyalty.customer.earnRatePercent || 0)}% earning rate
+                    </p>
+                    <p className={`mt-1 inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${loyalty.customer.redemptionFrozen ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                      {loyalty.customer.redemptionFrozen ? <><FaLock className="mr-1" /> Redemption frozen</> : <><FaUnlock className="mr-1" /> Redemption active</>}
+                    </p>
+                  </>
+                ) : !loyaltyError ? <p className="text-sm text-gray-500">No loyalty account details available.</p> : null}
+              </div>
+              <button
+                type="button"
+                onClick={toggleLoyaltyFreeze}
+                disabled={loyaltySaving || loyaltyLoading || !loyalty?.customer}
+                className={`min-h-10 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50 ${loyalty?.customer?.redemptionFrozen ? 'bg-emerald-700 hover:bg-emerald-800' : 'bg-amber-600 hover:bg-amber-700'}`}
+              >
+                {loyaltySaving ? 'Saving…' : loyalty?.customer?.redemptionFrozen ? 'Unfreeze redemption' : 'Freeze redemption'}
+              </button>
+            </div>
+
+            <form onSubmit={adjustLoyaltyBalance} className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-[140px_140px_minmax(0,1fr)_auto]">
+              <select
+                value={adjustment.direction}
+                onChange={(event) => setAdjustment((current) => ({ ...current, direction: event.target.value }))}
+                className="min-h-10 rounded border border-gray-300 bg-white px-3 text-sm"
+                aria-label="Balance adjustment type"
+              >
+                <option value="credit">Add BDT</option>
+                <option value="debit">Deduct BDT</option>
+              </select>
+              <input
+                type="number" min="0.01" step="0.01" required placeholder="Amount"
+                value={adjustment.amountBDT}
+                onChange={(event) => setAdjustment((current) => ({ ...current, amountBDT: event.target.value }))}
+                className="min-h-10 rounded border border-gray-300 bg-white px-3 text-sm"
+              />
+              <input
+                type="text" maxLength={300} placeholder="Reason (optional)"
+                value={adjustment.note}
+                onChange={(event) => setAdjustment((current) => ({ ...current, note: event.target.value }))}
+                className="min-h-10 rounded border border-gray-300 bg-white px-3 text-sm"
+              />
+              <button type="submit" disabled={loyaltySaving || loyaltyLoading || !loyalty?.customer} className="min-h-10 rounded bg-gray-900 px-4 text-sm font-semibold text-white disabled:opacity-50">
+                {loyaltySaving ? 'Saving…' : 'Update balance'}
+              </button>
+            </form>
+
+            {loyaltyError && <p role="alert" className="mt-3 text-sm text-red-700">{loyaltyError}</p>}
+            {loyaltyNotice && <p role="status" className="mt-3 text-sm text-emerald-700">{loyaltyNotice}</p>}
+
+            {!loyaltyLoading && loyalty?.transactions?.length > 0 && (
+              <div className="mt-5 border-t border-rose-100 pt-4">
+                <h4 className="mb-2 flex items-center text-sm font-semibold text-gray-800"><FaHistory className="mr-2" /> Recent points history</h4>
+                <div className="max-h-48 space-y-2 overflow-y-auto pr-1">
+                  {loyalty.transactions.map((transaction) => (
+                    <div key={transaction._id} className="flex items-start justify-between gap-3 rounded bg-white px-3 py-2 text-sm">
+                      <div className="min-w-0">
+                        <p className="font-medium text-gray-800">{transaction.note || String(transaction.source || 'Loyalty transaction').replaceAll('_', ' ')}</p>
+                        <p className="text-xs text-gray-500">{new Date(transaction.createdAt).toLocaleString()}</p>
+                      </div>
+                      <span className={`shrink-0 font-semibold ${transaction.direction === 'credit' ? 'text-emerald-700' : 'text-rose-700'}`}>
+                        {transaction.direction === 'credit' ? '+' : '−'}{formatCurrency(transaction.amountBDT)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
 
           {/* Payment Methods */}
           <div className="bg-gray-50 rounded-lg p-4">

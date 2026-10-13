@@ -78,6 +78,7 @@ function CheckoutPage() {
   });
   const [transactionNumber, setTransactionNumber] = useState("");
   const [loyaltyBalance, setLoyaltyBalance] = useState(0);
+  const [loyaltyRedemptionFrozen, setLoyaltyRedemptionFrozen] = useState(false);
   const [loyaltyRequested, setLoyaltyRequested] = useState('');
   const [loyaltyMaxRedeemPercent, setLoyaltyMaxRedeemPercent] = useState(100);
   const [loyaltyEnabled, setLoyaltyEnabled] = useState(false);
@@ -94,6 +95,7 @@ function CheckoutPage() {
     let cancelled = false;
     if (!isLoggedIn || !user?._id) {
       setLoyaltyBalance(0);
+      setLoyaltyRedemptionFrozen(false);
       setLoyaltyRequested('');
       setLoyaltyEnabled(false);
       return () => { cancelled = true; };
@@ -102,12 +104,15 @@ function CheckoutPage() {
       .then((data) => {
         if (cancelled) return;
         setLoyaltyBalance(Math.max(0, Number(data.balanceBDT) || 0));
+        setLoyaltyRedemptionFrozen(Boolean(data.redemptionFrozen));
+        if (data.redemptionFrozen) setLoyaltyRequested('');
         setLoyaltyMaxRedeemPercent(Math.min(100, Math.max(0, Number(data.maxRedeemPercent ?? 100) || 0)));
         setLoyaltyEnabled(Boolean(data.enabled));
       })
       .catch(() => {
         if (!cancelled) {
           setLoyaltyBalance(0);
+          setLoyaltyRedemptionFrozen(false);
           setLoyaltyEnabled(false);
         }
       });
@@ -314,8 +319,8 @@ function CheckoutPage() {
   const effectiveShipping = ruleEval ? Number(ruleEval.deliveryCharge || 0) : shippingCharge;
   const extraFeeTotal = ruleEval ? Number(ruleEval.extraFeeTotal || 0) : 0;
   const grandTotal = totalAfterDiscount + effectiveShipping + extraFeeTotal;
-  const loyaltyCap = loyaltyEnabled ? grandTotal * loyaltyMaxRedeemPercent / 100 : 0;
-  const loyaltyApplied = isLoggedIn
+  const loyaltyCap = loyaltyEnabled && !loyaltyRedemptionFrozen ? grandTotal * loyaltyMaxRedeemPercent / 100 : 0;
+  const loyaltyApplied = isLoggedIn && !loyaltyRedemptionFrozen
     ? Math.round(Math.min(Math.max(0, Number(loyaltyRequested) || 0), loyaltyBalance, loyaltyCap, grandTotal) * 100) / 100
     : 0;
   const amountDue = Math.max(0, Math.round((grandTotal - loyaltyApplied) * 100) / 100);
@@ -1125,6 +1130,11 @@ const handleCheckout = async () => {
                       <label htmlFor="checkout-loyalty" className="font-medium text-black">Use loyalty balance</label>
                       <span className="text-xs text-dark-gray">Available {formatBDT(loyaltyBalance.toFixed(2))}</span>
                     </div>
+                    {loyaltyRedemptionFrozen && (
+                      <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" role="status">
+                        Loyalty redemption is temporarily frozen for this account. Your balance is safe and you can still earn rewards.
+                      </p>
+                    )}
                     <div className="flex gap-2">
                       <input
                         id="checkout-loyalty"
@@ -1135,17 +1145,19 @@ const handleCheckout = async () => {
                         value={loyaltyRequested}
                         onChange={(event) => setLoyaltyRequested(event.target.value)}
                         placeholder="BDT amount"
+                        disabled={loyaltyRedemptionFrozen}
                         className="min-w-0 flex-1 rounded border border-cool-gray px-3 py-2 text-sm"
                       />
                       <button
                         type="button"
                         onClick={() => setLoyaltyRequested(String(Math.round(Math.min(loyaltyBalance, loyaltyCap) * 100) / 100))}
                         className="rounded border border-cool-gray px-3 text-sm font-medium hover:bg-white"
-                        disabled={loyaltyBalance <= 0 || loyaltyCap <= 0}
+                        disabled={loyaltyRedemptionFrozen || loyaltyBalance <= 0 || loyaltyCap <= 0}
                       >Use max</button>
                       <button
                         type="button"
                         onClick={() => setLoyaltyRequested('')}
+                        disabled={loyaltyRedemptionFrozen}
                         className="rounded border border-cool-gray px-3 text-sm hover:bg-white"
                       >Clear</button>
                     </div>

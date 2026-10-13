@@ -272,6 +272,7 @@ const AdminPOSOrders = () => {
           <div class="info-card">
             <div class="info-label">Payment</div>
             <div style="font-size:12px;color:#333"><strong>Method:</strong> ${escapePrintHtml((order.paymentMethod || 'N/A').toUpperCase())}</div>
+            ${order.paymentDetails?.trxId ? `<div style="font-size:12px;color:#333"><strong>Transaction ID:</strong> ${escapePrintHtml(order.paymentDetails.trxId)}</div>` : ''}
             <div style="font-size:12px;color:#333"><strong>Status:</strong> <span style="color:#16A34A;font-weight:600">PAID</span></div>
             <div style="font-size:12px;color:#333"><strong>Order Status:</strong> ${escapePrintHtml((order.orderStatus || 'completed').toUpperCase())}</div>
             ${order.notes ? `<div style="font-size:11px;color:#666;margin-top:4px"><strong>Notes:</strong> ${escapePrintHtml(order.notes)}</div>` : ''}
@@ -917,8 +918,20 @@ const AdminPOSOrders = () => {
                   <p className="text-[#4A4A4A]">Cashier: {selectedOrder.cashier?.firstName} {selectedOrder.cashier?.lastName}</p>
                   <p className="text-[#4A4A4A]">Outlet: {selectedOrder.outlet}</p>
                   <p className="text-[#4A4A4A]">Payment: {selectedOrder.paymentMethod.toUpperCase()}</p>
+                  {selectedOrder.paymentDetails?.trxId && <p className="text-[#4A4A4A]">Transaction ID: {selectedOrder.paymentDetails.trxId}</p>}
                 </div>
               </div>
+
+              {selectedOrder.giftCodeRedemptions?.length > 0 && (
+                <div className="rounded-lg border border-[#E8C4CE] bg-[#FFF8FA] p-3">
+                  <h4 className="mb-2 font-medium text-[#1B1B1B]">Redeemed gift code</h4>
+                  {selectedOrder.giftCodeRedemptions.map((redemption, index) => (
+                    <p key={`${redemption.giftCodeId || redemption.codeSuffix}-${index}`} className="text-sm text-[#4A4A4A]">
+                      ••••-{redemption.codeSuffix} · {formatBDT(redemption.appliedBDT)} applied
+                    </p>
+                  ))}
+                </div>
+              )}
 
               <div>
                 <h4 className="font-medium text-[#1B1B1B] mb-2">Items</h4>

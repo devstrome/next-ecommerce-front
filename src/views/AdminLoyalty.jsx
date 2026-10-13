@@ -317,7 +317,7 @@ export default function AdminLoyalty() {
         </div>
         {loading ? <p className="py-6 text-sm text-gray-500">Loading…</p> : <div className="overflow-x-auto">
           <table className="w-full min-w-[900px] text-left text-sm">
-            <thead><tr className="border-b text-gray-500"><th className="py-3">Code</th><th>Value</th><th>Status</th><th>Redeemed by</th><th>Expiry</th><th>Actions</th></tr></thead>
+            <thead><tr className="border-b text-gray-500"><th className="py-3">Code</th><th>Value</th><th>Status</th><th>Redeemed by / POS</th><th>Expiry</th><th>Actions</th></tr></thead>
             <tbody>{filteredGiftCodes.map((gift) => {
               const giftId = String(gift._id);
               const isActive = gift.status === 'active';
@@ -335,7 +335,11 @@ export default function AdminLoyalty() {
                   </td>
                   <td>{formatBDT(gift.amountBDT)}</td>
                   <td><span className={`rounded-full px-2.5 py-1 text-xs font-medium ${effectiveStatus === 'active' ? 'bg-emerald-50 text-emerald-700' : effectiveStatus === 'redeemed' ? 'bg-blue-50 text-blue-700' : effectiveStatus === 'expired' ? 'bg-amber-50 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>{effectiveStatus}</span></td>
-                  <td>{gift.redeemedBy ? `${gift.redeemedBy.firstName || ''} ${gift.redeemedBy.lastName || ''} · ${gift.redeemedBy.email || ''}` : '—'}</td>
+                  <td>
+                    {gift.redeemedBy ? <div>{`${gift.redeemedBy.firstName || ''} ${gift.redeemedBy.lastName || ''} · ${gift.redeemedBy.email || ''}`}</div> : null}
+                    {gift.redeemedPOSOrderNumber ? <div className="text-xs font-medium text-[#B1123B]">POS #{gift.redeemedPOSOrderNumber}</div> : null}
+                    {!gift.redeemedBy && !gift.redeemedPOSOrderNumber ? '—' : null}
+                  </td>
                   <td>{gift.expiresAt ? new Date(gift.expiresAt).toLocaleDateString() : 'Never'}</td>
                   <td><div className="flex flex-wrap items-center gap-2">
                     {isActive && !gift.code && <button disabled={isBusy} onClick={() => replaceLegacyGift(gift)} type="button" title="Replace the unrecoverable legacy code" className="rounded-lg border border-amber-300 px-2.5 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50">{isBusy ? 'Working…' : 'Replace code'}</button>}

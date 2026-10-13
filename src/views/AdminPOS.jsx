@@ -34,26 +34,25 @@ const AdminPOS = () => {
     posGiftCode,
     posGiftCodeDetails,
     posGiftCodeLoading,
-    searchQuery,
     scannedBarcode,
     searchResults,
     loading,
     stats,
     paymentMethod,
+    paymentTrxId,
     taxRate,
     discount,
     notes,
     outlet,
-    searchInputRef,
     barcodeInputRef,
     
     setCustomer,
     setLoyaltyRequested,
     setPOSGiftCode,
     clearPOSGiftCode,
-    setSearchQuery,
     setScannedBarcode,
     setPaymentMethod,
+    setPaymentTrxId,
     setTaxRate,
     setDiscount,
     setNotes,
@@ -75,8 +74,11 @@ const AdminPOS = () => {
   const [loyaltySearch, setLoyaltySearch] = useState('');
   const [loyaltySearchLoading, setLoyaltySearchLoading] = useState(false);
   const [loyaltyLookupMessage, setLoyaltyLookupMessage] = useState('');
-  const loyaltyCap = loyaltyCustomer?.enabled ? total * Math.min(100, Math.max(0, Number(loyaltyCustomer.maxRedeemPercent) || 0)) / 100 : 0;
-  const loyaltyApplied = loyaltyCustomer
+  const [productQuery, setProductQuery] = useState('');
+  const productSearchInputRef = useRef(null);
+  const loyaltyIsFrozen = Boolean(loyaltyCustomer?.redemptionFrozen);
+  const loyaltyCap = loyaltyCustomer?.enabled && !loyaltyIsFrozen ? total * Math.min(100, Math.max(0, Number(loyaltyCustomer.maxRedeemPercent) || 0)) / 100 : 0;
+  const loyaltyApplied = loyaltyCustomer && !loyaltyIsFrozen
     ? Math.round(Math.min(Math.max(0, Number(loyaltyRequested) || 0), Number(loyaltyCustomer.balanceBDT) || 0, loyaltyCap, total) * 100) / 100
     : 0;
   const giftCodeApplied = posGiftCodeDetails
@@ -126,47 +128,26 @@ const AdminPOS = () => {
     }
   };
 
-  // Mirror of the barcode field for the global (non-input) key handler
-  const barcodeValueRef = useRef(scannedBarcode);
-  useEffect(() => { barcodeValueRef.current = scannedBarcode; }, [scannedBarcode]);
-
-  // Physical (HID) scanner support:
-  // 1. Barcode field is focused on mount and after every scan (context refocuses).
-  // 2. Keystrokes typed while focus is NOT in an editable element are captured
-  //    and redirected into the barcode field — so scanning works no matter
-  //    where the cashier last clicked. Enter submits (scanner suffix).
+  const productSearchTimerRef = useRef(null);
+  useEffect(() => () => window.clearTimeout(productSearchTimerRef.current), []);
   useEffect(() => {
-    barcodeInputRef.current?.focus();
+    productSearchInputRef.current?.focus({ preventScroll: true });
+  }, []);
 
-    const isEditable = (el) =>
-      !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+  const scheduleProductSearch = (query) => {
+    window.clearTimeout(productSearchTimerRef.current);
+    productSearchTimerRef.current = window.setTimeout(() => {
+      productSearchTimerRef.current = null;
+      searchProducts(query);
+    }, 300);
+  };
 
-    const onKeyDown = (e) => {
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (isEditable(document.activeElement)) return;
-      const el = barcodeInputRef.current;
-      if (!el) return;
-
-      if (e.key === 'Enter') {
-        if (barcodeValueRef.current.trim()) {
-          e.preventDefault();
-          scanBarcode(barcodeValueRef.current);
-        }
-        return;
-      }
-      if (e.key.length === 1) {
-        e.preventDefault();
-        el.focus();
-        const next = barcodeValueRef.current + e.key;
-        barcodeValueRef.current = next;
-        setScannedBarcode(next);
-      }
-    };
-
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanBarcode]);
+  const submitProductSearch = (query = productQuery) => {
+    window.clearTimeout(productSearchTimerRef.current);
+    productSearchTimerRef.current = null;
+    searchProducts(query);
+    productSearchInputRef.current?.focus({ preventScroll: true });
+  };
 
   const resultMeasure = (item) => formatMeasureLine({
     ...item,
@@ -272,18 +253,25 @@ const AdminPOS = () => {
                   <label className="block text-sm font-medium text-[#4A4A4A] mb-2">Product Search</label>
                   <div className="flex space-x-2">
                     <input
-                      ref={searchInputRef}
+                      ref={productSearchInputRef}
                       type="text"
                       placeholder="Search products..."
-                      value={searchQuery}
+                      value={productQuery}
                       onChange={(e) => {
-                        setSearchQuery(e.target.value);
-                        searchProducts(e.target.value);
+                        setProductQuery(e.target.value);
+                        scheduleProductSearch(e.target.value);
+                      }}
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          submitProductSearch();
+                        }
                       }}
                       className="flex-1 px-4 py-3 border border-[#BDBDBD] focus:outline-none focus:ring-2 focus:ring-[#B1123B] bg-white text-[#1B1B1B] text-base min-h-[48px]"
                     />
                     <button
-                      onClick={() => searchProducts(searchQuery)}
+                      onClick={() => submitProductSearch()}
                       disabled={loading}
                       className="px-4 py-3 bg-[#4A4A4A] text-white hover:bg-[#1B1B1B] disabled:opacity-50 min-h-[48px] min-w-[48px] flex items-center justify-center"
                     >
@@ -332,7 +320,10 @@ const AdminPOS = () => {
                   {searchResults.map((item) => (
                     <div
                       key={item._id}
-                      onClick={() => addToCart(item)}
+                      onClick={() => {
+                        addToCart(item);
+                        window.requestAnimationFrame(() => productSearchInputRef.current?.focus({ preventScroll: true }));
+                      }}
                       className="p-3 border-b border-[#F4F4F4] hover:bg-[#F4F4F4] cursor-pointer min-h-[56px] active:bg-[#E9E9E9]"
                     >
                       <div className="flex items-center justify-between">
@@ -443,7 +434,7 @@ const AdminPOS = () => {
                   )}
                   {loyaltyCustomer && (
                     <div className="mt-2 flex items-center justify-between gap-3 text-sm">
-                      <span className="text-green-700">{loyaltyCustomer.name} · Balance {formatBDT(Number(loyaltyCustomer.balanceBDT || 0))}{loyaltyCustomer.tierName ? ` · ${loyaltyCustomer.tierName} (${Number(loyaltyCustomer.earnRatePercent || 0)}% back)` : ''}</span>
+                      <span className={loyaltyIsFrozen ? 'text-amber-700' : 'text-green-700'}>{loyaltyCustomer.name} · Balance {formatBDT(Number(loyaltyCustomer.balanceBDT || 0))}{loyaltyCustomer.tierName ? ` · ${loyaltyCustomer.tierName} (${Number(loyaltyCustomer.earnRatePercent || 0)}% back)` : ''}{loyaltyIsFrozen ? ' · Redemption frozen' : ''}</span>
                       <button type="button" onClick={() => { clearLoyaltyCustomer(); setLoyaltyLookupMessage('Loyalty unlinked. You can continue this sale normally.'); }} className="text-[#B1123B] underline">Unlink</button>
                     </div>
                   )}
@@ -509,7 +500,10 @@ const AdminPOS = () => {
                 ].map((method) => (
                   <button
                     key={method.value}
-                    onClick={() => setPaymentMethod(method.value)}
+                    onClick={() => {
+                      setPaymentMethod(method.value);
+                      if (method.value !== 'mobile_payment') setPaymentTrxId('');
+                    }}
                     className={`p-3 border flex flex-col items-center space-y-1 min-h-[60px] ${
                       paymentMethod === method.value
                         ? 'border-[#B1123B] bg-[#F7D5DF] text-[#B1123B]'
@@ -521,6 +515,24 @@ const AdminPOS = () => {
                   </button>
                 ))}
               </div>
+              {paymentMethod === 'mobile_payment' && (
+                <div className="mt-4">
+                  <label htmlFor="pos-payment-trx-id" className="mb-1 block text-sm font-medium text-[#4A4A4A]">
+                    Mobile payment transaction ID <span className="text-[#B1123B]">*</span>
+                  </label>
+                  <input
+                    id="pos-payment-trx-id"
+                    type="text"
+                    autoComplete="off"
+                    maxLength={100}
+                    value={paymentTrxId}
+                    onChange={(event) => setPaymentTrxId(event.target.value)}
+                    placeholder="Enter bKash/Nagad transaction ID"
+                    className="w-full min-h-[44px] border border-[#BDBDBD] bg-white px-3 py-2 text-[#1B1B1B] focus:outline-none focus:ring-2 focus:ring-[#B1123B]"
+                  />
+                  <p className="mt-1 text-xs text-[#6B7280]">The transaction ID will be saved with this POS order.</p>
+                </div>
+              )}
             </div>
 
             {/* Order Summary */}
@@ -561,6 +573,7 @@ const AdminPOS = () => {
                         <label htmlFor="pos-loyalty-amount" className="text-sm font-medium text-[#1B1B1B]">Apply loyalty BDT</label>
                         <span className="text-xs text-[#4A4A4A]">Max {formatBDT(Math.min(Number(loyaltyCustomer.balanceBDT || 0), loyaltyCap))}</span>
                       </div>
+                      {loyaltyIsFrozen && <p className="mb-2 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800" role="status">Redemption is frozen for this loyalty account. Continue this POS sale without spending the balance.</p>}
                       <div className="flex gap-2">
                         <input
                           id="pos-loyalty-amount"
@@ -570,9 +583,10 @@ const AdminPOS = () => {
                           step="0.01"
                           value={loyaltyRequested}
                           onChange={(event) => setLoyaltyRequested(event.target.value)}
-                          className="min-w-0 flex-1 px-3 py-2 border border-[#BDBDBD] bg-white text-[#1B1B1B]"
+                          disabled={loyaltyIsFrozen}
+                          className="min-w-0 flex-1 px-3 py-2 border border-[#BDBDBD] bg-white text-[#1B1B1B] disabled:bg-gray-100 disabled:text-gray-400"
                         />
-                        <button type="button" onClick={() => setLoyaltyRequested(String(Math.round(Math.min(Number(loyaltyCustomer.balanceBDT || 0), loyaltyCap) * 100) / 100))} className="px-3 border border-[#BDBDBD]">Use max</button>
+                        <button type="button" disabled={loyaltyIsFrozen} onClick={() => setLoyaltyRequested(String(Math.round(Math.min(Number(loyaltyCustomer.balanceBDT || 0), loyaltyCap) * 100) / 100))} className="px-3 border border-[#BDBDBD] disabled:cursor-not-allowed disabled:opacity-50">Use max</button>
                       </div>
                     </div>
                   )}
@@ -586,13 +600,12 @@ const AdminPOS = () => {
                         placeholder="Enter redeem code"
                         value={posGiftCode}
                         onChange={(event) => setPOSGiftCode(event.target.value)}
-                        disabled={!loyaltyCustomer}
-                        className="min-w-0 flex-1 border border-[#BDBDBD] bg-white px-3 py-2 text-[#1B1B1B] disabled:bg-gray-100"
+                        className="min-w-0 flex-1 border border-[#BDBDBD] bg-white px-3 py-2 text-[#1B1B1B]"
                       />
                       {posGiftCodeDetails ? (
                         <button type="button" onClick={clearPOSGiftCode} className="border border-[#BDBDBD] px-3">Clear</button>
                       ) : (
-                        <button type="button" onClick={handleApplyGiftCode} disabled={!loyaltyCustomer || !posGiftCode.trim() || posGiftCodeLoading} className="bg-[#1B1B1B] px-3 text-white disabled:opacity-50">
+                        <button type="button" onClick={handleApplyGiftCode} disabled={!posGiftCode.trim() || posGiftCodeLoading} className="bg-[#1B1B1B] px-3 text-white disabled:opacity-50">
                           {posGiftCodeLoading ? 'Checking…' : 'Apply'}
                         </button>
                       )}
@@ -600,10 +613,12 @@ const AdminPOS = () => {
                     {posGiftCodeDetails && (
                       <p className="mt-2 text-xs text-green-700">
                         Applied code ••••-{posGiftCodeDetails.codeSuffix} · {formatBDT(giftCodeApplied)} used
-                        {Number(posGiftCodeDetails.amountBDT) > giftCodeApplied ? ` · ${formatBDT(Number(posGiftCodeDetails.amountBDT) - giftCodeApplied)} unused value will be credited to this customer` : ''}
+                        {Number(posGiftCodeDetails.amountBDT) > giftCodeApplied ? (loyaltyCustomer
+                          ? ` · ${formatBDT(Number(posGiftCodeDetails.amountBDT) - giftCodeApplied)} unused value will be credited to this customer`
+                          : ` · Add items to use the full code value, or select a loyalty customer to keep the remainder`) : ''}
                       </p>
                     )}
-                    {!loyaltyCustomer && <p className="mt-2 text-xs text-[#6B7280]">Find a loyalty customer above before redeeming a code.</p>}
+                    {!loyaltyCustomer && <p className="mt-2 text-xs text-[#6B7280]">Gift codes work for walk-in sales. Select a loyalty customer only if unused code value should be credited to their balance.</p>}
                   </div>
                   {loyaltyApplied > 0 && (
                     <div className="flex justify-between text-sm text-green-700 mb-2">
