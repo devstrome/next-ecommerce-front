@@ -160,6 +160,7 @@ const AdminOrdersPage = () => {
   const [digitalFulfillmentDrafts, setDigitalFulfillmentDrafts] = useState({});
   const [digitalFulfillmentLoading, setDigitalFulfillmentLoading] = useState(false);
   const [digitalFulfillmentSaving, setDigitalFulfillmentSaving] = useState(false);
+  const [digitalFulfillmentPhase, setDigitalFulfillmentPhase] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [ordersPerPage] = useState(10);
   const [pagination, setPagination] = useState({
@@ -906,9 +907,12 @@ useEffect(() => {
     }));
     if (!items.length) return;
     setDigitalFulfillmentSaving(true);
+    setDigitalFulfillmentPhase(sendEmail ? 'save-email' : 'save');
+    let requestPhase = 'saving';
     try {
       const response = await axios.put(`${API_BASE_URL}/api/orders/${editingOrder._id}/digital-fulfillment`, { items }, {
         headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` },
+        timeout: 25000,
       });
       const drafts = Object.fromEntries((response.data.items || []).map((item) => [String(item.itemId), {
         details: item.details || {},
@@ -916,8 +920,11 @@ useEffect(() => {
       }]));
       setDigitalFulfillmentDrafts(drafts);
       if (sendEmail) {
+        requestPhase = 'sending';
+        setDigitalFulfillmentPhase('email');
         const emailResponse = await axios.post(`${API_BASE_URL}/api/orders/${editingOrder._id}/digital-fulfillment-email`, {}, {
           headers: { Authorization: `Bearer ${getStorage('adminAccessToken')}` },
+          timeout: 25000,
         });
         toast.success(emailResponse.data.message || 'Digital delivery details emailed');
         await loadDigitalFulfillment(editingOrder);
@@ -926,9 +933,13 @@ useEffect(() => {
       }
     } catch (error) {
       if (error.response?.status === 401) logout();
-      toast.error(error.response?.data?.message || 'Could not save digital delivery details');
+      const timeoutMessage = requestPhase === 'sending'
+        ? 'Email sending timed out. Your delivery details were saved, but the email was not confirmed. Check the Render email provider settings.'
+        : 'Saving delivery details timed out. Please retry.';
+      toast.error(error.response?.data?.message || (error.code === 'ECONNABORTED' ? timeoutMessage : 'Could not save digital delivery details'));
     } finally {
       setDigitalFulfillmentSaving(false);
+      setDigitalFulfillmentPhase('');
     }
   };
 
@@ -2179,7 +2190,12 @@ useEffect(() => {
                           {formatCurrency(item.price * item.quantity)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center text-sm">
-                          {item.inventoryAssigned ? (
+                          {item.isDigitalProduct ? (
+                            <div className="flex flex-col items-center gap-1">
+                              <span className="inline-flex items-center rounded-full bg-sky-50 px-2.5 py-0.5 text-xs font-medium text-sky-700">Digital product</span>
+                              <span className="text-xs text-gray-500">No inventory assignment needed</span>
+                            </div>
+                          ) : item.inventoryAssigned ? (
                             <div className="flex flex-col items-center">
                               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                                 ✓ Assigned
@@ -2380,8 +2396,8 @@ useEffect(() => {
                   })}
                 </div>
                 <div className="mt-4 flex flex-wrap justify-end gap-2">
-                  <button type="button" onClick={() => saveDigitalFulfillment(false)} disabled={digitalFulfillmentSaving || digitalFulfillmentLoading} className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 disabled:opacity-50">{digitalFulfillmentSaving ? 'Saving…' : 'Save details'}</button>
-                  <button type="button" onClick={() => saveDigitalFulfillment(true)} disabled={digitalFulfillmentSaving || digitalFulfillmentLoading || editingOrder.paymentStatus !== 'completed'} title={editingOrder.paymentStatus !== 'completed' ? 'Confirm payment before emailing digital access details' : 'Save and email digital fulfillment'} className="inline-flex items-center gap-2 rounded-lg bg-[#B1123B] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><FaEnvelope /> {digitalFulfillmentSaving ? 'Working…' : 'Save & email customer'}</button>
+                  <button type="button" onClick={() => saveDigitalFulfillment(false)} disabled={digitalFulfillmentSaving || digitalFulfillmentLoading} className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 disabled:opacity-50">{digitalFulfillmentPhase === 'save' ? 'Saving details…' : 'Save details'}</button>
+                  <button type="button" onClick={() => saveDigitalFulfillment(true)} disabled={digitalFulfillmentSaving || digitalFulfillmentLoading || editingOrder.paymentStatus !== 'completed'} title={editingOrder.paymentStatus !== 'completed' ? 'Confirm payment before emailing digital access details' : 'Save and email digital fulfillment'} className="inline-flex items-center gap-2 rounded-lg bg-[#B1123B] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><FaEnvelope /> {digitalFulfillmentPhase === 'save-email' ? 'Saving details…' : digitalFulfillmentPhase === 'email' ? 'Sending email…' : 'Save & email customer'}</button>
                 </div>
                 {editingOrder.paymentStatus !== 'completed' && <p className="mt-2 text-right text-xs text-amber-800">Payment must be marked completed before sending digital access details.</p>}
               </section>
