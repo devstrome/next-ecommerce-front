@@ -493,34 +493,33 @@ export default function PageClient() {
                                 const vEditing = editingItem === vKey
                                 const variantOptions = Array.isArray(variant.options) && variant.options.length
                                   ? variant.options
-                                  : (variant.sizes || []).map((size, index) => ({ size, measureType: variant.measureType, unitName: variant.unitName, price: variant.prices?.[index], discountPrice: variant.discountPrices?.[index] }))
-                                const prices = variantOptions.map((option) => {
+                                  : Array.from({ length: Math.max(variant.sizes?.length || 0, variant.prices?.length || 0, variant.discountPrices?.length || 0) }, (_, index) => ({ size: variant.sizes?.[index] || '', measureType: variant.measureType, unitName: variant.unitName, price: variant.prices?.[index], discountPrice: variant.discountPrices?.[index] }))
+                                const optionPriceLabels = variantOptions.map((option) => {
                                   const price = Number(option.discountPrice) > 0 && Number(option.discountPrice) < Number(option.price)
                                     ? Number(option.discountPrice)
                                     : Number(option.price)
-                                  return Number.isFinite(price) && price > 0 ? price : null
-                                }).filter((price) => price !== null)
-                                const priceLabel = prices.length === 0 ? ''
-                                  : prices.length === 1 ? `BDT ${prices[0]}`
-                                  : `BDT ${Math.min(...prices)}–${Math.max(...prices)}`
-                                const optionLabels = variantOptions.map((option) => {
+                                  if (!Number.isFinite(price) || price <= 0) return null
                                   const size = String(option.size || '').trim()
-                                  const unit = String(option.unitName || '').trim()
-                                  return size ? `${size}${unit && !size.toLowerCase().includes(unit.toLowerCase()) ? ` ${unit}` : ''}` : [option.measureType, unit].filter(Boolean).join(' ')
+                                  const unit = String(option.unitName || variant.unitName || '').trim()
+                                  const measureType = String(option.measureType || variant.measureType || '').trim()
+                                  const measure = size ? `${size}${unit && !size.toLowerCase().includes(unit.toLowerCase()) ? ` ${unit}` : ''}` : unit || 'Standard'
+                                  const label = [measureType, measure].filter(Boolean).join(': ')
+                                  return `${label} BDT ${price.toLocaleString('en-BD')}`
                                 }).filter(Boolean)
-                                const vLabel = [variant.colorName, ...optionLabels].filter(Boolean).join(' · ') || 'Variant'
+                                const vLabel = String(variant.colorName || '').trim() || 'Variant'
+                                const priceLabel = optionPriceLabels.join(' · ')
                                 const vRegion = variantRegionLabel(product, variant)
                                 return (
                                   <div key={variant._id} className="bg-white border border-[#E5E7EB] rounded-lg px-4 py-3">
                                     <div className="flex flex-wrap items-center justify-between gap-2">
-                                      <div className="flex items-center gap-3 min-w-0">
+                                      <div className="flex min-w-0 flex-wrap items-center gap-3">
                                         <p className="text-sm font-semibold text-[#1A1A1A] truncate">{vLabel}</p>
                                         {vRegion && <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700">📍 {vRegion}</span>}
-                                        {priceLabel && <span className="text-xs text-[#6B7280] shrink-0">{priceLabel}</span>}
                                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${hasCustom ? 'bg-[#D1FAE5] text-[#059669]' : 'bg-[#F3F4F6] text-[#6B7280]'}`}>
                                           {hasCustom ? <FiCheck size={11} /> : <FiAlertCircle size={11} />}
                                           {hasCustom ? 'Custom SEO' : 'Inherits product'}
                                         </span>
+                                        {priceLabel && <p className="basis-full break-words text-xs leading-relaxed text-[#6B7280]">{priceLabel}</p>}
                                       </div>
                                       {!vEditing && (
                                         <div className="flex items-center gap-2">

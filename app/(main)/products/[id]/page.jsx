@@ -52,11 +52,8 @@ function productStructuredData(product, id, selection = {}) {
       ...(categoryNames[1] ? [{ '@type': 'PropertyValue', name: 'Subcategory', value: categoryNames[1] }] : []),
       ...(regionNames.length ? [{ '@type': 'PropertyValue', name: 'Available regions', value: regionNames.join(', ') }] : []),
       ...(product.gender ? [{ '@type': 'PropertyValue', name: 'Audience', value: String(product.gender) }] : []),
-      ...(product.measureType || product.unitName ? [{
-        '@type': 'PropertyValue',
-        name: 'Measurement',
-        value: [product.measureType, product.unitName].filter(Boolean).join(' '),
-      }] : []),
+      ...(product.measureType ? [{ '@type': 'PropertyValue', name: 'Measurement type', value: String(product.measureType) }] : []),
+      ...(product.unitName ? [{ '@type': 'PropertyValue', name: 'Measurement unit', value: String(product.unitName) }] : []),
     ];
     const variantsForSearch = [];
 
@@ -68,16 +65,18 @@ function productStructuredData(product, id, selection = {}) {
       configurations.forEach((option, optionIndex) => {
         const size = String(option?.size || '').trim();
         const unitName = String(option?.unitName || variant.unitName || product.unitName || '').trim();
+        const measureType = String(option?.measureType || variant.measureType || product.measureType || '').trim();
         const sizeLabel = size
           ? `${size}${unitName && !size.toLowerCase().includes(unitName.toLowerCase()) ? ` ${unitName}` : ''}`
-          : [option?.measureType || variant.measureType || product.measureType, unitName].filter(Boolean).join(' ');
+          : unitName;
+        const measurementLabel = [measureType, sizeLabel].filter(Boolean).join(': ');
         const basePrice = Number(option?.price ?? variant.prices?.[optionIndex]);
         const discountPrice = Number(option?.discountPrice ?? variant.discountPrices?.[optionIndex]);
         const currentPrice = discountPrice > 0 && discountPrice < basePrice ? discountPrice : basePrice;
         const rawStock = option?.stock ?? variant.stockBySize?.[optionIndex] ?? variant.stock;
         const stock = rawStock === null || rawStock === undefined || rawStock === '' ? null : Number(rawStock);
         const image = absoluteImage(variant.images?.[0] || product.mainImage);
-        const label = [variant.colorName, sizeLabel, regionName].filter(Boolean).join(' / ');
+        const label = [variant.colorName, measurementLabel, regionName].filter(Boolean).join(' / ');
         const optionId = option?._id ? String(option._id) : '';
         const variantId = variant._id ? String(variant._id) : String(variantIndex);
         const fragment = `variant-${encodeURIComponent(variantId)}-${encodeURIComponent(optionId || sizeLabel || String(optionIndex))}`;
@@ -97,12 +96,20 @@ function productStructuredData(product, id, selection = {}) {
           ...(Number.isFinite(stock) ? { availability: stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock' } : {}),
           itemCondition: 'https://schema.org/NewCondition',
         } : null;
+        const optionDescription = [
+          variant.colorName ? `Color: ${variant.colorName}` : '',
+          regionName ? `Region: ${regionName}` : '',
+          measurementLabel ? `${measurementLabel}` : '',
+          offer ? `Price: BDT ${new Intl.NumberFormat('en-BD', { maximumFractionDigits: 2 }).format(currentPrice)}` : '',
+        ].filter(Boolean).join(' · ');
         const properties = [
           ...(regionName
             ? [{ '@type': 'PropertyValue', name: 'Region', value: regionName }]
             : regionNames.length ? [{ '@type': 'PropertyValue', name: 'Available regions', value: regionNames.join(', ') }] : []),
           ...(variant.colorName ? [{ '@type': 'PropertyValue', name: 'Color', value: String(variant.colorName) }] : []),
-          ...(sizeLabel ? [{ '@type': 'PropertyValue', name: 'Size or measure', value: sizeLabel }] : []),
+          ...(measureType ? [{ '@type': 'PropertyValue', name: 'Measurement type', value: measureType }] : []),
+          ...(sizeLabel ? [{ '@type': 'PropertyValue', name: 'Size / measurement', value: sizeLabel }] : []),
+          ...(unitName ? [{ '@type': 'PropertyValue', name: 'Measurement unit', value: unitName }] : []),
           ...(categoryNames[0] ? [{ '@type': 'PropertyValue', name: 'Category', value: categoryNames[0] }] : []),
           ...(categoryNames[1] ? [{ '@type': 'PropertyValue', name: 'Subcategory', value: categoryNames[1] }] : []),
         ];
@@ -112,8 +119,8 @@ function productStructuredData(product, id, selection = {}) {
           isVariantOf: { '@id': `${productUrl}#product-group` },
           url: variantUrl.toString(),
           name: [product.name, label].filter(Boolean).join(' — '),
-          ...(variant.seo?.metaDescription || product.seo?.metaDescription
-            ? { description: variant.seo?.metaDescription || product.seo.metaDescription }
+          ...([optionDescription, variant.seo?.metaDescription || product.seo?.metaDescription].filter(Boolean).length
+            ? { description: [optionDescription, variant.seo?.metaDescription || product.seo?.metaDescription].filter(Boolean).join('. ') }
             : {}),
           ...(image ? { image: [image] } : {}),
           ...(product.brand ? { brand: { '@type': 'Brand', name: product.brand } } : {}),
@@ -128,7 +135,7 @@ function productStructuredData(product, id, selection = {}) {
 
     const variesBy = [];
     if (variants.some((variant) => variant.colorName)) variesBy.push('https://schema.org/color');
-    if (variants.some((variant) => variantOptionsFor(product, variant).length || variant.sizes?.length)) variesBy.push('https://schema.org/size');
+    if (variants.some((variant) => variantOptionsFor(product, variant).length || variant.sizes?.length || variant.measureType || variant.unitName)) variesBy.push('https://schema.org/size');
     const group = {
       '@context': 'https://schema.org',
       '@type': 'ProductGroup',
@@ -294,6 +301,49 @@ function variantOptionsFor(product, variant) {
   }));
 }
 
+function formatOptionLabel(product, variant, option) {
+  const size = String(option?.size || '').trim();
+  const unit = String(option?.unitName || variant?.unitName || product?.unitName || '').trim();
+  const measureType = String(option?.measureType || variant?.measureType || product?.measureType || '').trim();
+  const measure = size
+    ? `${size}${unit && !size.toLowerCase().includes(unit.toLowerCase()) ? ` ${unit}` : ''}`
+    : unit || 'Standard';
+  return [measureType, measure].filter(Boolean).join(': ');
+}
+
+function productConfigurationSummary(product, selectedVariant = null, selectedOption = null) {
+  const variants = selectedVariant ? [selectedVariant] : (Array.isArray(product?.variants) ? product.variants : []);
+  const groups = variants.map((variant) => {
+    const options = variantOptionsFor(product, variant);
+    const prices = options.map((option) => {
+      const base = Number(option.price);
+      const discount = Number(option.discountPrice);
+      const price = discount > 0 && discount < base ? discount : base;
+      const matchesSelectedOption = !selectedOption
+        || (selectedOption._id && option._id && String(selectedOption._id) === String(option._id))
+        || (selectedOption.size && String(option.size || '').toLowerCase() === String(selectedOption.size).toLowerCase());
+      if (!Number.isFinite(price) || price <= 0 || !matchesSelectedOption) return null;
+      const optionLabel = formatOptionLabel(product, variant, option);
+      return `${optionLabel} BDT ${new Intl.NumberFormat('en-BD', { maximumFractionDigits: 2 }).format(price)}`;
+    }).filter(Boolean);
+    if (!prices.length) return '';
+    const regionRef = variant.regionId;
+    const regionName = typeof regionRef === 'object' ? regionRef?.name || regionRef?.slug : variant.regionName;
+    const groupLabel = [variant.colorName, regionName].filter(Boolean).join(' · ');
+    return `${groupLabel ? `${groupLabel}: ` : ''}${prices.join(', ')}`;
+  }).filter(Boolean);
+
+  if (!groups.length && !selectedVariant) {
+    const base = Number(product?.mainPrice);
+    const discount = Number(product?.discountPrice);
+    const price = discount > 0 && discount < base ? discount : base;
+    if (Number.isFinite(price) && price > 0) {
+      groups.push(`Standard BDT ${new Intl.NumberFormat('en-BD', { maximumFractionDigits: 2 }).format(price)}`);
+    }
+  }
+  return groups.join(' · ');
+}
+
 function productKeywords(product, storedKeywords = '') {
   const variants = Array.isArray(product?.variants) ? product.variants : [];
   const values = [
@@ -336,33 +386,49 @@ export async function generateMetadata({ params, searchParams }) {
     // Variant and region values are descriptive snapshot data for share
     // previews; the canonical remains the parent product to avoid duplicate
     // indexable pages for every configuration.
-    const variantId = sp?.variant;
-    const variant = variantId
+    const firstParam = (value) => Array.isArray(value) ? value[0] : value;
+    const variantId = firstParam(sp?.variant);
+    const requestedRegion = String(firstParam(sp?.region) || '');
+    const variants = Array.isArray(product.variants) ? product.variants : [];
+    const variantById = variantId
       ? (product.variants || []).find(v => String(v._id) === String(variantId))
       : null;
-    const optionKey = sp?.option || sp?.size;
+    const regionMatch = (entry) => {
+      const ref = entry?.regionId;
+      const values = [ref?._id, ref?.slug, ref?.name, entry?.regionName, ref]
+        .map((value) => String(value || '').toLowerCase());
+      return requestedRegion && values.includes(requestedRegion.toLowerCase());
+    };
+    const variant = variantById || (requestedRegion ? variants.find(regionMatch) : null);
+    const optionKey = firstParam(sp?.option) || firstParam(sp?.size);
     const option = optionKey && variantOptionsFor(product, variant).find((entry) =>
       String(entry._id) === String(optionKey) || String(entry.size || '').toLowerCase() === String(optionKey).toLowerCase()
     );
-    const requestedRegion = String(sp?.region || '');
     const regionOptions = [product.regionId, ...(product.regions || []), ...(product.variants || []).map((entry) => entry.regionId)]
       .filter((entry) => entry && typeof entry === 'object');
     const region = (variant?.regionId && typeof variant.regionId === 'object' ? variant.regionId : null)
       || regionOptions.find((entry) => [entry._id, entry.slug, entry.name].some((value) => String(value || '').toLowerCase() === requestedRegion.toLowerCase()));
-    const regionName = region?.name || (requestedRegion && requestedRegion !== 'undefined' ? requestedRegion : '');
-    const optionDetails = option?.size
-      ? [option.size, option.unitName].filter(Boolean).join(' ')
-      : [option?.measureType, option?.unitName].filter(Boolean).join(' ');
+    const regionName = region?.name || variant?.regionName || (requestedRegion && requestedRegion !== 'undefined' ? requestedRegion : '');
+    const optionDetails = option ? formatOptionLabel(product, variant, option) : '';
     const variantDetails = [variant?.colorName, optionDetails, regionName].filter(Boolean).join(' / ');
     const hasVariantSeo = variant?.seo?.metaTitle || variant?.seo?.metaDescription;
     const seo = hasVariantSeo ? variant.seo : (product.seo || {});
 
-    const title = seo.metaTitle || `${product.brand ? product.brand + ' ' : ''}${product.name}${variantDetails ? ` — ${variantDetails}` : ''} | ${SITE_NAME}`;
-    const description = seo.metaDescription || `Shop ${product.name}${variantDetails ? ` (${variantDetails})` : ''} at BELORELLA. Best prices and fast delivery in Bangladesh.`;
+    const defaultTitle = `${product.brand ? product.brand + ' ' : ''}${product.name}${variantDetails ? ` — ${variantDetails}` : ''} | ${SITE_NAME}`;
+    const title = option
+      ? `${product.brand ? product.brand + ' ' : ''}${product.name} — ${[variant?.colorName, optionDetails, regionName].filter(Boolean).join(' / ')} | ${SITE_NAME}`
+      : (seo.metaTitle || defaultTitle);
+    const configurationSummary = productConfigurationSummary(product, variant, option || null);
+    const baseDescription = seo.metaDescription || `Shop ${product.name}${variantDetails ? ` (${variantDetails})` : ''} at BELORELLA. Best prices and fast delivery in Bangladesh.`;
+    const description = option
+      ? [configurationSummary, baseDescription].filter(Boolean).join('. ')
+      : baseDescription;
+    const socialDescription = [configurationSummary, baseDescription].filter(Boolean).join('. ');
     const image = seo.ogImage || variant?.images?.[0] || product.mainImage || BRAND.EMAIL_LOGO_URL;
     const shareParams = new URLSearchParams();
     if (variant?._id) shareParams.set('variant', String(variant._id));
-    if (option?.size) shareParams.set('size', String(option.size));
+    if (option?._id) shareParams.set('option', String(option._id));
+    else if (option?.size) shareParams.set('size', String(option.size));
     if (region?.slug || requestedRegion) shareParams.set('region', String(region?.slug || requestedRegion));
     const shareUrl = `${SITE_URL}/products/${id}${shareParams.size ? `?${shareParams}` : ''}`;
     const canonicalUrl = `${SITE_URL}/products/${id}`;
@@ -373,13 +439,13 @@ export async function generateMetadata({ params, searchParams }) {
       keywords: productKeywords(product, seo.metaKeywords),
       openGraph: {
         title,
-        description,
+        description: socialDescription,
         url: shareUrl,
         siteName: SITE_NAME,
         images: [{ url: image, width: 1200, height: 630, alt: variantDetails ? `${product.name} - ${variantDetails}` : product.name }],
         type: 'website',
       },
-      twitter: { card: 'summary_large_image', title, description, images: [image] },
+      twitter: { card: 'summary_large_image', title, description: socialDescription, images: [image] },
       alternates: { canonical: canonicalUrl },
     };
   } catch {
@@ -397,9 +463,7 @@ export default async function Page({ params, searchParams }) {
   const structuredOption = variantOptionsFor(product, variant).find((entry) =>
     String(entry._id || '') === String(optionKey) || String(entry.size || '').toLowerCase() === String(optionKey).toLowerCase()
   );
-  const optionLabel = structuredOption?.size
-    ? [structuredOption.size, structuredOption.unitName].filter(Boolean).join(' ')
-    : [structuredOption?.measureType, structuredOption?.unitName].filter(Boolean).join(' ');
+  const optionLabel = structuredOption ? formatOptionLabel(product, variant, structuredOption) : '';
   const productRegions = [product.regionId, ...(product.regions || []), ...(product.variants || []).map((entry) => entry.regionId)].filter(Boolean);
   const requestedRegion = String(selectedParams?.region || '');
   const regionRecord = productRegions.find((entry) => [entry?._id, entry?.slug, entry?.name, entry].some((value) =>
