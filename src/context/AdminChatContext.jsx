@@ -25,6 +25,7 @@ export const AdminChatProvider = ({ children }) => {
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState("");
 const [imageToSend, setImageToSend] = useState("");
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [socket, setSocket] = useState(null);
@@ -216,6 +217,7 @@ const [imageToSend, setImageToSend] = useState("");
   // --- Fetch all chat rooms ---
   const fetchRooms = React.useCallback(async () => {
     try {
+      setError(null);
       setLoading(true);
       const token = getAdminToken();
       if (!token) {
@@ -312,6 +314,7 @@ const [imageToSend, setImageToSend] = useState("");
     const image = imageToSend;
     if ((!trimmed && !image) || !activeRoom?._id || !socket?.connected || !admin?._id || sendInFlightRef.current) return;
     sendInFlightRef.current = true;
+    setIsSendingMessage(true);
     
     try {
       setError(null);
@@ -321,6 +324,7 @@ const [imageToSend, setImageToSend] = useState("");
         const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         const tempMessage = {
           _id: tempId,
+          clientMessageId: tempId,
           senderId: admin._id,
           senderType: "admin",
           text: trimmed,
@@ -335,23 +339,43 @@ const [imageToSend, setImageToSend] = useState("");
         setMessages(prev => [...prev, tempMessage]);
         
         // Emit via socket with tempId so backend can echo it back
-        socket.emit("sendMessage", { 
-          roomId: activeRoom._id, 
-          senderId: admin._id, 
-          senderType: "admin", 
-          text: trimmed,
-          image,
-          tempId
+        const acknowledgement = new Promise((resolve) => {
+          const timeout = setTimeout(() => resolve({
+            success: false,
+            error: 'No confirmation yet. Check the conversation before retrying.'
+          }), 15000);
+          socket.emit("sendMessage", {
+            roomId: activeRoom._id,
+            senderId: admin._id,
+            senderType: "admin",
+            text: trimmed,
+            image,
+            tempId
+          }, (result) => {
+            clearTimeout(timeout);
+            resolve(result || { success: true });
+          });
         });
+
+        setInputMessage("");
+        setImageToSend("");
+        const result = await acknowledgement;
+        if (!result.success) {
+          setMessages((prev) => prev.filter((msg) => msg._id !== tempId));
+          setRooms((prev) => prev.map((room) => room._id === activeRoom._id
+            ? { ...room, messages: (room.messages || []).filter((msg) => msg._id !== tempId) }
+            : room));
+          setInputMessage((current) => current || trimmed);
+          setImageToSend((current) => current || image);
+          setError(result.error || 'Failed to send message. Please try again.');
+        }
       }
-      
-      setInputMessage("");
-      setImageToSend("");
     } catch (err) {
       console.error("Error sending message:", err);
       setError(err.response?.data?.message || "Failed to send message");
     } finally {
       sendInFlightRef.current = false;
+      setIsSendingMessage(false);
     }
   }, [inputMessage, imageToSend, activeRoom?._id, socket, admin?._id]);
 
@@ -527,6 +551,7 @@ const [imageToSend, setImageToSend] = useState("");
       // Ensure message has proper structure with unique _id
       const cleanMessage = {
         _id: message._id || `temp_${Date.now()}_${Math.random()}`,
+        clientMessageId: message.clientMessageId || '',
         senderId: message.senderId,
         senderType: message.senderType || 'customer',
         senderName: message.senderName || '',
@@ -548,6 +573,7 @@ const [imageToSend, setImageToSend] = useState("");
         // Check if message already exists in this room
         const messageExists = roomExists.messages.some(msg => 
           msg._id === message._id || 
+          (message.clientMessageId && msg.clientMessageId === message.clientMessageId) ||
           (msg.senderId === message.senderId && 
            msg.text === message.text && 
            Math.abs(new Date(msg.createdAt) - new Date(message.createdAt)) < 1000)
@@ -573,6 +599,7 @@ const [imageToSend, setImageToSend] = useState("");
           // Check if message already exists in active room
           const messageExists = prev.some(msg => 
             msg._id === message._id || 
+            (message.clientMessageId && msg.clientMessageId === message.clientMessageId) ||
             (msg.senderId === message.senderId && 
              msg.text === message.text && 
              Math.abs(new Date(msg.createdAt) - new Date(message.createdAt)) < 1000)
@@ -1114,6 +1141,7 @@ const [imageToSend, setImageToSend] = useState("");
     fetchRooms,
     fetchRoom,
     handleSend, // Use the new socket-based handleSend
+    isSendingMessage,
     imageToSend,
     setImageToSend,
     transferRoom,

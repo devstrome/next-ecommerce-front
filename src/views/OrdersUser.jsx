@@ -916,9 +916,9 @@ function OrdersListPage() {
                             className="flex items-start gap-4 p-4 card rounded-xl"
                           >
                             <img
-                              src={item.mainImage}
+                              src={item.variantImage || item.mainImage}
                               alt={item.name}
-                              className="w-16 h-16 object-cover rounded-lg border border-cool-gray"
+                              className="h-20 w-20 shrink-0 rounded-lg border border-cool-gray bg-white p-1 object-contain sm:h-24 sm:w-24"
                               loading="lazy"
                             />
                             <div className="flex-1">

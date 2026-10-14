@@ -14,6 +14,8 @@
     scroll-behavior: smooth;
     max-width: 100%;
     overflow-x: clip;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
   }
 
   body {
@@ -181,10 +183,29 @@
 
 @media (max-width: 767px) {
   .storefront-main,
+  .admin-responsive-content {
+    width: 100%;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .storefront-main,
   .admin-responsive-content,
   .storefront-main :where(.grid > *, .flex > *),
   .admin-responsive-content :where(.grid > *, .flex > *) {
     min-width: 0;
+  }
+
+  .storefront-main :where(button, a, input, select, textarea),
+  .admin-responsive-content :where(button, a, input, select, textarea) {
+    max-width: 100%;
+    touch-action: manipulation;
+  }
+
+  .storefront-main :where(.overflow-x-auto),
+  .admin-responsive-content :where(.overflow-x-auto) {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
   }
 
   .storefront-main table,

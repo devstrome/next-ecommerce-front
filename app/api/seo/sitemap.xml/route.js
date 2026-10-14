@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
-const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
-const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://belorella.com';
+const API_URI = (process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000').replace(/\/+$/, '');
+const BASE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://belorella.com').replace(/\/+$/, '');
 
 async function fetchProducts() {
   const products = [];
@@ -46,6 +46,17 @@ async function fetchBlogPosts() {
   return posts;
 }
 
+async function fetchHelpPages() {
+  try {
+    const res = await fetch(`${API_URI}/api/help-pages`, { next: { revalidate: 3600 } });
+    if (!res.ok) return [];
+    const pages = await res.json();
+    return Array.isArray(pages) ? pages.filter((page) => page.active && page.slug) : [];
+  } catch {
+    return [];
+  }
+}
+
 const SITEMAP_URL_LIMIT = 45000;
 const xmlEscape = (value) => String(value).replace(/[<>&'\"]/g, (char) => ({
   '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;',
@@ -56,7 +67,7 @@ function renderUrlSet(urls) {
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${urls.map((url) => `  <url>
     <loc>${xmlEscape(`${BASE_URL}${url.loc}`)}</loc>
-${url.lastmod ? `    <lastmod>${xmlEscape(new Date(url.lastmod).toISOString())}</lastmod>` : ''}
+${url.lastmod && Number.isFinite(new Date(url.lastmod).getTime()) ? `    <lastmod>${xmlEscape(new Date(url.lastmod).toISOString())}</lastmod>` : ''}
 ${url.changefreq ? `    <changefreq>${url.changefreq}</changefreq>` : ''}
 ${url.priority ? `    <priority>${url.priority}</priority>` : ''}
   </url>`).join('\n')}
@@ -65,13 +76,14 @@ ${url.priority ? `    <priority>${url.priority}</priority>` : ''}
 }
 
 export async function GET(request) {
-  const [products, blogPosts] = await Promise.all([fetchProducts(), fetchBlogPosts()]);
+  const [products, blogPosts, helpPages] = await Promise.all([fetchProducts(), fetchBlogPosts(), fetchHelpPages()]);
 
   const staticUrls = [
     { loc: '/', changefreq: 'daily', priority: '1.0' },
     { loc: '/products', changefreq: 'daily', priority: '0.9' },
     { loc: '/about', changefreq: 'monthly', priority: '0.5' },
     { loc: '/contact', changefreq: 'monthly', priority: '0.5' },
+    { loc: '/help', changefreq: 'monthly', priority: '0.6' },
     { loc: '/blog', changefreq: 'daily', priority: '0.7' },
   ];
 
@@ -89,7 +101,14 @@ export async function GET(request) {
     lastmod: b.updatedAt || b.createdAt || new Date().toISOString(),
   }));
 
-  const allUrls = [...staticUrls, ...productUrls, ...blogUrls];
+  const helpUrls = helpPages.map((page) => ({
+    loc: `/help/${encodeURIComponent(page.slug)}`,
+    changefreq: 'monthly',
+    priority: '0.5',
+    lastmod: page.updatedAt || page.createdAt,
+  }));
+
+  const allUrls = [...staticUrls, ...productUrls, ...blogUrls, ...helpUrls];
   const partValue = new URL(request.url).searchParams.get('part');
   if (partValue !== null) {
     const part = Number.parseInt(partValue, 10);

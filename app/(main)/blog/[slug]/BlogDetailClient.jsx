@@ -4,20 +4,19 @@ import axios from 'axios';
 import Link from 'next/link';
 import { FiArrowLeft, FiClock, FiUser, FiEye, FiTag, FiHeart, FiMessageCircle, FiSend, FiTrash2, FiShare2 } from 'react-icons/fi';
 import { FaFacebookF, FaInstagram, FaLinkedinIn, FaPinterestP, FaWhatsapp, FaXTwitter, FaYoutube } from 'react-icons/fa6';
-import SEOHead from '../../../../src/components/SEOHead';
 import { SOCIAL_LINKS } from '../../../../src/config/socialLinks';
 import { getPublicCurrentUrl, getPublicSiteUrl } from '../../../../src/lib/publicSiteUrl';
 
 const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
 
-export default function BlogDetailClient({ slug }) {
-  const [blog, setBlog] = useState(null);
-  const [loading, setLoading] = useState(true);
+export default function BlogDetailClient({ slug, initialBlog = null }) {
+  const [blog, setBlog] = useState(initialBlog);
+  const [loading, setLoading] = useState(!initialBlog);
   const [error, setError] = useState('');
-  const [likesCount, setLikesCount] = useState(0);
+  const [likesCount, setLikesCount] = useState(initialBlog?.likesCount || 0);
   const [liked, setLiked] = useState(false);
   const [commentText, setCommentText] = useState('');
-  const [comments, setComments] = useState([]);
+  const [comments, setComments] = useState(initialBlog?.comments || []);
   const [submitting, setSubmitting] = useState(false);
   const [user, setUser] = useState(null);
 
@@ -29,6 +28,17 @@ export default function BlogDetailClient({ slug }) {
   }, []);
 
   useEffect(() => {
+    if (initialBlog?.slug === slug) {
+      setBlog(initialBlog);
+      setLikesCount(initialBlog.likesCount || 0);
+      setComments(initialBlog.comments || []);
+      if (user) {
+        setLiked((initialBlog.likedBy || []).some(u => u._id === user._id || u === user._id));
+      }
+      setLoading(false);
+      return;
+    }
+
     const fetchBlog = async () => {
       try {
         const res = await axios.get(`${API_URI}/api/blogs/by-slug/${slug}`);
@@ -45,7 +55,7 @@ export default function BlogDetailClient({ slug }) {
       }
     };
     if (slug) fetchBlog();
-  }, [slug, user]);
+  }, [slug, user, initialBlog]);
 
   const handleLike = async () => {
     if (!user) return;
@@ -125,14 +135,6 @@ export default function BlogDetailClient({ slug }) {
 
   return (
     <div className="min-h-screen bg-pure-white">
-      <SEOHead
-        title={blog.seo?.metaTitle || blog.title}
-        description={blog.seo?.metaDescription || blog.excerpt}
-        keywords={blog.seo?.metaKeywords}
-        image={blog.seo?.ogImage || blog.coverImage}
-        url={`/blog/${blog.slug}`}
-        type="article"
-      />
       {/* Cover Image */}
       {blog.coverImage && (
         <div className="max-w-3xl mx-auto px-4 pt-8">

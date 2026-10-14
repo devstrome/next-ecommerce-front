@@ -1,9 +1,10 @@
 export const dynamic = 'force-dynamic';
 import BlogDetailClient from './BlogDetailClient';
 import { BRAND } from '../../../../src/config/brand';
+import { notFound } from 'next/navigation';
 
 const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://belorella.com';
+const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://belorella.com').replace(/\/+$/, '');
 const SITE_NAME = 'BELORELLA';
 const safeAbsoluteUrl = (value) => {
   try {
@@ -29,7 +30,7 @@ export async function generateMetadata({ params }) {
   const { slug } = await params;
   try {
     const blog = await fetchBlog(slug);
-    if (!blog) return { title: `Blog | ${SITE_NAME}` };
+    if (!blog) return { title: { absolute: `Blog | ${SITE_NAME}` }, robots: { index: false, follow: true } };
     const seo = blog.seo || {};
     const title = seo.metaTitle || `${blog.title} | ${SITE_NAME} Blog`;
     const description = seo.metaDescription || blog.excerpt || `Read "${blog.title}" on BELORELLA. Tips, trends, and more.`;
@@ -37,7 +38,7 @@ export async function generateMetadata({ params }) {
     const url = `${SITE_URL}/blog/${slug}`;
 
     return {
-      title,
+      title: { absolute: title },
       description,
       keywords: seo.metaKeywords || `${blog.title}, ${blog.category}, BELORELLA, blog`,
       openGraph: {
@@ -56,13 +57,14 @@ export async function generateMetadata({ params }) {
       alternates: { canonical: url },
     };
   } catch {
-    return { title: `Blog | ${SITE_NAME}` };
+    return { title: { absolute: `Blog | ${SITE_NAME}` }, robots: { index: false, follow: true } };
   }
 }
 
 export default async function Page({ params }) {
   const { slug } = await params;
   const blog = await fetchBlog(slug);
+  if (!blog) notFound();
   const blogUrl = `${SITE_URL}/blog/${encodeURIComponent(slug)}`;
   const authorName = typeof blog?.author === 'string' ? blog.author : blog?.author?.name;
   const image = safeAbsoluteUrl(blog?.seo?.ogImage || blog?.coverImage);
@@ -91,6 +93,6 @@ export default async function Page({ params }) {
   return <>
     {articleSchema && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: safeJsonLd(articleSchema) }} />}
     <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: safeJsonLd(breadcrumbs) }} />
-    <BlogDetailClient slug={slug} />
+      <BlogDetailClient slug={slug} initialBlog={blog} />
   </>;
 }

@@ -3,8 +3,6 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import Link from 'next/link';
 import { FiArrowLeft, FiArrowUpRight, FiClock, FiMessageCircle, FiShield } from 'react-icons/fi';
-import SEOHead from '../../../../src/components/SEOHead';
-import { BRAND } from '../../../../src/config/brand';
 
 const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
 
@@ -17,11 +15,11 @@ function HelpRichContent({ content, faq = false }) {
   );
 }
 
-export default function HelpPageClient({ slug }) {
-  const [page, setPage] = useState(null);
-  const [loading, setLoading] = useState(true);
+export default function HelpPageClient({ slug, initialPage = null, initialPages = [] }) {
+  const [page, setPage] = useState(initialPage);
+  const [loading, setLoading] = useState(!initialPage);
   const [error, setError] = useState('');
-  const [allPages, setAllPages] = useState([]);
+  const [allPages, setAllPages] = useState(initialPages);
 
   useEffect(() => {
     const fetchPage = async () => {
@@ -40,9 +38,9 @@ export default function HelpPageClient({ slug }) {
         setAllPages(res.data.filter(p => p.active));
       } catch {}
     };
-    if (slug) fetchPage();
-    fetchAll();
-  }, [slug]);
+    if (initialPage?.slug !== slug) fetchPage();
+    if (!initialPages.length) fetchAll();
+  }, [slug, initialPage, initialPages]);
 
   if (loading) {
     return (
@@ -69,14 +67,6 @@ export default function HelpPageClient({ slug }) {
 
   return (
     <div className="min-h-screen bg-[#fbf8f7]">
-      <SEOHead
-        title={page.seo?.metaTitle || `${page.title} | BELORELLA`}
-        description={page.seo?.metaDescription || 'Helpful information for shopping with BELORELLA in Bangladesh.'}
-        keywords={page.seo?.metaKeywords}
-        image={page.seo?.ogImage || BRAND.EMAIL_LOGO_URL}
-        url={`/help/${page.slug}`}
-      />
-
       <header className="relative isolate overflow-hidden bg-[linear-gradient(120deg,#741025_0%,#a30f30_48%,#e31845_100%)] text-white">
         <div className="pointer-events-none absolute -right-16 -top-32 h-96 w-96 rounded-full border border-white/10" />
         <div className="pointer-events-none absolute -right-2 top-12 h-64 w-64 rounded-full border border-white/10" />

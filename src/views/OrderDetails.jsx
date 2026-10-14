@@ -697,9 +697,9 @@ function OrderDetails() {
                 {order.items?.map((item, index) => (
                   <div key={index} className="flex items-start gap-4 p-4 card rounded-lg">
                     <img
-                      src={item.mainImage}
+                      src={item.variantImage || item.mainImage}
                       alt={item.name}
-                      className="w-20 h-20 object-cover rounded-lg border border-cool-gray"
+                      className="h-20 w-20 shrink-0 rounded-lg border border-cool-gray bg-white p-1 object-contain sm:h-24 sm:w-24"
                     />
                     <div className="flex-1">
                       <h3 className="font-semibold text-black font-heading">{item.name}</h3>

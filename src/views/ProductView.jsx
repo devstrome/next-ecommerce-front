@@ -111,7 +111,7 @@ const RegionSelector = ({ regions, selectedRegionId, onChange, compact = false }
   );
 };
 
-const ProductView = () => {
+const ProductView = ({ initialProduct, initialSelection }) => {
   const cartCtx = useContext(CartContext);
   const addToCart = cartCtx?.addToCart || (() => {});
   const userCtx = useContext(UserContext);
@@ -122,15 +122,25 @@ const ProductView = () => {
   const { id } = useParams();
   const router = useRouter();
   const dispatch = useDispatch();
-  const product = useSelector((state) => selectProductById(state, id));
-  const [selectedRegionId, setSelectedRegionId] = useState('');
-  const [selectedVariant, setSelectedVariant] = useState(null);
-  const [selectedOptionIndex, setSelectedOptionIndex] = useState(0);
-  const [selectedSize, setSelectedSize] = useState(null);
-  const [selectedPrice, setSelectedPrice] = useState(null);
-  const [selectedColor, setSelectedColor] = useState(null);
-  const [selectedDiscountPrice, setSelectedDiscountPrice] = useState(null);
-  const [mainImage, setMainImage] = useState('');
+  const storedProduct = useSelector((state) => selectProductById(state, id));
+  const product = String(initialProduct?._id || '') === String(id || '')
+    ? initialProduct
+    : storedProduct;
+  const serverSelectedVariant = product?.variants?.find((variant) => String(variant._id) === String(initialSelection?.variantId || ''))
+    || product?.variants?.[0] || null;
+  const serverOptions = getVariantOptions(product, serverSelectedVariant);
+  const serverOptionIndex = Number.isInteger(initialSelection?.optionIndex)
+    ? Math.min(Math.max(initialSelection.optionIndex, 0), Math.max(serverOptions.length - 1, 0))
+    : 0;
+  const serverSelectedOption = serverOptions[serverOptionIndex] || null;
+  const [selectedRegionId, setSelectedRegionId] = useState(initialSelection?.regionId || '');
+  const [selectedVariant, setSelectedVariant] = useState(serverSelectedVariant);
+  const [selectedOptionIndex, setSelectedOptionIndex] = useState(serverOptionIndex);
+  const [selectedSize, setSelectedSize] = useState(serverSelectedOption?.size || null);
+  const [selectedPrice, setSelectedPrice] = useState(serverSelectedOption?.price ?? null);
+  const [selectedColor, setSelectedColor] = useState(serverSelectedVariant?.colorName || null);
+  const [selectedDiscountPrice, setSelectedDiscountPrice] = useState(Number(serverSelectedOption?.discountPrice) || 0);
+  const [mainImage, setMainImage] = useState(serverSelectedVariant?.images?.[0] || product?.mainImage || '');
   const [relatedProducts, setRelatedProducts] = useState([]);
   const [viewers, setViewers] = useState(0);
   const socketRef = useRef(null);
@@ -1209,8 +1219,8 @@ const ProductView = () => {
           {/* Related Products */}
           {relatedProducts.length > 0 && (
             <div className="mt-12 border-t border-cool-gray pt-8">
-              <h2 className="font-heading text-display-sm mb-6 text-black">You May Also Like</h2>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <h2 className="font-heading text-2xl sm:text-display-sm mb-5 sm:mb-6 text-black">You May Also Like</h2>
+              <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-3 scrollbar-none sm:mx-0 sm:grid sm:grid-cols-2 sm:gap-4 sm:overflow-visible sm:px-0 sm:pb-0 lg:grid-cols-4">
                 {relatedProducts
                   .filter((relatedProduct) => relatedProduct.productId !== product._id)
                   .slice(0, 8)
@@ -1232,7 +1242,7 @@ const ProductView = () => {
                     return (
                     <div
                       key={relatedProduct.productId}
-                      className="group border border-cool-gray hover:border-mid-gray hover:shadow-[0_8px_24px_rgba(0,0,0,0.08)] transition-all duration-300 p-4 flex flex-col bg-pure-white"
+                      className="group w-[78vw] max-w-[20rem] flex-none snap-start rounded-xl border border-cool-gray bg-pure-white p-3 transition-all duration-300 hover:border-mid-gray hover:shadow-[0_8px_24px_rgba(0,0,0,0.08)] sm:w-auto sm:max-w-none sm:p-4"
                     >
                       <Link href={`/products/${relatedProduct.productId}`} className="block relative">
                         {relatedProduct.mainBadgeName && relatedProduct.mainBadgeColor && (
@@ -1281,23 +1291,23 @@ const ProductView = () => {
                       <div className="mt-auto pt-3 grid grid-cols-2 gap-2">
                         <Link
                           href={`/products/${relatedProduct.productId}`}
-                          className="text-[11px] font-sans font-semibold uppercase tracking-wider text-black border border-black text-center py-2.5 hover:bg-black hover:text-pure-white transition-colors duration-200"
+                        className="inline-flex min-h-11 items-center justify-center whitespace-nowrap border border-black px-2 text-center font-sans text-[10px] font-semibold uppercase tracking-wide text-black transition-colors duration-200 hover:bg-black hover:text-pure-white sm:text-[11px] sm:tracking-wider"
                         >
                           View Details
                         </Link>
                         <button
                           type="button"
                           onClick={() => setRelatedCartProductId(relatedProduct.productId)}
-                          className="text-[11px] font-sans font-semibold uppercase tracking-wider text-pure-white bg-maybelline-pink text-center py-2.5 hover:bg-opacity-90 transition-opacity duration-200 flex items-center justify-center gap-1.5"
+                          className="inline-flex min-h-11 items-center justify-center gap-1 whitespace-nowrap bg-maybelline-pink px-1.5 text-center font-sans text-[10px] font-semibold uppercase tracking-wide text-pure-white transition-opacity duration-200 hover:bg-opacity-90 sm:gap-1.5 sm:px-2 sm:text-[11px] sm:tracking-wider"
                         >
-                          <FiShoppingCart size={12} />
+                          <FiShoppingCart className="shrink-0" size={14} aria-hidden="true" />
                           Add to Cart
                         </button>
                       </div>
                       <button
                         type="button"
                         onClick={() => setRelatedCartProductId(relatedProduct.productId)}
-                        className="mt-2 w-full text-[11px] font-sans font-semibold uppercase tracking-wider text-pure-white bg-black text-center py-2.5 hover:bg-maybelline-pink transition-colors duration-200"
+                        className="mt-2 min-h-11 w-full rounded-sm bg-black px-2 text-center font-sans text-[10px] font-semibold uppercase tracking-wide text-pure-white transition-colors duration-200 hover:bg-maybelline-pink sm:text-[11px] sm:tracking-wider"
                       >
                         Buy Now
                       </button>

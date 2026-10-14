@@ -25,10 +25,12 @@ const AdminMessagePage = () => {
     inputMessage,
     loading,
     error,
+    clearError,
     onlineUsers,
     isTyping,
     fetchRoom,
     handleSend,
+    isSendingMessage,
     transferRoom,
     closeRoom,
     joinRoom,
@@ -239,17 +241,22 @@ const AdminMessagePage = () => {
     return new Date(readEntry.readAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
 
-  if (error) return (
+  if (error && (!activeRoom || activeRoom._id !== roomId)) return (
     <div className="flex flex-col p-4 min-h-screen bg-[#FAF8F6]">
-      <div className="flex-1 p-4 border border-[#BDBDBD] mt-14 flex items-center justify-center bg-white">
-        <p className="text-red-500 text-lg">{error}</p>
+      <div className="flex-1 p-4 border border-[#BDBDBD] flex items-center justify-center bg-white">
+        <div className="text-center">
+          <p className="text-red-500 text-lg">{error}</p>
+          <button type="button" onClick={() => fetchRoom(roomId)} className="mt-4 border border-[#B1123B] px-4 py-2 text-sm font-medium text-[#B1123B] hover:bg-[#B1123B] hover:text-white">
+            Try loading again
+          </button>
+        </div>
       </div>
     </div>
   );
   
   if (loading || !isConnected) return (
     <div className="flex flex-col p-4 min-h-screen bg-[#FAF8F6]">
-      <div className="flex-1 p-4 border border-[#BDBDBD] mt-14 flex items-center justify-center bg-white">
+      <div className="flex-1 p-4 border border-[#BDBDBD] flex items-center justify-center bg-white">
         <div className="text-center">
           <div className="animate-spin h-8 w-8 border-b-2 border-[#B1123B] mx-auto mb-4"></div>
           <p className="text-[#4A4A4A]">
@@ -267,7 +274,7 @@ const AdminMessagePage = () => {
   
   if (!activeRoom) return (
     <div className="flex flex-col p-4 min-h-screen bg-[#FAF8F6]">
-      <div className="flex-1 p-4 border border-[#BDBDBD] mt-14 flex items-center justify-center bg-white">
+      <div className="flex-1 p-4 border border-[#BDBDBD] flex items-center justify-center bg-white">
         <p className="text-[#4A4A4A] text-lg">Chat room not found</p>
       </div>
     </div>
@@ -277,7 +284,13 @@ const AdminMessagePage = () => {
     <>
     <div className="flex flex-col p-4 min-h-screen bg-[#FAF8F6]">
       
-      <div className="flex-1 border border-[#BDBDBD] mt-14 flex flex-col bg-white">
+      <div className="flex-1 border border-[#BDBDBD] flex flex-col bg-white">
+        {error && (
+          <div role="alert" className="flex items-center justify-between gap-3 border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
+            <span>{error}</span>
+            <button type="button" onClick={clearError} aria-label="Dismiss chat error" className="shrink-0 rounded px-2 py-1 font-semibold hover:bg-red-100">Dismiss</button>
+          </div>
+        )}
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-[#BDBDBD] bg-[#F4F4F4]">
           <div className="flex items-center space-x-3">
@@ -625,7 +638,7 @@ const AdminMessagePage = () => {
               <button
                 type="button"
                 onClick={handleSendMessage}
-                disabled={(!inputMessage.trim() && !imageToSend) || activeRoom.isClosed || !isConnected || uploadingImage}
+                disabled={(!inputMessage.trim() && !imageToSend) || activeRoom.isClosed || !isConnected || uploadingImage || isSendingMessage}
                 className={`p-3 transition-colors ${
                   !activeRoom.isClosed && (inputMessage.trim() || imageToSend)
                     ? "bg-[#1B1B1B] text-white hover:bg-[#4A4A4A]"

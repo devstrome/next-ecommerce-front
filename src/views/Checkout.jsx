@@ -147,7 +147,7 @@ function CheckoutPage() {
 
   useEffect(() => {
     if (defaultPaymentMethod) {
-      setSelectedPaymentMethod(defaultPaymentMethod);
+      setSelectedPaymentMethod((current) => current || defaultPaymentMethod);
     }
   }, [defaultPaymentMethod]);
 
@@ -806,12 +806,23 @@ const handleCheckout = async () => {
                 {!addingNewPayment ? (
                   <div className="space-y-4">
                     <select
-                      value={selectedPaymentMethod?._id || ""}
+                      value={String(selectedPaymentMethod?.type || '').toLowerCase() === 'cash'
+                        ? 'cash'
+                        : selectedPaymentMethod?._id || ""}
                       onChange={(e) => {
                         const methodId = e.target.value;
-                        const method = paymentMethods.find(m => m._id === methodId) || 
-                          { _id: "cash", type: "cash", label: "Cash on Delivery" };
-                        setSelectedPaymentMethod(method);
+                        if (methodId === 'cash') {
+                          setSelectedPaymentMethod({
+                            _id: 'cash',
+                            methodId: 'cash',
+                            type: 'cash',
+                            label: 'Cash on Delivery',
+                          });
+                          return;
+                        }
+
+                        const method = availablePaymentMethods.find((item) => String(item._id) === methodId);
+                        setSelectedPaymentMethod(method || null);
                       }}
                       className="w-full p-4 border border-cool-gray font-sans text-black bg-pure-white focus:ring-1 focus:ring-maybelline-pink focus:border-maybelline-pink outline-none transition-all duration-200"
                     >
@@ -821,7 +832,7 @@ const handleCheckout = async () => {
                           {method.label || `${method.type.toUpperCase()} ${method.walletNumberMasked || method.last4 || ''}`}
                         </option>
                       ))}
-                      {!requiresWalletPayment && <option value="Cash On Delivery">Cash on Delivery</option>}
+                      {!requiresWalletPayment && <option value="cash">Cash on Delivery</option>}
                     </select>
 
                     {selectedPaymentMethod && (

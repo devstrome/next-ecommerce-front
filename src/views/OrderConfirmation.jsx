@@ -94,9 +94,9 @@ export default function OrderConfirmationPage() {
                 <li key={idx} className="py-4">
                   <div className="flex items-center">
                     <img
-                      src={item.mainImage}
+                      src={item.variantImage || item.mainImage}
                       alt={item.name}
-                      className="flex-shrink-0 h-16 w-16 rounded-md object-cover border border-cool-gray"
+                      className="h-20 w-20 shrink-0 rounded-md border border-cool-gray bg-white p-1 object-contain sm:h-24 sm:w-24"
                     />
                     <div className="ml-4 flex-1">
                       <div className="flex justify-between">

@@ -22,6 +22,7 @@ export const UserChatProvider = ({ children }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [inputMessage, setInputMessage] = useState("");
   const [imageToSend, setImageToSend] = useState("");
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [messages, setMessages] = useState([]);
   const [activeRoom, setActiveRoom] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -250,6 +251,7 @@ export const UserChatProvider = ({ children }) => {
       setMessages((prev) => {
         const messageExists = prev.some(msg => 
           msg._id === message._id || 
+          (message.clientMessageId && msg.clientMessageId === message.clientMessageId) ||
           (msg.senderId === message.senderId && 
            msg.text === message.text && 
            Math.abs(new Date(msg.createdAt) - new Date(message.createdAt)) < 1000)
@@ -263,6 +265,7 @@ export const UserChatProvider = ({ children }) => {
         const cleanMessage = {
           _id: message._id || `temp_${Date.now()}_${Math.random()}`,
           senderId: message.senderId,
+          clientMessageId: message.clientMessageId || '',
           senderType: message.senderType || 'customer',
           senderName: message.senderName || '',
           text: message.text,
@@ -635,6 +638,7 @@ export const UserChatProvider = ({ children }) => {
     const image = imageToSend;
     if ((!trimmed && !image) || !activeRoom?._id || !socket?.connected || sendInFlightRef.current) return;
     sendInFlightRef.current = true;
+    setIsSendingMessage(true);
     
     const isGuest = !user?._id || !isLoggedIn;
     
@@ -647,6 +651,7 @@ export const UserChatProvider = ({ children }) => {
         const tempMessage = {
           _id: tempId,
           senderType: isGuest ? "guest" : "customer",
+          clientMessageId: tempId,
           text: trimmed,
           image,
           reaction: "",
@@ -678,16 +683,33 @@ export const UserChatProvider = ({ children }) => {
         } else {
           socketData.senderId = user._id;
         }
-        socket.emit("sendMessage", socketData);
+        const acknowledgement = new Promise((resolve) => {
+          const timeout = setTimeout(() => resolve({
+            success: false,
+            error: 'No confirmation yet. Check the conversation before retrying.'
+          }), 15000);
+          socket.emit("sendMessage", socketData, (result) => {
+            clearTimeout(timeout);
+            resolve(result || { success: true });
+          });
+        });
+
+        setInputMessage("");
+        setImageToSend("");
+        const result = await acknowledgement;
+        if (!result.success) {
+          setMessages((prev) => prev.filter((msg) => msg._id !== tempId));
+          setInputMessage((current) => current || trimmed);
+          setImageToSend((current) => current || image);
+          setError(result.error || 'Failed to send message. Please try again.');
+        }
       }
-      
-      setInputMessage("");
-      setImageToSend("");
     } catch (err) {
       console.error("Error sending message:", err);
       setError(err.response?.data?.message || "Failed to send message");
     } finally {
       sendInFlightRef.current = false;
+      setIsSendingMessage(false);
     }
   }, [inputMessage, imageToSend, activeRoom?._id, socket, user?._id, isLoggedIn, guestId, guestInfo]);
 
@@ -959,6 +981,7 @@ export const UserChatProvider = ({ children }) => {
     imageToSend,
     setImageToSend,
     handleSend,
+    isSendingMessage,
     clearError,
     clearNotifications,
     markActivityNotificationRead,

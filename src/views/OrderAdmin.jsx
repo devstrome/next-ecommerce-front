@@ -66,6 +66,13 @@ const formatCurrency = (amount) => {
   return formatBDT(amount);
 };
 
+const normalizeInventorySize = (value, unitName = '') => {
+  const size = String(value ?? '').trim().toLowerCase().replace(/\s+/g, '');
+  const unit = String(unitName ?? '').trim().toLowerCase().replace(/\s+/g, '');
+  if (!size || !unit || !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(size) || size.endsWith(unit)) return size;
+  return `${size}${unit}`;
+};
+
 const InventoryDetailCard = ({ inventory, index }) => {
   const variant = inventory?.variantId && typeof inventory.variantId === 'object' ? inventory.variantId : null;
   const product = inventory?.productId && typeof inventory.productId === 'object' ? inventory.productId : null;
@@ -593,7 +600,8 @@ useEffect(() => {
         return;
       }
 
-      if (inventoryItem.size !== orderItem.size) {
+      const sizeUnit = orderItem.unitName || orderItem.configuration?.unitName || inventoryItem.variantId?.unitName || '';
+      if (normalizeInventorySize(inventoryItem.size, sizeUnit) !== normalizeInventorySize(orderItem.size, sizeUnit)) {
         toast.error(`Size mismatch: scanned ${inventoryItem.size}, expected ${orderItem.size}`);
         return;
       }

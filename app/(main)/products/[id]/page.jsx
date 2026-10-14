@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation'
 import { BRAND } from '../../../../src/config/brand'
 
 const API_URI = process.env.NEXT_PUBLIC_API_URI || 'http://localhost:3000';
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://belorella.com';
+const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://belorella.com').replace(/\/+$/, '');
 const SITE_NAME = 'BELORELLA';
 
 async function fetchProduct(id) {
@@ -328,7 +328,10 @@ export async function generateMetadata({ params, searchParams }) {
   const sp = await searchParams;
   try {
     const { product } = await fetchProduct(id);
-    if (!product) return { title: { absolute: `Product | ${SITE_NAME}` } };
+    if (!product) return {
+      title: { absolute: `Product | ${SITE_NAME}` },
+      robots: { index: false, follow: true },
+    };
 
     // Variant and region values are descriptive snapshot data for share
     // previews; the canonical remains the parent product to avoid duplicate
@@ -388,7 +391,7 @@ export default async function Page({ params, searchParams }) {
   const { id } = await params;
   const selectedParams = await searchParams;
   const { product, status } = await fetchProduct(id);
-  if (status === 404) notFound();
+  if (!product || status === 404) notFound();
   const variant = product?.variants?.find((entry) => String(entry._id) === String(selectedParams?.variant || ''));
   const optionKey = selectedParams?.option || selectedParams?.size || '';
   const structuredOption = variantOptionsFor(product, variant).find((entry) =>
@@ -397,16 +400,49 @@ export default async function Page({ params, searchParams }) {
   const optionLabel = structuredOption?.size
     ? [structuredOption.size, structuredOption.unitName].filter(Boolean).join(' ')
     : [structuredOption?.measureType, structuredOption?.unitName].filter(Boolean).join(' ');
+  const productRegions = [product.regionId, ...(product.regions || []), ...(product.variants || []).map((entry) => entry.regionId)].filter(Boolean);
+  const requestedRegion = String(selectedParams?.region || '');
+  const regionRecord = productRegions.find((entry) => [entry?._id, entry?.slug, entry?.name, entry].some((value) =>
+    String(value || '').toLowerCase() === requestedRegion.toLowerCase()
+  ));
+  const requestedVariant = product.variants?.find((entry) => String(entry._id) === String(selectedParams?.variant || ''));
+  const initialRegionId = String(
+    requestedVariant?.regionId?._id || requestedVariant?.regionId || regionRecord?._id || regionRecord ||
+    product.regionId?._id || product.regionId || product.variants?.find((entry) => entry.regionId)?.regionId?._id ||
+    product.variants?.find((entry) => entry.regionId)?.regionId || ''
+  );
+  const initialVariant = requestedVariant || product.variants?.find((entry) =>
+    !initialRegionId || !entry.regionId || String(entry.regionId?._id || entry.regionId) === initialRegionId
+  ) || product.variants?.[0] || null;
+  const initialOptions = variantOptionsFor(product, initialVariant);
+  const initialOptionIndex = Math.max(0, initialOptions.findIndex((entry) =>
+    String(entry._id || '') === String(optionKey || '') || String(entry.size || '').toLowerCase() === String(optionKey || '').toLowerCase()
+  ));
+  const initialSelection = {
+    variantId: initialVariant?._id ? String(initialVariant._id) : '',
+    regionId: initialRegionId,
+    optionIndex: initialOptionIndex,
+  };
   const structuredData = productStructuredData(product, id, {
     variantId: selectedParams?.variant,
     optionKey,
     regionKey: selectedParams?.region || '',
     optionLabel,
   });
+  const breadcrumbs = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Home', item: SITE_URL },
+      { '@type': 'ListItem', position: 2, name: 'Products', item: `${SITE_URL}/products` },
+      { '@type': 'ListItem', position: 3, name: product.name, item: `${SITE_URL}/products/${encodeURIComponent(id)}` },
+    ],
+  };
   return (
     <>
       {structuredData && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: safeJsonLd(structuredData) }} />}
-      <ProductViewPageClient id={id} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: safeJsonLd(breadcrumbs) }} />
+      <ProductViewPageClient initialProduct={product} initialSelection={initialSelection} />
     </>
   );
 }

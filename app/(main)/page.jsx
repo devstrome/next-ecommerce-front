@@ -3,14 +3,15 @@ import HomePageClient from './HomePageClient'
 import { BRAND } from '../../src/config/brand'
 
 const SITE_NAME = 'BELORELLA';
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://belorella.com';
+const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://belorella.com').replace(/\/+$/, '');
+const HOME_TITLE = 'BELORELLA | Premium Fashion, Beauty & Lifestyle in Bangladesh';
 
 export const metadata = {
-  title: `${SITE_NAME} - Premium Fashion & Lifestyle Bangladesh`,
+  title: { absolute: HOME_TITLE },
   description: 'Shop the latest fashion, beauty, and lifestyle trends with unbeatable prices. Quality products delivered to your doorstep in Bangladesh.',
   keywords: 'BELORELLA, online shopping Bangladesh, fashion, beauty, makeup, skincare, haircare, luxury, ecommerce Bangladesh',
   openGraph: {
-    title: `${SITE_NAME} - Premium Fashion & Lifestyle`,
+    title: HOME_TITLE,
     description: 'Shop the latest fashion, beauty, and lifestyle trends with unbeatable prices.',
     url: SITE_URL,
     siteName: SITE_NAME,
@@ -19,7 +20,7 @@ export const metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: `${SITE_NAME} - Premium Fashion & Lifestyle`,
+    title: HOME_TITLE,
     description: 'Shop the latest fashion, beauty, and lifestyle trends with unbeatable prices.',
     images: [BRAND.EMAIL_LOGO_URL],
   },

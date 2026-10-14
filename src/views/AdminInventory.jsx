@@ -968,7 +968,7 @@ const AdminInventory = () => {
               >
                 <option value="">{filters.productId ? 'All Sizes' : 'Select a product first'}</option>
                 {filterSizes.map((s) => (
-                  <option key={s} value={s}>{s}</option>
+                  <option key={s} value={s}>{[s, filterVariant?.unitName || filterProduct?.unitName].filter(Boolean).join(' ')}</option>
                 ))}
               </select>
             </div>

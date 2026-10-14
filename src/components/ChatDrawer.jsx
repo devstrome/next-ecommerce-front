@@ -32,6 +32,7 @@ const ChatDrawer = () => {
     imageToSend,
     setImageToSend,
     handleSend,
+    isSendingMessage,
     clearError,
     clearNotifications,
     retryLoadChat,
@@ -62,7 +63,7 @@ const ChatDrawer = () => {
   // Check if device is mobile
   const isMobile = () => window.innerWidth <= 768;
 
-  const canSend = (Boolean(inputMessage.trim()) || Boolean(imageToSend)) && isConnected;
+  const canSend = (Boolean(inputMessage.trim()) || Boolean(imageToSend)) && isConnected && !isSendingMessage;
   const activePlaceholder = "Type your message...";
 
   const handleImageSelect = async (e) => {
@@ -536,7 +537,7 @@ const ChatDrawer = () => {
                       : "bg-gray-300 text-gray-500"
                   }`}
                 >
-                  Send
+                  {isSendingMessage ? "Sending..." : "Send"}
                 </button>
               )}
             </div>

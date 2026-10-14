@@ -1,7 +1,7 @@
 'use client'
 import React, { useState, useEffect } from "react";
 import ChatItem from "../components/ChatItem";
-import { BiSearch, BiMessageRoundedDots } from "react-icons/bi";
+import { BiSearch, BiMessageRoundedDots, BiRefresh } from "react-icons/bi";
 import { useRouter } from "next/navigation";
 import { useAdminChat } from "../context/AdminChatContext";
 
@@ -56,15 +56,27 @@ const ChatList = () => {
                 </p>
               </div>
             </div>
-            <div className="relative w-full sm:w-80">
-              <input
-                type="text"
-                placeholder="Search customers..."
-                className="w-full px-4 py-2 pl-10 border border-[#BDBDBD] bg-white focus:outline-none focus:ring-2 focus:ring-[#B1123B] focus:border-transparent"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-              <BiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#4A4A4A]" />
+            <div className="flex w-full items-center gap-2 sm:w-auto">
+              <div className="relative min-w-0 flex-1 sm:w-80 sm:flex-none">
+                <input
+                  type="text"
+                  placeholder="Search customers..."
+                  className="w-full px-4 py-2 pl-10 border border-[#BDBDBD] bg-white focus:outline-none focus:ring-2 focus:ring-[#B1123B] focus:border-transparent"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+                <BiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#4A4A4A]" />
+              </div>
+              <button
+                type="button"
+                onClick={fetchRooms}
+                disabled={loading}
+                aria-label="Refresh inbox"
+                className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 border border-[#BDBDBD] bg-white px-3 text-sm font-medium text-[#1B1B1B] transition hover:border-[#B1123B] hover:text-[#B1123B] disabled:cursor-wait disabled:opacity-60"
+              >
+                <BiRefresh className={`h-5 w-5 ${loading ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">{loading ? 'Refreshing' : 'Refresh'}</span>
+              </button>
             </div>
           </div>
         </div>
@@ -87,6 +99,15 @@ const ChatList = () => {
                   <span className="text-red-500 text-xl">!</span>
                 </div>
                 <p className="text-red-500">{error}</p>
+                <button
+                  type="button"
+                  onClick={fetchRooms}
+                  disabled={loading}
+                  className="mt-3 inline-flex items-center gap-2 rounded-md bg-[#B1123B] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#8E0E2F] disabled:opacity-60"
+                >
+                  <BiRefresh className={loading ? 'animate-spin' : ''} />
+                  {loading ? 'Refreshing...' : 'Try again'}
+                </button>
               </div>
             </div>
           )}
