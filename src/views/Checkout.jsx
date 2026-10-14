@@ -319,9 +319,10 @@ function CheckoutPage() {
   const effectiveShipping = ruleEval ? Number(ruleEval.deliveryCharge || 0) : shippingCharge;
   const extraFeeTotal = ruleEval ? Number(ruleEval.extraFeeTotal || 0) : 0;
   const grandTotal = totalAfterDiscount + effectiveShipping + extraFeeTotal;
-  const loyaltyCap = loyaltyEnabled && !loyaltyRedemptionFrozen ? grandTotal * loyaltyMaxRedeemPercent / 100 : 0;
+  const loyaltyMerchandiseTotal = Math.max(0, totalAfterDiscount);
+  const loyaltyCap = loyaltyEnabled && !loyaltyRedemptionFrozen ? loyaltyMerchandiseTotal * loyaltyMaxRedeemPercent / 100 : 0;
   const loyaltyApplied = isLoggedIn && !loyaltyRedemptionFrozen
-    ? Math.round(Math.min(Math.max(0, Number(loyaltyRequested) || 0), loyaltyBalance, loyaltyCap, grandTotal) * 100) / 100
+    ? Math.round(Math.min(Math.max(0, Number(loyaltyRequested) || 0), loyaltyBalance, loyaltyCap, loyaltyMerchandiseTotal) * 100) / 100
     : 0;
   const amountDue = Math.max(0, Math.round((grandTotal - loyaltyApplied) * 100) / 100);
   const ruleBlockers = ruleEval?.blockers || (checkoutState.status === 'failed' && checkoutState.error ? [{ message: checkoutState.error }] : []);
@@ -1141,6 +1142,7 @@ const handleCheckout = async () => {
                       <label htmlFor="checkout-loyalty" className="font-medium text-black">Use loyalty balance</label>
                       <span className="text-xs text-dark-gray">Available {formatBDT(loyaltyBalance.toFixed(2))}</span>
                     </div>
+                    <p className="text-xs text-dark-gray">Loyalty balance applies to discounted product prices only. Delivery and extra fees remain payable, and orders using loyalty do not earn new rewards.</p>
                     {loyaltyRedemptionFrozen && (
                       <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" role="status">
                         Loyalty redemption is temporarily frozen for this account. Your balance is safe and you can still earn rewards.
@@ -1173,7 +1175,7 @@ const handleCheckout = async () => {
                       >Clear</button>
                     </div>
                     {loyaltyMaxRedeemPercent < 100 && (
-                      <p className="text-xs text-dark-gray">Up to {loyaltyMaxRedeemPercent}% of this order can be paid with loyalty balance.</p>
+                      <p className="text-xs text-dark-gray">Use up to {loyaltyMaxRedeemPercent}% of the product total with loyalty balance.</p>
                     )}
                   </div>
                 )}

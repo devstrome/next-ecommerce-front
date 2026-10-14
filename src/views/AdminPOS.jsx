@@ -77,9 +77,10 @@ const AdminPOS = () => {
   const [productQuery, setProductQuery] = useState('');
   const productSearchInputRef = useRef(null);
   const loyaltyIsFrozen = Boolean(loyaltyCustomer?.redemptionFrozen);
-  const loyaltyCap = loyaltyCustomer?.enabled && !loyaltyIsFrozen ? total * Math.min(100, Math.max(0, Number(loyaltyCustomer.maxRedeemPercent) || 0)) / 100 : 0;
+  const loyaltyMerchandiseTotal = Math.max(0, subtotal - discountAmount);
+  const loyaltyCap = loyaltyCustomer?.enabled && !loyaltyIsFrozen ? loyaltyMerchandiseTotal * Math.min(100, Math.max(0, Number(loyaltyCustomer.maxRedeemPercent) || 0)) / 100 : 0;
   const loyaltyApplied = loyaltyCustomer && !loyaltyIsFrozen
-    ? Math.round(Math.min(Math.max(0, Number(loyaltyRequested) || 0), Number(loyaltyCustomer.balanceBDT) || 0, loyaltyCap, total) * 100) / 100
+    ? Math.round(Math.min(Math.max(0, Number(loyaltyRequested) || 0), Number(loyaltyCustomer.balanceBDT) || 0, loyaltyCap, loyaltyMerchandiseTotal) * 100) / 100
     : 0;
   const giftCodeApplied = posGiftCodeDetails
     ? Math.round(Math.min(Number(posGiftCodeDetails.amountBDT) || 0, Math.max(0, total - loyaltyApplied)) * 100) / 100
@@ -573,6 +574,7 @@ const AdminPOS = () => {
                         <label htmlFor="pos-loyalty-amount" className="text-sm font-medium text-[#1B1B1B]">Apply loyalty BDT</label>
                         <span className="text-xs text-[#4A4A4A]">Max {formatBDT(Math.min(Number(loyaltyCustomer.balanceBDT || 0), loyaltyCap))}</span>
                       </div>
+                      <p className="mb-2 text-xs text-[#6B7280]">Loyalty applies to discounted products only. Tax remains payable, and this sale will not earn new rewards.</p>
                       {loyaltyIsFrozen && <p className="mb-2 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800" role="status">Redemption is frozen for this loyalty account. Continue this POS sale without spending the balance.</p>}
                       <div className="flex gap-2">
                         <input

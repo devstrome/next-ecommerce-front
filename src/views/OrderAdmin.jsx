@@ -82,38 +82,66 @@ const InventoryDetailCard = ({ inventory, index }) => {
   const image = inventory?.imageUri || inventory?.variantImage || variant?.images?.[0]?.url || variant?.images?.[0] || product?.mainImage || '';
   const location = inventory?.location || {};
   const locationLabel = [location.warehouse, location.shelf, location.section].filter(Boolean).join(' · ');
+  const sizeLabel = formatMeasureLine(inventory) || inventory?.size;
   const detail = (label, value, mono = false) => (
-    <div className="flex justify-between gap-3 text-sm" key={label}>
-      <span className="shrink-0 text-gray-600">{label}:</span>
-      <span className={`${mono ? 'font-mono break-all' : 'text-right break-words'} text-gray-800`}>{value || '—'}</span>
+    <div className="min-w-0 rounded-xl border border-slate-100 bg-white px-3 py-2.5" key={label}>
+      <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.09em] text-slate-400">{label}</div>
+      <div className={`${mono ? 'break-all font-mono text-xs leading-5' : 'break-words text-sm'} font-medium text-slate-800`}>
+        {value ?? '—'}
+      </div>
     </div>
   );
 
   return (
-    <section key={inventory?._id || index} className="border border-gray-200 rounded-lg p-4">
-      <div className="flex flex-col sm:flex-row gap-4">
-        {image && <img src={image} alt={product?.name || 'Inventory item'} className="h-28 w-28 shrink-0 rounded border border-gray-100 bg-white object-contain" />}
-        <div className="grid flex-1 grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
-          <div className="space-y-2">
-            <h4 className="font-medium text-gray-900">{product?.name || 'Inventory item'} · Item {index + 1}</h4>
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-sm">
+      <div className="flex flex-col gap-4 border-b border-slate-100 bg-white p-4 sm:flex-row sm:items-center sm:p-5">
+        <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-100 bg-gradient-to-br from-white to-rose-50 sm:h-28 sm:w-28">
+          {image ? (
+            <img src={image} alt={product?.name || 'Inventory item'} className="h-full w-full object-contain p-2" />
+          ) : (
+            <FaBox className="text-3xl text-rose-300" aria-hidden="true" />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="mb-1 flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-rose-700">Item {index + 1}</span>
+            {inventory?.status && (
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold capitalize text-slate-600">
+                {String(inventory.status).replace(/_/g, ' ')}
+              </span>
+            )}
+          </div>
+          <h4 className="break-words text-base font-semibold leading-snug text-slate-900 sm:text-lg">{product?.name || 'Inventory item'}</h4>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {regionName && <span className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600">{regionName}</span>}
+            {colorName && <span className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600">{colorName}</span>}
+            {sizeLabel && <span className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600">{sizeLabel}</span>}
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-5 p-4 sm:p-5">
+        <div>
+          <h5 className="mb-3 text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Barcodes &amp; identifiers</h5>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {detail('My barcode', inventory?.barcode, true)}
             {detail('Product barcode', inventory?.realBarcode, true)}
             {detail('QR code', inventory?.qrCode, true)}
-            {detail('Region', regionName)}
-            {detail('Color / size', [colorName, formatMeasureLine(inventory) || inventory?.size].filter(Boolean).join(' · '))}
-            {detail('Status', inventory?.status)}
-            {detail('Stock / available / assigned', `${Number(inventory?.stockQuantity) || 0} / ${Number(inventory?.availableQuantity) || 0} / ${Number(inventory?.assignedQuantity) || 0}`)}
-          </div>
-          <div className="space-y-2">
-            <h4 className="font-medium text-gray-900">Item details</h4>
             {detail('Inventory ID', inventory?._id, true)}
             {detail('Product ID', idText(product?._id || inventory?.productId), true)}
             {detail('Variant ID', idText(variant?._id || inventory?.variantId), true)}
+          </div>
+        </div>
+
+        <div>
+          <h5 className="mb-3 text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Stock &amp; item details</h5>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
             {detail('Price', formatBDT(inventory?.price))}
-            {detail('Discount price', inventory?.discountPrice != null ? formatBDT(inventory.discountPrice) : '')}
-            {detail('Unit cost', inventory?.costPrice != null ? formatBDT(inventory.costPrice) : '')}
-            {detail('Location', locationLabel)}
-            {detail('Notes', inventory?.notes)}
+            {detail('Discount price', inventory?.discountPrice != null ? formatBDT(inventory.discountPrice) : null)}
+            {detail('Unit cost', inventory?.costPrice != null ? formatBDT(inventory.costPrice) : null)}
+            {detail('Stock / available / assigned', `${Number(inventory?.stockQuantity) || 0} / ${Number(inventory?.availableQuantity) || 0} / ${Number(inventory?.assignedQuantity) || 0}`)}
+            {detail('Location', locationLabel || null)}
+            {detail('Notes', inventory?.notes || null)}
           </div>
         </div>
       </div>
@@ -3103,39 +3131,58 @@ useEffect(() => {
 
       {/* 🔹 Inventory Details Modal */}
       {viewingInventory && inventoryDetails && (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold flex items-center">
-                <svg className="w-5 h-5 mr-2 text-maybelline-pink" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M3 4a1 1 0 011-1h4a1 1 0 010 2H6.414l2.293 2.293a1 1 0 11-1.414 1.414L5 6.414V8a1 1 0 01-2 0V4zm9 1a1 1 0 010-2h4a1 1 0 011 1v4a1 1 0 01-2 0V6.414l-2.293 2.293a1 1 0 11-1.414-1.414L13.586 5H12zm-9 7a1 1 0 012 0v1.586l2.293-2.293a1 1 0 111.414 1.414L6.414 15H8a1 1 0 010 2H4a1 1 0 01-1-1v-4zm13-1a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 010-2h1.586l-2.293-2.293a1 1 0 111.414-1.414L15 13.586V12a1 1 0 011-1z" clipRule="evenodd" />
-                </svg>
-                Assigned Inventory Details
-              </h3>
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 p-3 backdrop-blur-sm sm:p-6"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setViewingInventory(false);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="assigned-inventory-title"
+            className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/10"
+            style={{ maxHeight: '92dvh' }}
+          >
+            <header className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-100 px-4 py-4 sm:px-6">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-50 text-rose-600">
+                  <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                    <path fillRule="evenodd" d="M3 4a1 1 0 011-1h4a1 1 0 010 2H6.414l2.293 2.293a1 1 0 11-1.414 1.414L5 6.414V8a1 1 0 01-2 0V4zm9 1a1 1 0 010-2h4a1 1 0 011 1v4a1 1 0 01-2 0V6.414l-2.293 2.293a1 1 0 11-1.414-1.414L13.586 5H12zm-9 7a1 1 0 012 0v1.586l2.293-2.293a1 1 0 111.414 1.414L6.414 15H8a1 1 0 010 2H4a1 1 0 01-1-1v-4zm13-1a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 010-2h1.586l-2.293-2.293a1 1 0 111.414-1.414L15 13.586V12a1 1 0 011-1z" clipRule="evenodd" />
+                  </svg>
+                </span>
+                <div className="min-w-0">
+                  <h3 id="assigned-inventory-title" className="truncate text-base font-bold text-slate-900 sm:text-lg">Assigned inventory</h3>
+                  <p className="text-xs text-slate-500 sm:text-sm">Barcode, stock, and product information</p>
+                </div>
+              </div>
               <button
+                type="button"
                 onClick={() => setViewingInventory(false)}
-                className="text-gray-500 hover:text-gray-700"
+                aria-label="Close inventory details"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-300"
               >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
-            </div>
+            </header>
 
-            <div className="space-y-4">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-3 sm:space-y-5 sm:p-6">
               {(Array.isArray(inventoryDetails) ? inventoryDetails : [inventoryDetails]).map((inventory, index) => (
                 <InventoryDetailCard key={inventory?._id || index} inventory={inventory} index={index} />
               ))}
             </div>
 
-            <div className="mt-6 flex justify-end">
+            <footer className="flex shrink-0 justify-end border-t border-slate-100 bg-white px-4 py-3 sm:px-6">
               <button
+                type="button"
                 onClick={() => setViewingInventory(false)}
-                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+                className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2"
               >
-                Close
+                Done
               </button>
-            </div>
+            </footer>
           </div>
         </div>
       )}
